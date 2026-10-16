@@ -17,6 +17,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 @media(min-width:700px){.shell{padding:0 36px}.masthead{padding-top:36px;padding-bottom:30px}.board-intro{margin:30px 0 28px}.board.all{grid-template-columns:repeat(2,minmax(0,1fr))}.board.all .section{display:contents}.board.all .section-heading{grid-column:1/-1;margin-bottom:0}.board.all .card{margin:0}.card{padding:22px}.guide-shell{padding:34px 40px}.guide-content{padding-top:50px}}@media(min-width:1100px){.board:not(.all){grid-template-columns:repeat(4,minmax(0,1fr));align-items:start;gap:18px}.board.all{grid-template-columns:repeat(3,minmax(0,1fr))}.board>.killed{grid-column:1/-1}.board>.killed[open]{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.board>.killed summary{grid-column:1/-1}.card{padding:18px}}@media(prefers-reduced-motion:no-preference){button,a{transition:background-color .12s ease}dialog[open]{animation:enter .16s ease-out}@keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}}
 .reply-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle;margin-left:6px;flex-shrink:0}.card-unread{margin:0 auto 0 0}.thread{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.thread-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:.72rem}.thread-head button,.thread-toggle{font-size:.72rem;padding:8px 4px}.messages{display:flex;flex-direction:column;gap:10px;list-style:none;padding:0;margin:8px 0 0}.message{font-size:.8rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}.message-ted{border-left:2px solid var(--accent);padding:3px 0 3px 11px}.message-label{display:block;color:var(--accent);font-size:.65rem;letter-spacing:.04em;margin-bottom:3px}.message-seb{align-self:flex-end;text-align:right;color:var(--muted);padding:3px 0 3px 20px}.thread-toggle{margin-top:4px}
 </style>
+<link rel="stylesheet" href="mockups.css">
 </head>
 <body>
 <div class="shell">
@@ -28,6 +29,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 </div>
 <dialog id="guide" aria-labelledby="guide-heading"><div class="guide-shell"><div class="guide-header"><span class="guide-project" id="guide-project"></span><button class="icon-button" id="guide-close" aria-label="Close guided mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><h2 class="guide-title" id="guide-heading"></h2><div class="progress-track" id="guide-progress" aria-hidden="true"></div><div class="guide-content"><p class="step-count" id="step-count"></p><p class="step-text" id="step-text" tabindex="-1"></p><div id="guide-link"></div><div class="guide-note"><label for="step-note">stuck? tell me why (optional)</label><textarea id="step-note" maxlength="1900" placeholder="what's in the way?"></textarea></div><p class="status guide-status" id="guide-status" role="status" aria-live="polite"></p></div><div class="guide-actions"><button id="guide-back">Back</button><button class="primary" id="guide-next">Done, next</button></div><button class="quiet stuck" id="guide-stuck">Stuck</button><p class="paused" id="guide-save-status">close anytime, i'll keep your spot.</p></div></dialog>
 <noscript><div class="shell state"><h2>JavaScript is needed</h2><p>Open this link in Safari or Chrome to use your board.</p></div></noscript>
+<script src="mockups.js"></script>
 <script>
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
@@ -64,14 +66,15 @@ function renderThread(card){
  if(list.length>3){const toggle=button(expanded?'show less':'show all ('+list.length+')','quiet thread-toggle',()=>{if(expanded)state.threads.delete(card.id);else{state.threads.add(card.id);state.readCards.add(card.id);storage.set('ted-board-read:'+card.id,replyMarker(card))}render()});toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-controls',items.id);thread.append(toggle)}
  return thread;
 }
+const mockups=new MockupsView({el,button,storage,getKey:()=>key,onChange:()=>{if(state.project==='Mockups')render();else renderTabs()},notify:announce,isSelected:()=>state.project==='Mockups'});
 function renderTabs(){
  const tabs=$('tabs');tabs.replaceChildren();
- const projects=['All',...PROJECTS,...new Set(state.cards.map(c=>c.project).filter(p=>p&&!PROJECTS.includes(p)))];
+ const projects=['All','Mockups',...PROJECTS,...new Set(state.cards.map(c=>c.project).filter(p=>p&&!PROJECTS.includes(p)))];
  projects.forEach((p,i)=>{
   const b=button(p,'tab',()=>selectProject(p));b.setAttribute('role','tab');b.id='project-'+i;b.setAttribute('aria-controls','main');b.setAttribute('aria-selected',String(p===state.project));b.tabIndex=p===state.project?0:-1;
-  const n=state.cards.filter(c=>c.section==='needs_you'&&(p==='All'||p===c.project)).length;
-  const hasUnread=state.cards.some(c=>(p==='All'||p===c.project)&&unread(c));
-  if(n||hasUnread){const count=el('span','tab-count',n);if(hasUnread)count.append(replyDot());b.append(count)}
+  const n=p==='Mockups'?0:state.cards.filter(c=>c.section==='needs_you'&&(p==='All'||p===c.project)).length;
+  const hasUnread=p==='Mockups'?mockups.hasUnread():state.cards.some(c=>(p==='All'||p===c.project)&&unread(c));
+  if(n||hasUnread){const count=el('span','tab-count',p==='Mockups'?'':n);if(hasUnread)count.append(replyDot());b.append(count)}
   if(hasUnread)b.setAttribute('aria-description','Unread replies from Ted');
   b.setAttribute('aria-label',p);
   b.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const next=e.key==='Home'?0:e.key==='End'?projects.length-1:(i+(e.key==='ArrowRight'?1:-1)+projects.length)%projects.length;selectProject(projects[next]);$('tabs').children[next].focus()});
@@ -79,7 +82,7 @@ function renderTabs(){
  });
  $('main').setAttribute('aria-labelledby','project-'+projects.indexOf(state.project));
 }
-function selectProject(p){state.project=p;render();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
+function selectProject(p){state.project=p;render();if(p==='Mockups'&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
 function answerText(card){
  const a=card.answer;if(!a)return '';
  if(a.action==='stuck'||a.choice==='stuck')return 'Help requested'+(Number.isInteger(a.step_index)?' on step '+(a.step_index+1):'');
@@ -111,6 +114,7 @@ function renderCard(card){
 function render(){
  renderTabs();const main=$('main');main.replaceChildren();
  if(!key){renderAccess();return}
+ if(state.project==='Mockups'){mockups.render(main);return}
  if(!state.loaded){main.append(el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return}
  const cards=projectCards();const n=cards.filter(c=>c.section==='needs_you').length;
  const intro=el('div','board-intro');const introText=el('div');introText.append(el('h2',null,state.project==='All'?'what i need from you':state.project));const sub=el('p',null,state.project==='All'?(n===1?'just one thing.':n?n+' things, quick ones mostly.':'nothing on you right now. go live a little.'):'your calls, what i\'m on, and what\'s next.');sub.style.marginTop='8px';introText.append(sub);intro.append(introText);main.append(intro);
@@ -127,7 +131,7 @@ function render(){
 }
 function renderAccess(){
  const main=$('main');main.replaceChildren();const box=el('section','state');box.append(el('h2',null,'Your board, one private link.'),el('p',null,'Open the personal link Ted gave you, or paste it below. Access is remembered on this device.'));
- const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;if(!storage.set('ted-board-key',key))history.replaceState(null,'',location.pathname+location.search+'#k='+encodeURIComponent(key));state.loaded=false;state.cards=[];load()});box.append(form);main.append(box);
+ const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;if(!storage.set('ted-board-key',key))history.replaceState(null,'',location.pathname+location.search+'#k='+encodeURIComponent(key));state.loaded=false;state.cards=[];mockups.reset();mockups.load();load()});box.append(form);main.append(box);
 }
 async function api(method,body){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
@@ -172,10 +176,10 @@ async function guideSend(action){
  if(ok&&action==='steps_done'){storage.remove(progressKey(g.card));$('guide').close();state.guide=null;$('main').focus();return}
  if(ok)$('guide-status').textContent='Ted has your note. You can keep going or close this for now.';drawGuide();
 }
-$('refresh').addEventListener('click',load);
-$('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading)return;announce('');renderAccess()});
+$('refresh').addEventListener('click',()=>state.project==='Mockups'?mockups.load():load());
+$('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading||mockups.busy.size)return;announce('');renderAccess()});
 window.addEventListener('online',()=>{if(key&&!state.busy.size)load()});
-render();if(key)load();
+render();if(key){load();mockups.load();}
 </script>
 </body>
 </html>
