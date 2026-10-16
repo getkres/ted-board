@@ -66,7 +66,9 @@ For pin feedback, the watcher posts a short acknowledgment in the same pin threa
 
 The watcher sends its acknowledgment with `--decision-id` semantics through the client. The database deduplicates that acknowledgment by decision ID, and stable queue markers prevent repeated design work if a route is retried. Routing failures remain eligible for retry even after a Telegram acknowledgment. Test notes starting with `test-` never post a mockup reply or enqueue design work.
 
-Picks enter the design queue as selections. They have no pin thread, so the watcher does not pass a mockup ID to the pin reply command. Any follow-up belongs in a related actual pin thread.
+Picks enter the queue as completed, informational selection records. They do not launch design work and have no pin thread, so the watcher does not pass a mockup ID to the pin reply command. Any follow-up belongs in a related actual pin thread.
+
+The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dispatch.py` to distinguish mockup, card, and legacy Figma briefs. Mockup workers upload to Ted Board and reply to the original pin. Card workers retain their exact card outcome command. Existing Figma briefs retain their original delivery surface. A failed Figma poll does not prevent independent design briefs from running. Queued mockup commands use the direct Command Line Tools interpreter.
 
 ## Backend and deployment
 
@@ -103,6 +105,8 @@ Do not reapply the migration during routine function deployments. The public rep
 
 ## Verification
 
-Verification includes authorization and validation tests, worker image conversion and reply tests, watcher routing and retry tests, and browser checks at 390x844 and desktop size. The existing card backend, CLI, router, and browser suites also pass against the integration.
+Verification includes 10 new Deno tests, 12 new Python tests, and eight new browser scenarios at 390x844 and desktop size. The existing nine Deno tests, 13 Python tests, and 12 card-browser scenarios also pass against the integration. The queue-consumer regression tests exercise the real shell flow with external Figma polling and model execution stubbed, verifying that failed Figma polling cannot block mockup work. Real seeded images were decoded and visually inspected in the gallery and fullscreen views. A fresh code review caught and verified the need for source-aware queue delivery, informational picks, and the direct reply runtime.
+
+One minor visual issue remains: a selected pin can retain its unread dot while its thread is open. Closing the viewer redraws the gallery and clears that already-read dot. Physical iPhone keyboard and Safari gesture behavior have not been tested on a device; browser checks used Chromium touch emulation. Drafts survive failed saves within the session, but are not persisted through a page reload. The page loads all mockups and pins, which is appropriate for the current 20-image workload; its backend read is deliberately bounded at 100,000 rows per table.
 
 A live test uploaded one temporary JPEG, added a Sebastian pin, posted a Ted reply, appended eight concurrent replies without loss, retried an acknowledgment without duplication, reopened a resolved thread with a Sebastian reply, and picked the image. SQL checks verified matching decision receipts and table/RPC access restrictions. The existing watcher was paused for those test decisions. Exact test rows, receipts, and the Storage object were removed before the watcher was restored.
