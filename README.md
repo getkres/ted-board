@@ -11,16 +11,20 @@ Open the private link supplied by Ted. Its access key arrives in the URL fragmen
 - **All** shows only cards in Needs you. Each project shows Needs you, Ted’s doing, Up next, Done from the last seven days, and a collapsed Killed section.
 - Tap a quick choice, send a note, or choose **Ted, you do it**. Confirmed answers move to Ted’s doing and show **sent ✓**. The move menu can file a card into In progress, Done, Killed, or Up next.
 - **▶ Steps** opens a full-screen walkthrough. Open links in a new tab, use Back or Done, next, or send a stuck note. Finishing moves the card to Done. Progress is saved on this device, and step changes reset outdated progress.
+- Each card keeps a conversation under its actions. Ted replies have a marigold border; your messages sit on the right. The latest three messages show first. Use **show all** for the full thread, or **Mark replies read** to clear the unread dots on this device. Refresh to fetch new replies.
 - Use the refresh button for the latest cards. Failed requests show a message and keep the card available to retry. The board needs an internet connection.
 
 ## Deploying the static page
 
-This public repository deliberately contains only `index.html` and this README. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository deliberately contains `index.html`, this README, and `REPLIES.md`. There is no build step. GitHub Pages publishes the root of `main`.
 
 ```sh
-git add index.html README.md
+git switch -c update-ted-board
+git add index.html README.md REPLIES.md
 git commit -m "Update Ted Board"
-git push origin main
+git push -u origin update-ted-board
+gh pr create --base main --fill
+gh pr merge --squash
 ```
 
 The backend, card data, worker tools, screenshots, and keyed URL are local operational files. They are not part of this public repository. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
