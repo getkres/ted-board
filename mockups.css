@@ -366,3 +366,7 @@
     animation: none;
   }
 }
+/* Comparison boards and phone screens keep their own natural card height. */
+.mockup-row {
+  align-items: flex-start;
+}
