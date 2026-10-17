@@ -31,11 +31,11 @@ Operational source and tests remain private on the Mac mini in `~/ted-ops/ted-bo
 PY=/Library/Developer/CommandLineTools/usr/bin/python3
 
 $PY ~/ted-ops/ted-board/mockup_upload.py \
-  --project Fictora --batch 'Top bar v3' --title 'Glass home' \
+  --project Fictora --batch 'Top bar v3' --supersedes 'Top bar v2' --title 'Glass home' \
   /path/to/home.png
 
 $PY ~/ted-ops/ted-board/mockup_upload.py \
-  --project 'Lunair + art' --batch 'Closet v2' --title 'Outfit options' \
+  --project 'Lunair + art' --batch 'Closet v2' --supersedes 'Closet spike' --title 'Outfit options' \
   /path/to/one.png /path/to/two.png
 
 $PY ~/ted-ops/ted-board/mockup_reply.py <pin_id> 'Updated the spacing. Ready for another look.'
@@ -43,6 +43,17 @@ $PY ~/ted-ops/ted-board/mockup_pins.py --open
 ```
 
 Uploads preserve aspect ratio and save a full WebP at quality 95, retaining transparency and capping the long edge at 12,000px. The grid uses a separate JPEG quality 95 preview, capped at 1,600px on either axis, with transparency flattened onto white. Metadata is removed. Preview files must fit 4 MB, and full files must fit 32 MB. Each image object receives a UUID path. Multiple files use the supplied title as a prefix followed by each filename. `--status picked` can register an already chosen design without a Sebastian receipt. `--sort` controls order within the batch. The uploader prints each confirmed ID; if a later file fails, earlier confirmed uploads remain registered. If full detail fails after preview registration, it prints the existing ID and a recovery command, continues the batch, and returns nonzero. Retry that row with `mockup_upload.py --attach-full MOCKUP_ID /path/to/original.png`; this does not create another row. When replacing an image with a different aspect ratio, add `--replace-preview` to attach its matching preview through Storage metadata while preserving the row ID and pins. Original source paths are recorded in a private local upload log.
+
+Every worker uploading a replacement must pass `--supersedes 'Old batch'`, repeated for each replaced batch, and use a different new batch name. Matching is exact and scoped to `--project`. Only after every image and its full detail succeeds does the uploader archive those batches. Partial uploads or pending detail leave old batches visible. If archiving fails, the uploader exits nonzero; retry the idempotent archive action without re-uploading. After recovering pending detail, archive the old batches explicitly. Never supersede the new batch or use `--supersedes` with `--attach-full`. Archive hides rows while retaining images, pins, and decision receipts. It replaces legacy `status='picked'` with `archived`; receipt-free seeded picks have no separate approval record. This action has no unarchive command. A zero-match old batch prints a warning to check its exact name.
+
+```python
+from mockup_client import call
+call('archive', project='Fictora', batch='Top bar v2')
+# Or archive exact rows, up to 500 per request:
+call('archive', ids=['<mockup UUID>'])
+```
+
+Good to go images move out of the main grid after 24 hours into a collapsed **Done** group at the bottom of the tab. They remain viewable, with their pins and verdict controls, and follow the project filter. Changing the verdict restores them to the appropriate group. The clock starts at `verdict_change.at`, or the actual pick receipt for legacy picked rows. Images registered as already picked, with no receipt, use their upload time. The open tab updates at the next deadline without a scheduled routine. Done grouping does not archive or delete anything.
 
 `mockup_pins.py --open` prints one JSON object per unresolved pin, including its image, project, batch, full thread, and latest Sebastian text. Omit `--open` to include resolved pins.
 
@@ -62,7 +73,7 @@ The existing `co.ted.decisions` watcher handles `page='mockups'` receipts. It us
 
 Every Sebastian pin, reply, legacy pick, or verdict creates a `public.ted_decisions` row atomically with the action. Pin and reply receipts use the pin ID as `item_id`. Pick receipts use the mockup ID. The note contains the full comment or selection, image title, project, batch, mockup ID, and coordinates. Picks identify coordinates as applying to the whole image.
 
-For pin feedback, the watcher posts a short acknowledgment in the same pin thread, then appends the task to `~/ted-ops/markup-watch/design-queue.md`. Queue entries include the exact reply command. Ted or a delegated design worker must reply in that pin thread with the outcome or blocker, using `mockup_reply.py`. Replies must be plain text, contain no U+2014, and stay within 2,000 characters. Resolve a pin after the requested change is complete. New design variants should be uploaded into a new batch.
+For pin feedback, the watcher posts a short acknowledgment in the same pin thread, then appends the task to `~/ted-ops/markup-watch/design-queue.md`. Queue entries include the exact reply command. Ted or a delegated design worker must reply in that pin thread with the outcome or blocker, using `mockup_reply.py`. Replies must be plain text, contain no U+2014, and stay within 2,000 characters. Resolve a pin after the requested change is complete. New design variants should be uploaded into a new batch with `--supersedes` for every replaced batch in that project. Pass this requirement to delegated workers.
 
 The watcher sends its acknowledgment with `--decision-id` semantics through the client. The database deduplicates that acknowledgment by decision ID, and stable queue markers prevent repeated design work if a route is retried. Routing failures remain eligible for retry even after a Telegram acknowledgment. Test notes starting with `test-` never post a mockup reply or enqueue design work.
 
@@ -94,6 +105,7 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 | `upload` | Worker | `project`, `batch`, `title`, `width`, `height`, base64 `jpeg`, optional `sort`, `status`, and base64 WebP `full` with `full_width` and `full_height` |
 | `register` | Worker | Same metadata, plus existing UUID JPEG `storage_path` instead of `jpeg` |
 | `attach_full` | Worker | Existing `mockup_id`, base64 WebP `full`, `full_width`, and `full_height` |
+| `archive` | Worker | `ids` (1 to 500 UUIDs), or exact `project` and `batch`; returns `archived` count; idempotent, retains pins and Storage |
 | `delete_pin` | Worker | `pin_id`; removes the pin and its routing receipts |
 | `detail_setup` | Worker | Configures the detail bucket through the Storage API |
 

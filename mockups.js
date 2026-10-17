@@ -23,6 +23,7 @@ class MockupsView {
     this.verdictNotes = new Set();
     this.verdictTimers = new Map();
     this.scrappedOpen = new Set();
+    this.doneOpen = false;
     this.filter = "All projects";
     this.error = "";
     this.owner = "";
@@ -65,6 +66,8 @@ class MockupsView {
     return this.unreadCount() > 0;
   }
   reset() {
+    clearTimeout(this.doneTimer);
+    this.doneOpen = false;
     this.revision++;
     this.mockups = [];
     this.pins = [];
@@ -223,11 +226,18 @@ class MockupsView {
     });
     filter.append(select);
     intro.append(filter);
+    clearTimeout(this.doneTimer);
+    const now = Date.now(), day = 24 * 60 * 60 * 1000;
+    const pending = this.mockups.filter(m => m.status !== "archived" && this.verdict(m) === "approved")
+      .map(m => this.doneAt(m) + day - now).filter(ms => ms > 0);
+    if (pending.length) this.doneTimer = setTimeout(() => this.onChange(), Math.min(...pending, day) + 50);
+    const done = [];
     const batches = new Map();
     this.mockups.filter((m) =>
       m.status !== "archived" &&
       (this.filter === "All projects" || m.project === this.filter)
     ).forEach((m) => {
+      if (this.isDone(m, now)) { done.push(m); return; }
       const key = JSON.stringify([m.project, m.batch]);
       if (!batches.has(key)) {
         batches.set(key, {
@@ -241,7 +251,7 @@ class MockupsView {
       batch.images.push(m);
       if (m.created_at > batch.at) batch.at = m.created_at;
     });
-    if (!batches.size) {
+    if (!batches.size && !done.length) {
       const empty = el("div", "state");
       empty.append(
         el("h3", null, "Room for the next idea."),
@@ -298,6 +308,25 @@ class MockupsView {
         root.append(section);
       },
     );
+    if (done.length) {
+      const group = el("details", "mockup-scrapped mockup-done");
+      group.open = this.doneOpen;
+      group.append(el("summary", null, "Done (" + done.length + ")"));
+      const row = el("div", "mockup-row");
+      row.setAttribute("aria-label", "Done mockups");
+      row.tabIndex = 0;
+      done.sort((a, b) => b.created_at.localeCompare(a.created_at) || this.imageOrder(a, b))
+        .forEach(m => row.append(this.card(m)));
+      group.append(row);
+      group.addEventListener("toggle", () => { if (group.isConnected) this.doneOpen = group.open; });
+      root.append(group);
+    }
+  }
+  doneAt(m) {
+    return Date.parse(m.verdict_change?.at || m.picked_at || m.created_at);
+  }
+  isDone(m, now = Date.now()) {
+    return this.verdict(m) === "approved" && now - this.doneAt(m) >= 24 * 60 * 60 * 1000;
   }
   card(m) {
     const { el, button } = this,
@@ -500,6 +529,7 @@ class MockupsView {
     if (!m) return [];
     return this.mockups.filter((image) => image.status !== "archived" &&
       (this.verdict(image) === "scrapped") === (this.verdict(m) === "scrapped") &&
+      this.isDone(image) === this.isDone(m) &&
       image.project === m.project && image.batch === m.batch)
       .sort((a, b) => this.imageOrder(a, b));
   }
