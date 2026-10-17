@@ -230,3 +230,12 @@ html.cave{
 @keyframes cave-alarm{0%,100%{box-shadow:0 0 0 2px #0b0f12,0 3px 0 2px #050708,0 0 10px 2px rgba(255,59,59,.5),inset 0 -4px 7px rgba(0,0,0,.35);filter:brightness(.85)}50%{box-shadow:0 0 0 2px #0b0f12,0 3px 0 2px #050708,0 0 30px 10px rgba(255,59,59,.95),inset 0 -4px 7px rgba(0,0,0,.25);filter:brightness(1.15)}}
 @media(prefers-reduced-motion:reduce){.cave .fresh-ted,.cave .fresh-ted:before,.cave .fresh-ted:after{animation:none;transition:none}}
 @media(min-width:700px){.cave .job-list{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}}
+
+/* The live card strip uses fixed state colors and a motion-safe activity dot. */
+.live-strip{--live-color:#f3c66d;display:grid;grid-template-columns:8px minmax(0,1fr);column-gap:9px;row-gap:4px;align-items:start;margin:10px 0 14px;color:var(--live-color);font-size:.8rem;line-height:1.45;overflow-wrap:anywhere}
+.live-strip[data-state="running"],.live-strip[data-state="done"]{--live-color:#74e6ab}
+.live-strip[data-state="waiting_on_you"]{--live-color:#ff9f99}
+.live-strip:before{content:"";width:7px;height:7px;border-radius:50%;margin-top:6px;background:var(--live-color);animation:live-pulse 2s ease-in-out infinite}
+.live-strip time{grid-column:2;color:var(--muted,#aab7c4);font-size:.7rem}
+@keyframes live-pulse{50%{opacity:.4}}
+@media(prefers-reduced-motion:reduce){.live-strip:before{animation:none}}

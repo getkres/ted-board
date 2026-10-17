@@ -113,6 +113,15 @@ function answerText(card){
  if(a.choice==='note')return a.note||'Note sent';
  return options(card).find(o=>o.value===a.choice)?.label||String(a.choice||'Answer sent');
 }
+function liveStrip(card){
+ const strip=el('div','live-strip');const parsed=Date.parse(card.live_status_at);const age=Number.isFinite(parsed)?Math.max(0,Date.now()-parsed):null;
+ const stale=card.live_state==='running'&&(age===null||age>7200000);
+ const state=stale?'blocked':(['running','blocked','waiting_on_you','done'].includes(card.live_state)?card.live_state:'blocked');strip.dataset.state=state;
+ const line=stale?"stale, ted's checking":(card.live_status||'waiting for a live update');
+ const copy=el('span',null,line);copy.setAttribute('aria-label',({running:'running',blocked:'blocked',waiting_on_you:'waiting on you',done:'done'})[state]+': '+line);
+ const time=el('time');if(age!==null){time.dateTime=card.live_status_at;const minutes=Math.floor(age/60000);time.textContent='updated '+(minutes<1?'just now':minutes<60?minutes+'m ago':minutes<1440?Math.floor(minutes/60)+'h ago':Math.floor(minutes/1440)+'d ago')}else time.textContent='no update yet';
+ strip.append(copy,time);return strip;
+}
 function renderCard(card){
  const article=el('article','card');article.dataset.cardId=card.id;article.setAttribute('aria-label',card.title);
  const top=el('div','card-top');top.append(el('span','chip',card.project));if(unread(card))top.append(replyDot('card-unread'));
@@ -120,6 +129,7 @@ function renderCard(card){
  const placeholder=el('option',null,'Move');placeholder.value='';placeholder.disabled=true;placeholder.selected=true;move.append(placeholder);
  [['ted_doing','In progress'],['done','Done'],['killed','Killed'],['up_next','Up next']].forEach(([value,label])=>{const o=el('option',null,label);o.value=value;move.append(o)});
  move.addEventListener('change',async()=>{const value=move.value;move.value='';await act(card,'move',value)});wrap.append(move);const chevron=document.createElementNS('http://www.w3.org/2000/svg','svg');chevron.setAttribute('viewBox','0 0 24 24');chevron.setAttribute('aria-hidden','true');const line=document.createElementNS(chevron.namespaceURI,'path');line.setAttribute('d','m7 10 5 5 5-5');chevron.append(line);wrap.append(chevron);top.append(wrap);article.append(top,el('h3',null,card.title));
+ if(card.section==='ted_doing')article.append(liveStrip(card));
  if(card.body)article.append(el('p','card-body',card.body));
  const image=safeURL(card.image_url);if(image){const img=el('img','thumb');img.src=image;img.alt='';img.loading='lazy';img.referrerPolicy='no-referrer';img.addEventListener('error',()=>img.remove());article.append(img)}
  const opts=options(card);if(opts.length){const row=el('div','options');opts.forEach(o=>row.append(button(o.label,'option',()=>act(card,'choice',o.value))));article.append(row)}
@@ -168,6 +178,22 @@ async function load(){
  try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(revision!==state.revision)return;state.cards=data.cards;const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'')}
  catch(e){announce(e.message,true);render()}finally{state.loading=false;$('refresh').disabled=false}
 }
+async function pollCards(){
+ if(!key||document.hidden||state.loading||state.polling||state.busy.size)return;
+ state.polling=true;const revision=state.revision;
+ try{
+  const data=await api('GET');if(revision!==state.revision||!Array.isArray(data.cards))return;
+  state.cards=data.cards;
+  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT','BUTTON'].includes(focused.tagName);
+  if(!editing&&!state.guide&&state.project!=='Mockups'&&state.project!=='Jobs'){
+   const opened=[...document.querySelectorAll('details[open]')].map(e=>e.dataset.approvalId||e.className);
+   render();document.querySelectorAll('details').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true});
+  }else{
+   document.querySelectorAll('.live-strip').forEach(strip=>{const card=state.cards.find(c=>c.id===strip.parentElement.dataset.cardId);if(card)strip.replaceWith(liveStrip(card))});
+  }
+ }catch{}finally{state.polling=false}
+}
+setInterval(pollCards,20000);
 function setCardBusy(id,busy){if(busy)state.busy.add(id);else state.busy.delete(id);document.querySelectorAll('[data-card-id]').forEach(e=>{if(e.dataset.cardId===id)e.querySelectorAll('button,select,textarea').forEach(c=>c.disabled=busy)})}
 async function act(card,action,value='',note=''){
  if(state.busy.has(card.id))return false;setCardBusy(card.id,true);announce('Saving…');
