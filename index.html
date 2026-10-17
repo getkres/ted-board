@@ -23,6 +23,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <link rel="stylesheet" href="cave.css">
 </head>
 <body>
+<a id="talk-ted" class="talk-ted" href="https://claude.ai/code" target="_blank" rel="noopener noreferrer" aria-label="talk to Ted">talk to<br>Ted</a>
 <button id="fresh-ted" class="fresh-ted" aria-label="fresh ted" aria-describedby="fresh-status" disabled>fresh<br>ted</button>
 <div class="shell">
 <header class="masthead"><div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><h1>Ted Board</h1><p>tap it, i'll handle the rest.</p></div></div><button class="icon-button" id="refresh" aria-label="Refresh" title="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg></button></header>
@@ -52,6 +53,11 @@ function deepTab(value){return ['All','Mockups','Jobs',...PROJECTS,...state.card
 state.project=deepTab(fragment.get('tab'));
 function saveTab(){const params=new URLSearchParams();if(key)params.set('k',key);params.set('tab',state.project);history.replaceState(null,'',location.pathname+location.search+'#'+params.toString())}
 let freshState=null,freshSending=false;
+function updateTedChat(raw){
+ let url='https://claude.ai/code';
+ try{const u=new URL(raw);if(u.origin==='https://claude.ai'&&!u.username&&!u.password&&!u.search&&!u.hash&&/^\/code(?:\/session_[A-Za-z0-9_-]+)?\/?$/.test(u.pathname))url=u.href}catch{}
+ $('talk-ted').href=url;
+}
 function renderFresh(){
  const b=$('fresh-ted');const pending=freshSending||['pending','running'].includes(freshState?.status);b.disabled=!key||!freshState||pending;b.classList.toggle('due',freshState?.due===true);b.setAttribute('aria-busy',String(pending));
  $('fresh-status').textContent=freshState?.status==='failed'?(freshState.error||'Fresh Ted could not start. Tap the red button to retry.'):pending?(freshState?.stage||'Requesting fresh Ted…'):freshState?.status==='done'?'Fresh Ted is up. Open the new Ted chat.':'';
@@ -62,7 +68,7 @@ $('fresh-ted').addEventListener('click',async()=>{
  freshSending=true;renderFresh();
  try{freshState=await api('POST',{action:'fresh_request'});announce('Fresh Ted requested. I’ll handle the handoff.')}catch(e){announce(e.message,true)}finally{freshSending=false;renderFresh()}
 });
-window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs()});
+window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;updateTedChat();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs()});
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.type='button';b.addEventListener('click',fn);return b}
 function safeURL(raw){try{const u=new URL(raw);return ['https:','http:'].includes(u.protocol)?u.href:null}catch{return null}}
@@ -210,7 +216,7 @@ function renderApprovals(card,article){
 }
 async function loadJobs(){
  if(!key||state.jobsLoading)return;state.jobsLoading=true;
- try{const data=await api('GET',undefined,'jobs');freshState=data.fresh_ted||null;renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
+ try{const data=await api('GET',undefined,'jobs');freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('[data-approval-id][open]')].map(e=>e.dataset.approvalId);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);

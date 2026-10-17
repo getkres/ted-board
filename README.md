@@ -15,9 +15,11 @@ Open the private link supplied by Ted. Its access key arrives in the URL fragmen
 - Every card in Ted’s doing shows its current step or blocker, a colored activity dot, and the update age. Running work turns amber after two hours without a changed update. Cards refresh every 20 seconds while the page is visible, preserving your draft and focused controls.
 - Use the refresh button for the latest cards. Failed requests show a message and keep the card available to retry. The board needs an internet connection.
 
+The pinned **talk to Ted** button opens the current Ted chat in a new tab. It falls back to Claude Code when the current session is unknown. Fresh Ted updates the link after a successful rollover.
+
 ## Mockups
 
-The **Mockups** tab has swipeable design batches, fullscreen zoom, numbered feedback pins, threaded replies, unread dots, and image selections. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
+The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x, numbered feedback pins, threaded replies, unread dots, and image selections. Open a mockup, use the wheel, pinch, or zoom buttons, and drag to pan. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads after 1.5x when available; older images still open with their preview. Pins stay the same size as you zoom. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
 
 See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
 
