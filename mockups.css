@@ -205,16 +205,20 @@
 .mockup-viewport {
   flex: 1;
   min-height: 100px;
-  overflow: auto;
+  overflow: hidden;
   touch-action: none;
   overscroll-behavior: contain;
   background: #0b0806;
-  padding: 24px;
+  padding: 0;
   position: relative;
 }
 .mockup-canvas {
   position: relative;
-  margin: 0 auto;
+  margin: 0;
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
   flex-shrink: 0;
   user-select: none;
   -webkit-user-select: none;
@@ -370,3 +374,10 @@
 .mockup-row {
   align-items: flex-start;
 }
+
+.mockup-canvas .mockup-pin {
+  transform-origin: 0 0;
+  transform: scale(calc(1 / var(--mockup-zoom, 1))) translate(-50%, -50%);
+}
+.mockup-viewport { cursor: grab; }
+.mockup-viewport:active { cursor: grabbing; }

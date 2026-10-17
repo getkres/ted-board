@@ -30,6 +30,9 @@ class MockupsView {
       this.close();
     });
     this.dialog.addEventListener("close", () => {
+      if (this.dialog.open) return;
+      clearTimeout(this.tapTimer);
+      this.resizeViewer?.disconnect();
       this.active = null;
       document.body.style.overflow = "";
     });
@@ -121,6 +124,8 @@ class MockupsView {
       this.mockups = data.mockups;
       this.pins = data.pins.map((p) => ({
         ...p,
+        x: p.x ?? p.x_pct / 100,
+        y: p.y ?? p.y_pct / 100,
         thread: (Array.isArray(p.thread) ? p.thread : []).filter((m) =>
           m && ["seb", "ted"].includes(m.who) && typeof m.text === "string"
         ),
@@ -264,7 +269,7 @@ class MockupsView {
       open = button("", "mockup-open", () => this.open(m));
     open.setAttribute("aria-label", "Open " + m.title);
     const img = el("img");
-    img.src = this.imageURL(m.image_url);
+    img.src = this.imageURL(m.preview_url || m.image_url);
     img.alt = m.title;
     img.width = m.width;
     img.height = m.height;
@@ -333,8 +338,8 @@ class MockupsView {
       "mockup-pin" + (pin.resolved ? " resolved" : ""),
       onClick,
     );
-    b.style.left = pin.x_pct + "%";
-    b.style.top = pin.y_pct + "%";
+    b.style.left = ((pin.x ?? pin.x_pct / 100) * 100) + "%";
+    b.style.top = ((pin.y ?? pin.y_pct / 100) * 100) + "%";
     b.setAttribute(
       "aria-label",
       "Pin " + (index + 1) + (pin.resolved ? ", resolved" : ""),
@@ -348,7 +353,11 @@ class MockupsView {
     this.active = m;
     this.selected = pinId;
     this.pending = null;
+    clearTimeout(this.tapTimer);
+    this.resizeViewer?.disconnect();
     this.zoom = 1;
+    this.panX = 0; this.panY = 0; this.baseWidth = 0; this.baseHeight = 0;
+    this.fullLoading = false; this.fullLoaded = false; this.fullRetryAt = 0; this.lastTap = null;
     this.pointers = new Map();
     this.gesture = null;
     this.dialog.replaceChildren();
@@ -364,11 +373,11 @@ class MockupsView {
     const tools = el("div", "mockup-tools");
     tools.append(
       button("−", "", () => this.setZoom(this.zoom - .5)),
-      button("100%", "", () => this.setZoom(1)),
+      button("Fit", "", () => this.setZoom(1)),
       button("+", "", () => this.setZoom(this.zoom + .5)),
       button("Add pin", "mockup-add", () => this.centerPin()),
     );
-    ["Zoom out", "Reset zoom", "Zoom in"].forEach((label, i) =>
+    ["Zoom out", "Fit image", "Zoom in"].forEach((label, i) =>
       tools.children[i].setAttribute("aria-label", label)
     );
     this.zoomLabel = tools.children[1];
@@ -387,7 +396,7 @@ class MockupsView {
     this.viewport.tabIndex = 0;
     this.canvas = el("div", "mockup-canvas");
     const img = el("img");
-    img.src = this.imageURL(m.image_url);
+    img.src = this.imageURL(m.preview_url || m.image_url);
     img.alt = m.title;
     img.draggable = false;
     img.referrerPolicy = "no-referrer";
@@ -402,13 +411,11 @@ class MockupsView {
     this.installPointers();
     if (!this.dialog.open) this.dialog.showModal();
     document.body.style.overflow = "hidden";
-    this.baseWidth = Math.max(
-      1,
-      Math.min(m.width, this.viewport.clientWidth - 48),
-    );
-    this.setZoom(1);
     this.drawPins();
     this.drawPanel();
+    this.layoutViewer();
+    this.resizeViewer = new ResizeObserver(() => this.layoutViewer());
+    this.resizeViewer.observe(this.viewport);
     this.onChange();
     img.addEventListener("error", () => {
       this.dialogStatus.textContent =
@@ -417,123 +424,157 @@ class MockupsView {
   }
   close() {
     if (this.active && this.busy.has(this.active.id)) return;
+    clearTimeout(this.tapTimer);
+    this.lastTap = null;
+    this.resizeViewer?.disconnect();
     if (this.dialog.open) this.dialog.close();
     this.active = null;
     document.body.style.overflow = "";
     this.onChange();
   }
-  setZoom(value, anchor = null) {
+  layoutViewer() {
     if (!this.active) return;
-    const old = this.zoom || 1, next = Math.max(1, Math.min(4, value));
-    const v = this.viewport;
-    const ax = anchor?.x ?? v.clientWidth / 2,
-      ay = anchor?.y ?? v.clientHeight / 2;
-    const x = (v.scrollLeft + ax) / old, y = (v.scrollTop + ay) / old;
+    const v = this.viewport, ratio = this.active.width / this.active.height;
+    const w = Math.max(1, Math.min(v.clientWidth - 32, (v.clientHeight - 32) * ratio));
+    const oldW = this.baseWidth, oldH = this.baseHeight;
+    const cx = oldW ? (this.lastWidth / 2 - this.panX) / (oldW * this.zoom) : .5;
+    const cy = oldH ? (this.lastHeight / 2 - this.panY) / (oldH * this.zoom) : .5;
+    this.baseWidth = w; this.baseHeight = w / ratio;
+    this.lastWidth = v.clientWidth; this.lastHeight = v.clientHeight;
+    this.panX = v.clientWidth / 2 - cx * w * this.zoom;
+    this.panY = v.clientHeight / 2 - cy * this.baseHeight * this.zoom;
+    this.applyTransform();
+  }
+  applyTransform() {
+    const v = this.viewport, w = this.baseWidth * this.zoom, h = this.baseHeight * this.zoom;
+    const clamp = (p, size, available) => size <= available ? (available - size) / 2 : Math.max(available - size, Math.min(0, p));
+    this.panX = clamp(this.panX, w, v.clientWidth);
+    this.panY = clamp(this.panY, h, v.clientHeight);
+    this.canvas.style.width = this.baseWidth + 'px';
+    this.canvas.style.height = this.baseHeight + 'px';
+    this.canvas.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
+    this.canvas.style.setProperty('--mockup-zoom', this.zoom);
+    this.zoomLabel.textContent = this.zoom === 1 ? 'Fit' : 'Fit · ' + Math.round(this.zoom * 100) + '%';
+    this.viewport.dataset.zoom = this.zoom;
+  }
+  setZoom(value, anchor = null, panDelta = null) {
+    if (!this.active) return;
+    const old = this.zoom || 1, next = Math.max(1, Math.min(10, value));
+    const x = anchor?.x ?? this.viewport.clientWidth / 2, y = anchor?.y ?? this.viewport.clientHeight / 2;
+    this.panX = x - (x - this.panX) * next / old;
+    this.panY = y - (y - this.panY) * next / old;
     this.zoom = next;
-    const width = this.baseWidth * next;
-    this.canvas.style.width = width + "px";
-    this.canvas.style.height = width * this.active.height / this.active.width +
-      "px";
-    this.zoomLabel.textContent = Math.round(next * 100) + "%";
-    v.scrollLeft = x * next - ax;
-    v.scrollTop = y * next - ay;
+    if (panDelta) {this.panX += panDelta.x;this.panY += panDelta.y;}
+    if (next === 1) { this.panX = (this.viewport.clientWidth - this.baseWidth) / 2; this.panY = (this.viewport.clientHeight - this.baseHeight) / 2; }
+    this.applyTransform();
+    if (next > 1.5) this.loadFull();
+  }
+  loadFull() {
+    const m = this.active, canvas = this.canvas, url = this.imageURL(m?.full_url);
+    if (!url || this.fullLoading || this.fullLoaded || Date.now() < this.fullRetryAt) return;
+    this.fullLoading = true;
+    this.dialogStatus.textContent = 'Loading full detail…';
+    const image = new Image(); image.referrerPolicy = 'no-referrer';
+    image.onload = async () => {
+      try {await image.decode();} catch {}
+      if (!this.active || this.canvas !== canvas) return;
+      this.fullLoading = false; this.fullLoaded = true;
+      this.canvas.querySelector('img').src = url;
+      this.dialogStatus.textContent = 'Full detail loaded';
+    };
+    image.onerror = () => {
+      if (!this.active || this.canvas !== canvas) return;
+      this.fullLoading = false; this.fullRetryAt = Date.now() + 1500;
+      this.dialogStatus.textContent = 'Full detail could not load. Zoom again to retry.';
+    };
+    image.src = url;
   }
   installPointers() {
-    const v = this.viewport;
-    const point = (e) => ({ x: e.clientX, y: e.clientY });
-    const distance = () => {
-      const a = [...this.pointers.values()];
-      return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+    const v = this.viewport, point = e => ({x:e.clientX,y:e.clientY});
+    const pair = () => {
+      const [a,b] = [...this.pointers.values()];
+      const r = v.getBoundingClientRect();
+      return {x:(a.x+b.x)/2-r.left,y:(a.y+b.y)/2-r.top,d:Math.hypot(a.x-b.x,a.y-b.y)};
     };
-    v.addEventListener("pointerdown", (e) => {
-      if (e.target.closest("button") || e.button > 0) return;
-      this.pointers.set(e.pointerId, point(e));
-      try {
-        v.setPointerCapture(e.pointerId);
-      } catch {}
-      if (this.pointers.size === 1) {
-        this.gesture = {
-          start: point(e),
-          last: point(e),
-          moved: false,
-          multi: false,
-        };
-      }
-      if (this.pointers.size >= 2) {
-        this.gesture.multi = true;
-        this.gesture.distance = distance();
-        this.gesture.zoom = this.zoom;
+    v.addEventListener('keydown', e => {
+      if (e.target !== v || e.ctrlKey || e.metaKey || e.altKey) return;
+      const r = {ArrowLeft:[60,0],ArrowRight:[-60,0],ArrowUp:[0,60],ArrowDown:[0,-60]}[e.key];
+      if (r) {e.preventDefault();this.panX += r[0];this.panY += r[1];this.applyTransform();}
+      else if (['+','=','-','0','Home'].includes(e.key)) {
+        e.preventDefault();this.setZoom(['0','Home'].includes(e.key) ? 1 : this.zoom + (e.key === '-' ? -.5 : .5));
       }
     });
-    v.addEventListener("pointermove", (e) => {
+    v.addEventListener('wheel', e => {
+      // Ctrl-wheel is browser page zoom (including trackpad pinch); leave it alone.
+      if (e.ctrlKey || e.metaKey) return;
+      e.preventDefault();
+      const r = v.getBoundingClientRect();
+      this.setZoom(this.zoom * Math.exp(-e.deltaY * (e.deltaMode === 1 ? .04 : .002)), {x:e.clientX-r.left,y:e.clientY-r.top});
+    }, {passive:false});
+    v.addEventListener('pointerdown', e => {
+      if (e.target.closest('button') || e.button > 0 || this.pointers.size >= 2) return;
+      this.pointers.set(e.pointerId,point(e));
+      try {v.setPointerCapture(e.pointerId);} catch {}
+      if (this.pointers.size === 1) this.gesture = {start:point(e),last:point(e),moved:false,multi:false};
+      if (this.pointers.size === 2) {
+        clearTimeout(this.tapTimer); this.lastTap = null;
+        this.gesture.multi = true; this.gesture.pair = pair();
+      }
+    });
+    v.addEventListener('pointermove', e => {
       if (!this.pointers.has(e.pointerId) || !this.gesture) return;
-      this.pointers.set(e.pointerId, point(e));
+      this.pointers.set(e.pointerId,point(e));
       const g = this.gesture;
-      if (this.pointers.size >= 2) {
-        const rect = v.getBoundingClientRect(), a = [...this.pointers.values()];
-        this.setZoom(g.zoom * distance() / g.distance, {
-          x: (a[0].x + a[1].x) / 2 - rect.left,
-          y: (a[0].y + a[1].y) / 2 - rect.top,
-        });
-        g.moved = true;
+      if (this.pointers.size === 2) {
+        const now = pair(), old = g.pair;
+        this.setZoom(this.zoom * now.d / Math.max(1,old.d), old, {x:now.x-old.x,y:now.y-old.y});
+        g.pair = now; g.moved = true;
       } else {
-        if (Math.hypot(e.clientX - g.start.x, e.clientY - g.start.y) > 8) {
-          g.moved = true;
-        }
-        if (g.moved) {
-          v.scrollLeft -= e.clientX - g.last.x;
-          v.scrollTop -= e.clientY - g.last.y;
+        if (Math.hypot(e.clientX-g.start.x,e.clientY-g.start.y) > 8) g.moved = true;
+        if (g.moved || g.multi) {
+          this.panX += e.clientX-g.last.x; this.panY += e.clientY-g.last.y; this.applyTransform();
         }
         g.last = point(e);
       }
     });
-    const finish = (e, cancel = false) => {
+    const finish = (e,cancel=false) => {
       if (!this.pointers.has(e.pointerId)) return;
-      const g = this.gesture;
-      this.pointers.delete(e.pointerId);
+      const g = this.gesture; this.pointers.delete(e.pointerId);
       if (!this.pointers.size) {
         if (g && !g.moved && !g.multi && !cancel) {
-          const r = this.canvas.getBoundingClientRect();
-          if (
-            e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top &&
-            e.clientY <= r.bottom
-          ) {
-            this.newPin(
-              100 * (e.clientX - r.left) / r.width,
-              100 * (e.clientY - r.top) / r.height,
-            );
+          const now = Date.now(), last = this.lastTap;
+          if (last && now-last.at < 320 && Math.hypot(e.clientX-last.x,e.clientY-last.y)<28) {
+            clearTimeout(this.tapTimer); this.lastTap = null;
+            const r = v.getBoundingClientRect(); this.setZoom(this.zoom === 1 ? 2.5 : 1,{x:e.clientX-r.left,y:e.clientY-r.top});
+          } else {
+            clearTimeout(this.tapTimer);
+            this.lastTap = {at:now,...point(e)};
+            const r = this.canvas.getBoundingClientRect(), x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+            this.tapTimer = setTimeout(() => {
+              this.lastTap = null;
+              if (this.active && x>=0 && x<=1 && y>=0 && y<=1) this.newPin(x,y);
+            },320);
           }
         }
         this.gesture = null;
-      } else if (g) g.last = [...this.pointers.values()][0];
+      } else if (g) {g.last=[...this.pointers.values()][0];g.start=g.last;g.moved=true;}
+      if (cancel) {clearTimeout(this.tapTimer);this.lastTap=null;}
     };
-    v.addEventListener("pointerup", (e) => finish(e));
-    v.addEventListener("pointercancel", (e) => finish(e, true));
+    v.addEventListener('pointerup',e=>finish(e));
+    v.addEventListener('pointercancel',e=>finish(e,true));
+    v.addEventListener('lostpointercapture',e=>finish(e,true));
   }
   centerPin() {
-    const v = this.viewport.getBoundingClientRect(),
-      c = this.canvas.getBoundingClientRect();
-    this.newPin(
-      Math.max(
-        0,
-        Math.min(100, 100 * (v.left + v.width / 2 - c.left) / c.width),
-      ),
-      Math.max(
-        0,
-        Math.min(
-          100,
-          100 * (v.top + Math.min(v.height, c.height) / 2 - c.top) / c.height,
-        ),
-      ),
-    );
+    const v = this.viewport.getBoundingClientRect(), c = this.canvas.getBoundingClientRect();
+    this.newPin(Math.max(0,Math.min(1,(v.left+v.width/2-c.left)/c.width)),Math.max(0,Math.min(1,(v.top+v.height/2-c.top)/c.height)));
   }
   newPin(x, y) {
     if (this.busy.has(this.active.id) || this.active.status === "archived") {
       return;
     }
     this.pending = {
-      x_pct: Math.round(x * 100) / 100,
-      y_pct: Math.round(y * 100) / 100,
+      x: Math.max(0, Math.min(1, Number(x.toFixed(6)))),
+      y: Math.max(0, Math.min(1, Number(y.toFixed(6)))),
     };
     this.selected = null;
     this.drawPins();
