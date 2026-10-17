@@ -411,3 +411,23 @@
 .mockup-next { right: 8px; }
 .mockup-nav:disabled { opacity: .3; cursor: default; }
 .mockup-position { font-variant-numeric: tabular-nums; }
+/* Verdicts share the Cave palette and keep all tap targets at least 44px. */
+.mockup-card-foot { flex-wrap: wrap; }
+.mockup-verdicts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.mockup-verdict-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mockup-verdicts button { min-width: 44px; min-height: 44px; font-size: .78rem; padding: 8px 10px; }
+.mockup-verdict-badge { width: 100%; font-size: .68rem; font-weight: 750; letter-spacing: .08em; }
+.mockup-verdict-badge.verdict-approved { color: var(--green); }
+.mockup-verdict-badge.verdict-needs_work { color: var(--accent); }
+.mockup-verdict-badge.verdict-scrapped { color: var(--muted); }
+.mockup-verdict-button[aria-pressed="true"] { border-color: currentColor; }
+.mockup-verdict-button.verdict-approved[aria-pressed="true"] { color: var(--green); }
+.mockup-verdict-button.verdict-needs_work[aria-pressed="true"] { color: var(--accent); }
+.mockup-verdict-note { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.mockup-verdict-note textarea { width: 100%; min-height: 64px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 10px; font: inherit; font-size: 1rem; }
+.mockup-dialog-verdicts { padding: 0 16px 8px; flex-shrink: 0; max-height: 32dvh; overflow: auto; }
+.mockup-dialog-verdicts .mockup-verdict-badge { width: auto; margin-right: 6px; }
+.mockup-scrapped { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.mockup-scrapped summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-size: .85rem; color: var(--muted); }
+.mockup-card.is-scrapped .mockup-preview { filter: grayscale(1); opacity: .55; }
+.mockup-card.is-scrapped { border-style: dashed; }
