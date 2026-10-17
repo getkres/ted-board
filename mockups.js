@@ -25,6 +25,14 @@ class MockupsView {
     this.dialog = el("dialog", "mockup-dialog");
     this.dialog.setAttribute("aria-labelledby", "mockup-dialog-title");
     document.body.append(this.dialog);
+    this.dialog.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey ||
+          e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        this.navigate(e.key === "ArrowLeft" ? -1 : 1);
+      }
+    });
     this.dialog.addEventListener("cancel", (e) => {
       e.preventDefault();
       this.close();
@@ -135,8 +143,10 @@ class MockupsView {
         const m = this.mockups.find((m) => m.id === this.active.id);
         if (m) {
           this.active = m;
+          this.updateNavigation();
           this.drawPins();
           this.drawPanel();
+          this.layoutViewer();
         } else this.close();
       }
     } catch (e) {
@@ -247,10 +257,8 @@ class MockupsView {
         const row = el("div", "mockup-row");
         row.setAttribute("aria-label", batch.title + " images");
         row.tabIndex = 0;
-        batch.images.sort((a, b) =>
-          a.sort - b.sort || a.created_at.localeCompare(b.created_at) ||
-          a.id.localeCompare(b.id)
-        ).forEach((m) => row.append(this.card(m)));
+        batch.images.sort((a, b) => this.imageOrder(a, b))
+          .forEach((m) => row.append(this.card(m)));
         section.append(row);
         root.append(section);
       },
@@ -348,14 +356,49 @@ class MockupsView {
     b.append(this.el("span", null, index + 1));
     return b;
   }
+  imageOrder(a, b) {
+    return a.sort - b.sort || a.created_at.localeCompare(b.created_at) ||
+      a.id.localeCompare(b.id);
+  }
+  groupImages(m) {
+    return this.mockups.filter((image) => image.status !== "archived" &&
+      image.project === m.project && image.batch === m.batch)
+      .sort((a, b) => this.imageOrder(a, b));
+  }
+  navigate(direction) {
+    if (!this.active || this.busy.has(this.active.id)) return;
+    const group = this.groupImages(this.active),
+      index = group.findIndex((m) => m.id === this.active.id),
+      next = group[index + direction];
+    if (index < 0 || !next) return;
+    const focusInViewer = this.dialog.contains(document.activeElement);
+    this.open(next);
+    if (focusInViewer) this.viewport.focus({preventScroll: true});
+  }
+  updateNavigation() {
+    const group = this.groupImages(this.active),
+      index = group.findIndex((m) => m.id === this.active.id);
+    this.positionLabel.textContent = index < 0 ? "Image outside this batch" : `${index + 1} of ${group.length}`;
+    this.prevButton.hidden = index < 0;
+    this.nextButton.hidden = index < 0;
+    this.prevButton.disabled = index <= 0;
+    this.nextButton.disabled = index < 0 || index >= group.length - 1;
+    this.neighbourPreloads = [group[index - 1], group[index + 1]].filter(Boolean).map((m) => {
+      const image = new Image();
+      image.referrerPolicy = "no-referrer";
+      image.src = this.imageURL(m.preview_url || m.image_url);
+      return image;
+    });
+  }
   open(m, pinId = null) {
     this.storage.set("ted-mockup-seen:" + m.id, m.created_at || m.id);
     this.active = m;
     this.selected = pinId;
+    this.pinMode = false;
     this.pending = null;
     clearTimeout(this.tapTimer);
     this.resizeViewer?.disconnect();
-    this.zoom = 1;
+    this.zoom = 1; this.fitZoom = 1; this.fitting = true;
     this.panX = 0; this.panY = 0; this.baseWidth = 0; this.baseHeight = 0;
     this.fullLoading = false; this.fullLoaded = false; this.fullRetryAt = 0; this.lastTap = null;
     this.pointers = new Map();
@@ -366,18 +409,21 @@ class MockupsView {
       title = el("div"),
       h = el("h2", null, m.title);
     h.id = "mockup-dialog-title";
-    title.append(h, el("p", null, m.project + " · " + m.batch));
+    this.positionLabel = el("p", "mockup-position");
+    this.positionLabel.setAttribute("aria-live", "polite");
+    title.append(h, el("p", null, m.project + " · " + m.batch), this.positionLabel);
     head.append(title, button("Close", "", () => this.close()));
     head.lastChild.setAttribute("aria-label", "Close mockup");
     this.dialog.append(head);
     const tools = el("div", "mockup-tools");
     tools.append(
-      button("−", "", () => this.setZoom(this.zoom - .5)),
-      button("Fit", "", () => this.setZoom(1)),
-      button("+", "", () => this.setZoom(this.zoom + .5)),
-      button("Add pin", "mockup-add", () => this.centerPin()),
+      button("−", "", () => this.setZoom(this.zoom / 1.5)),
+      button("100%", "mockup-scale", () => this.resetFit()),
+      button("+", "", () => this.setZoom(this.zoom * 1.5)),
+      button("Fit", "", () => this.resetFit()),
+      button("Add pin", "mockup-add", () => { this.pinMode = true; this.centerPin(); }),
     );
-    ["Zoom out", "Fit image", "Zoom in"].forEach((label, i) =>
+    ["Zoom out", "Reset zoom to fit", "Zoom in", "Fit image"].forEach((label, i) =>
       tools.children[i].setAttribute("aria-label", label)
     );
     this.zoomLabel = tools.children[1];
@@ -386,7 +432,7 @@ class MockupsView {
       el(
         "p",
         "mockup-hint",
-        "Tap the image to leave a pin. Pinch to zoom, or drag to look around.",
+        "Pinch to zoom, drag to pan, or swipe to change images. Use Add pin to leave feedback.",
       ),
     );
     this.index = el("div", "mockup-pin-index");
@@ -401,7 +447,12 @@ class MockupsView {
     img.draggable = false;
     img.referrerPolicy = "no-referrer";
     this.canvas.append(img);
-    this.viewport.append(this.canvas);
+    this.prevButton = button("‹", "mockup-nav mockup-prev", () => this.navigate(-1));
+    this.nextButton = button("›", "mockup-nav mockup-next", () => this.navigate(1));
+    this.prevButton.setAttribute("aria-label", "Previous image");
+    this.nextButton.setAttribute("aria-label", "Next image");
+    this.viewport.append(this.canvas, this.prevButton, this.nextButton);
+    this.updateNavigation();
     this.dialog.append(this.viewport);
     this.dialogStatus = el("p", "mockup-status mockup-dialog-status");
     this.dialogStatus.setAttribute("role", "status");
@@ -417,7 +468,9 @@ class MockupsView {
     this.resizeViewer = new ResizeObserver(() => this.layoutViewer());
     this.resizeViewer.observe(this.viewport);
     this.onChange();
+    const currentCanvas = this.canvas;
     img.addEventListener("error", () => {
+      if (!this.active || this.canvas !== currentCanvas) return;
       this.dialogStatus.textContent =
         "Image could not load. Close and refresh to try again.";
     });
@@ -434,16 +487,24 @@ class MockupsView {
   }
   layoutViewer() {
     if (!this.active) return;
-    const v = this.viewport, ratio = this.active.width / this.active.height;
-    const w = Math.max(1, Math.min(v.clientWidth - 32, (v.clientHeight - 32) * ratio));
+    const v = this.viewport, m = this.active;
+    const width = m.full_width || m.width, height = m.full_height || m.height;
     const oldW = this.baseWidth, oldH = this.baseHeight;
     const cx = oldW ? (this.lastWidth / 2 - this.panX) / (oldW * this.zoom) : .5;
     const cy = oldH ? (this.lastHeight / 2 - this.panY) / (oldH * this.zoom) : .5;
-    this.baseWidth = w; this.baseHeight = w / ratio;
+    this.baseWidth = width; this.baseHeight = height;
+    this.fitZoom = Math.min(Math.max(1, v.clientWidth - 32) / width,
+      Math.max(1, v.clientHeight - 32) / height, 10);
+    this.minZoom = Math.min(.25, this.fitZoom / 4);
     this.lastWidth = v.clientWidth; this.lastHeight = v.clientHeight;
-    this.panX = v.clientWidth / 2 - cx * w * this.zoom;
-    this.panY = v.clientHeight / 2 - cy * this.baseHeight * this.zoom;
+    if (this.fitting) { this.zoom = this.fitZoom; }
+    else this.zoom = Math.max(this.minZoom, this.zoom);
+    this.panX = v.clientWidth / 2 - cx * width * this.zoom;
+    this.panY = v.clientHeight / 2 - cy * height * this.zoom;
     this.applyTransform();
+  }
+  resetFit() {
+    this.setZoom(this.fitZoom);
   }
   applyTransform() {
     const v = this.viewport, w = this.baseWidth * this.zoom, h = this.baseHeight * this.zoom;
@@ -454,20 +515,23 @@ class MockupsView {
     this.canvas.style.height = this.baseHeight + 'px';
     this.canvas.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
     this.canvas.style.setProperty('--mockup-zoom', this.zoom);
-    this.zoomLabel.textContent = this.zoom === 1 ? 'Fit' : 'Fit · ' + Math.round(this.zoom * 100) + '%';
+    this.zoomLabel.textContent = (Math.round(this.zoom * 1000) / 10) + '%';
+    this.zoomLabel.title = 'Actual image scale. Reset to fit';
     this.viewport.dataset.zoom = this.zoom;
   }
   setZoom(value, anchor = null, panDelta = null) {
     if (!this.active) return;
-    const old = this.zoom || 1, next = Math.max(1, Math.min(10, value));
+    const old = this.zoom || this.fitZoom, next = Math.max(this.minZoom, Math.min(10, value));
     const x = anchor?.x ?? this.viewport.clientWidth / 2, y = anchor?.y ?? this.viewport.clientHeight / 2;
     this.panX = x - (x - this.panX) * next / old;
     this.panY = y - (y - this.panY) * next / old;
     this.zoom = next;
+    this.fitting = Math.abs(next - this.fitZoom) < 1e-9;
     if (panDelta) {this.panX += panDelta.x;this.panY += panDelta.y;}
-    if (next === 1) { this.panX = (this.viewport.clientWidth - this.baseWidth) / 2; this.panY = (this.viewport.clientHeight - this.baseHeight) / 2; }
     this.applyTransform();
-    if (next > 1.5) this.loadFull();
+    const previewWidth = this.active.preview_width || this.active.width;
+    if (next > this.fitZoom * 1.5 &&
+        next * this.baseWidth * (window.devicePixelRatio || 1) > previewWidth) this.loadFull();
   }
   loadFull() {
     const m = this.active, canvas = this.canvas, url = this.imageURL(m?.full_url);
@@ -498,10 +562,10 @@ class MockupsView {
     };
     v.addEventListener('keydown', e => {
       if (e.target !== v || e.ctrlKey || e.metaKey || e.altKey) return;
-      const r = {ArrowLeft:[60,0],ArrowRight:[-60,0],ArrowUp:[0,60],ArrowDown:[0,-60]}[e.key];
-      if (r) {e.preventDefault();this.panX += r[0];this.panY += r[1];this.applyTransform();}
+      const r = (e.shiftKey ? {ArrowLeft:[60,0],ArrowRight:[-60,0],ArrowUp:[0,60],ArrowDown:[0,-60]} : {ArrowUp:[0,60],ArrowDown:[0,-60]})[e.key];
+      if (r) {e.preventDefault();e.stopPropagation();this.panX += r[0];this.panY += r[1];this.applyTransform();}
       else if (['+','=','-','0','Home'].includes(e.key)) {
-        e.preventDefault();this.setZoom(['0','Home'].includes(e.key) ? 1 : this.zoom + (e.key === '-' ? -.5 : .5));
+        e.preventDefault();this.setZoom(['0','Home'].includes(e.key) ? this.fitZoom : this.zoom * (e.key === '-' ? 1 / 1.5 : 1.5));
       }
     });
     v.addEventListener('wheel', e => {
@@ -515,7 +579,7 @@ class MockupsView {
       if (e.target.closest('button') || e.button > 0 || this.pointers.size >= 2) return;
       this.pointers.set(e.pointerId,point(e));
       try {v.setPointerCapture(e.pointerId);} catch {}
-      if (this.pointers.size === 1) this.gesture = {start:point(e),last:point(e),moved:false,multi:false};
+      if (this.pointers.size === 1) this.gesture = {start:point(e),last:point(e),moved:false,multi:false,touch:e.pointerType === "touch",swipe:this.zoom <= this.fitZoom * 1.001,at:Date.now()};
       if (this.pointers.size === 2) {
         clearTimeout(this.tapTimer); this.lastTap = null;
         this.gesture.multi = true; this.gesture.pair = pair();
@@ -541,18 +605,24 @@ class MockupsView {
       if (!this.pointers.has(e.pointerId)) return;
       const g = this.gesture; this.pointers.delete(e.pointerId);
       if (!this.pointers.size) {
-        if (g && !g.moved && !g.multi && !cancel) {
+        const dx = g ? e.clientX - g.start.x : 0, dy = g ? e.clientY - g.start.y : 0;
+        if (g && !g.multi && !cancel && g.touch && g.swipe &&
+            this.zoom <= this.fitZoom * 1.001 && Math.abs(dx) >= 50 &&
+            Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - g.at < 1000) {
+          clearTimeout(this.tapTimer); this.lastTap = null;
+          this.navigate(dx < 0 ? 1 : -1);
+        } else if (g && !g.moved && !g.multi && !cancel) {
           const now = Date.now(), last = this.lastTap;
           if (last && now-last.at < 320 && Math.hypot(e.clientX-last.x,e.clientY-last.y)<28) {
             clearTimeout(this.tapTimer); this.lastTap = null;
-            const r = v.getBoundingClientRect(); this.setZoom(this.zoom === 1 ? 2.5 : 1,{x:e.clientX-r.left,y:e.clientY-r.top});
+            const r = v.getBoundingClientRect(); this.setZoom(this.fitting ? this.fitZoom * 2.5 : this.fitZoom,{x:e.clientX-r.left,y:e.clientY-r.top});
           } else {
             clearTimeout(this.tapTimer);
             this.lastTap = {at:now,...point(e)};
             const r = this.canvas.getBoundingClientRect(), x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
             this.tapTimer = setTimeout(() => {
               this.lastTap = null;
-              if (this.active && x>=0 && x<=1 && y>=0 && y<=1) this.newPin(x,y);
+              if (this.active && this.pinMode && x>=0 && x<=1 && y>=0 && y<=1) this.newPin(x,y);
             },320);
           }
         }
@@ -590,6 +660,7 @@ class MockupsView {
         if (this.busy.has(this.active.id)) return;
         this.selected = p.id;
         this.pending = null;
+        this.pinMode = false;
         this.drawPins();
         this.drawPanel();
       };
@@ -638,6 +709,7 @@ class MockupsView {
         if (this.busy.has(this.active.id)) return;
         this.selected = null;
         this.pending = null;
+        this.pinMode = false;
         this.drawPins();
         this.drawPanel();
       }),
@@ -750,6 +822,7 @@ class MockupsView {
         if (this.active?.id === id) {
           this.selected = data.pin.id;
           this.pending = null;
+          this.pinMode = false;
         }
       }
       if (draftKey) this.drafts.delete(draftKey);
@@ -775,6 +848,7 @@ class MockupsView {
         this.dialog.querySelectorAll("button,textarea").forEach((e) =>
           e.disabled = false
         );
+        this.updateNavigation();
       }
       this.onChange();
     }

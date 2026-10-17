@@ -381,3 +381,33 @@
 }
 .mockup-viewport { cursor: grab; }
 .mockup-viewport:active { cursor: grabbing; }
+
+.mockup-tools .mockup-scale {
+  min-width: 64px;
+  padding-left: 6px;
+  padding-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.mockup-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 48px;
+  height: 64px;
+  min-width: 48px;
+  min-height: 64px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--accent);
+  font-size: 2.5rem;
+  line-height: 1;
+  box-shadow: 0 2px 12px #0008;
+  touch-action: manipulation;
+}
+.mockup-prev { left: 8px; }
+.mockup-next { right: 8px; }
+.mockup-nav:disabled { opacity: .3; cursor: default; }
+.mockup-position { font-variant-numeric: tabular-nums; }
