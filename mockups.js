@@ -272,6 +272,15 @@ class MockupsView {
         batch.images.sort((a, b) => this.imageOrder(a, b)).filter((m) => this.verdict(m) !== "scrapped").forEach((m) => row.append(this.card(m)));
         if (row.children.length) section.append(row);
         const scrapped = batch.images.filter((m) => this.verdict(m) === "scrapped");
+        scrapped.filter((m) => m.verdict_change?.token && Date.parse(m.verdict_change.undo_until) > Date.now()).forEach((m) => {
+          const undo = el("div", "mockup-verdicts mockup-scrap-undo");
+          undo.dataset.verdictId = m.id;
+          undo.setAttribute("role", "status");
+          const restore = button("Undo", "mockup-verdict-undo", () => this.saveVerdict(m, null, m.verdict_change.token));
+          restore.disabled = this.busy.has(m.id);
+          undo.append(el("span", null, m.title + " scrapped."), restore);
+          section.append(undo);
+        });
         if (scrapped.length) {
           const group = el("details", "mockup-scrapped"), key = JSON.stringify([batch.project, batch.title]);
           group.open = this.scrappedOpen.has(key);
@@ -356,7 +365,9 @@ class MockupsView {
     if (left > 0) this.verdictTimers.set(m.id, setTimeout(() => {
       this.verdictTimers.delete(m.id);
       document.querySelectorAll(".mockup-verdicts").forEach((box) => {
-        if (box.dataset.verdictId === m.id) box.querySelector(".mockup-verdict-undo")?.remove();
+        if (box.dataset.verdictId !== m.id) return;
+        if (box.classList.contains("mockup-scrap-undo")) box.remove();
+        else box.querySelector(".mockup-verdict-undo")?.remove();
       });
     }, left + 30));
   }
@@ -402,7 +413,9 @@ class MockupsView {
         e.preventDefault();
         if (!input.value.trim()) { skip.click(); return; }
         const pins = this.imagePins(m.id), pin = pins.find((p) => p.id === change?.pin_id) || pins.findLast((p) => !p.resolved);
-        const body = pin ? {action:"reply", pin_id:pin.id, text:input.value.trim()}
+        const body = change?.token && change.pin_id
+          ? {action:"verdict_note", mockup_id:m.id, token:change.token, text:input.value.trim()}
+          : pin ? {action:"reply", pin_id:pin.id, text:input.value.trim()}
           : {action:"pin", mockup_id:m.id, x:.5, y:.5, text:input.value.trim()};
         await this.save(body, m.id, key);
         this.drawVerdicts();
