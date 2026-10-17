@@ -246,4 +246,6 @@ html.cave{
 .cave .masthead,.masthead{padding-right:160px;flex-wrap:wrap}
 .cave .brand{gap:8px}
 @media(max-width:440px){.cave .brand-mark{display:none}.cave .masthead h1{font-size:1.06rem}.cave .masthead p{font-size:.6rem;max-width:170px}.cave .masthead{gap:10px;padding-top:25px}.cave .masthead #refresh{width:44px;height:44px}}
-.cave .tab-wrap,.tab-wrap{padding-right:164px}
+/* Reserve space for the fixed controls only when the tab strip reaches them. */
+.cave .tab-wrap,.tab-wrap{padding-right:0}
+.cave .tab-wrap.under-controls,.tab-wrap.under-controls{padding-right:164px}
