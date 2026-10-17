@@ -19,6 +19,10 @@ class MockupsView {
     this.revision = 0;
     this.drafts = new Map();
     this.busy = new Set();
+    this.verdictsEnabled = false;
+    this.verdictNotes = new Set();
+    this.verdictTimers = new Map();
+    this.scrappedOpen = new Set();
     this.filter = "All projects";
     this.error = "";
     this.owner = "";
@@ -68,6 +72,10 @@ class MockupsView {
     this.error = "";
     this.owner = this.getKey();
     this.drafts.clear();
+    this.verdictNotes.clear();
+    this.verdictTimers.forEach(clearTimeout);
+    this.verdictTimers.clear();
+    this.verdictsEnabled = false;
     this.close();
   }
   async api(method, body) {
@@ -130,6 +138,8 @@ class MockupsView {
       }
       if (rev !== this.revision || key !== this.getKey()) return;
       this.mockups = data.mockups;
+      this.verdictsEnabled = data.verdicts_enabled === true;
+      this.mockups.forEach((m) => this.scheduleVerdict(m));
       this.pins = data.pins.map((p) => ({
         ...p,
         x: p.x ?? p.x_pct / 100,
@@ -144,6 +154,7 @@ class MockupsView {
         if (m) {
           this.active = m;
           this.updateNavigation();
+          this.drawVerdicts();
           this.drawPins();
           this.drawPanel();
           this.layoutViewer();
@@ -194,6 +205,7 @@ class MockupsView {
       }
       return;
     }
+    if (!this.verdictsEnabled) intro.append(el("p", "mockup-status", "Verdicts will be ready after Ted applies the database setup."));
     const filter = el("label", "mockup-filter", "Project");
     const select = el("select");
     select.setAttribute("aria-label", "Filter mockups by project");
@@ -257,9 +269,32 @@ class MockupsView {
         const row = el("div", "mockup-row");
         row.setAttribute("aria-label", batch.title + " images");
         row.tabIndex = 0;
-        batch.images.sort((a, b) => this.imageOrder(a, b))
-          .forEach((m) => row.append(this.card(m)));
-        section.append(row);
+        batch.images.sort((a, b) => this.imageOrder(a, b)).filter((m) => this.verdict(m) !== "scrapped").forEach((m) => row.append(this.card(m)));
+        if (row.children.length) section.append(row);
+        const scrapped = batch.images.filter((m) => this.verdict(m) === "scrapped");
+        scrapped.filter((m) => m.verdict_change?.token && Date.parse(m.verdict_change.undo_until) > Date.now()).forEach((m) => {
+          const undo = el("div", "mockup-verdicts mockup-scrap-undo");
+          undo.dataset.verdictId = m.id;
+          undo.setAttribute("role", "status");
+          const restore = button("Undo", "mockup-verdict-undo", () => this.saveVerdict(m, null, m.verdict_change.token));
+          restore.disabled = this.busy.has(m.id);
+          undo.append(el("span", null, m.title + " scrapped."), restore);
+          section.append(undo);
+        });
+        if (scrapped.length) {
+          const group = el("details", "mockup-scrapped"), key = JSON.stringify([batch.project, batch.title]);
+          group.open = this.scrappedOpen.has(key);
+          group.append(el("summary", null, "Scrapped (" + scrapped.length + ")"));
+          const discarded = el("div", "mockup-row");
+          scrapped.forEach((m) => discarded.append(this.card(m)));
+          group.append(discarded);
+          group.addEventListener("toggle", () => {
+            if (!group.isConnected) return;
+            if (group.open) this.scrappedOpen.add(key); else this.scrappedOpen.delete(key);
+          });
+          section.append(group);
+        }
+
         root.append(section);
       },
     );
@@ -316,19 +351,120 @@ class MockupsView {
         n + " open " + (n === 1 ? "pin" : "pins"),
       ),
     );
-    if (m.status === "picked") {
-      foot.append(el("span", "mockup-picked", "✓ Picked"));
-    } else {
-      const pick = button(
-        "Pick this one",
-        "",
-        () => this.save({ action: "pick", mockup_id: m.id }, m.id),
-      );
-      pick.disabled = this.busy.has(m.id);
-      foot.append(pick);
-    }
+    card.classList.toggle("is-scrapped", this.verdict(m) === "scrapped");
+    foot.append(this.verdictControls(m));
     card.append(foot);
     return card;
+  }
+  verdict(m) {
+    return m.verdict || (m.status === "picked" ? "approved" : null);
+  }
+  scheduleVerdict(m) {
+    clearTimeout(this.verdictTimers.get(m.id));
+    const left = Date.parse(m.verdict_change?.undo_until) - Date.now();
+    if (left > 0) this.verdictTimers.set(m.id, setTimeout(() => {
+      this.verdictTimers.delete(m.id);
+      document.querySelectorAll(".mockup-verdicts").forEach((box) => {
+        if (box.dataset.verdictId !== m.id) return;
+        if (box.classList.contains("mockup-scrap-undo")) box.remove();
+        else box.querySelector(".mockup-verdict-undo")?.remove();
+      });
+    }, left + 30));
+  }
+  drawVerdicts() {
+    if (this.active && this.verdictBar) this.verdictBar.replaceChildren(this.verdictControls(this.active));
+  }
+  verdictControls(m) {
+    const {el, button} = this, box = el("div", "mockup-verdicts"), value = this.verdict(m),
+      labels = {approved:"GOOD TO GO", needs_work:"NEEDS WORK", scrapped:"SCRAPPED"};
+    box.dataset.verdictId = m.id;
+    if (labels[value]) box.append(el("span", "mockup-verdict-badge verdict-" + value, labels[value]));
+    const actions = el("div", "mockup-verdict-actions");
+    [["approved", "Good to go"], ["needs_work", "Needs work"], ["scrapped", "Scrap"]].forEach(([verdict, label]) => {
+      const b = button(label, "mockup-verdict-button verdict-" + verdict, () => this.saveVerdict(m, verdict));
+      b.setAttribute("aria-pressed", String(value === verdict));
+      b.disabled = !this.verdictsEnabled || this.busy.has(m.id) || m.status === "archived";
+      actions.append(b);
+    });
+    box.append(actions);
+    const change = m.verdict_change;
+    if (change?.token && Date.parse(change.undo_until) > Date.now()) {
+      const undo = button("Undo", "quiet mockup-verdict-undo", () => this.saveVerdict(m, null, change.token));
+      undo.disabled = this.busy.has(m.id);
+      box.append(undo);
+    }
+    if (value === "needs_work" && this.verdictNotes.has(m.id)) {
+      const form = el("form", "mockup-verdict-note"), input = el("textarea"), key = m.id + ":verdict";
+      input.setAttribute("aria-label", "What's off? (optional)");
+      input.placeholder = "What's off? Pins also count.";
+      input.maxLength = 1200;
+      input.rows = 2;
+      input.value = this.drafts.get(key) || "";
+      input.addEventListener("input", () => this.drafts.set(key, input.value));
+      const send = button("Send note", "", () => {});
+      send.type = "submit";
+      const skip = button("Send without note", "quiet", () => {
+        this.verdictNotes.delete(m.id);
+        this.drawVerdicts();
+        this.onChange();
+      });
+      form.append(input, send, skip);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!input.value.trim()) { skip.click(); return; }
+        const pins = this.imagePins(m.id), pin = pins.find((p) => p.id === change?.pin_id) || pins.findLast((p) => !p.resolved);
+        const body = change?.token && change.pin_id
+          ? {action:"verdict_note", mockup_id:m.id, token:change.token, text:input.value.trim()}
+          : pin ? {action:"reply", pin_id:pin.id, text:input.value.trim()}
+          : {action:"pin", mockup_id:m.id, x:.5, y:.5, text:input.value.trim()};
+        await this.save(body, m.id, key);
+        this.drawVerdicts();
+      });
+      form.querySelectorAll("button,textarea").forEach((b) => b.disabled = this.busy.has(m.id));
+      box.append(form);
+    }
+    return box;
+  }
+  async saveVerdict(m, value, token = null) {
+    if (!this.verdictsEnabled || this.busy.has(m.id)) return;
+    if (!token && this.verdict(m) === value) {
+      if (value === "needs_work") this.verdictNotes.add(m.id);
+      this.drawVerdicts(); this.onChange(); return;
+    }
+    this.busy.add(m.id);
+    const owner = this.getKey();
+    this.drawVerdicts(); this.onChange();
+    try {
+      const data = await this.api("POST", token
+        ? {action:"undo_verdict", mockup_id:m.id, token}
+        : {action:"verdict", mockup_id:m.id, verdict:value, text:""});
+      if (!data.ok || !data.mockup) throw Error("Verdict was not confirmed. Refresh to check it.");
+      if (owner !== this.getKey()) return;
+      this.revision++;
+      const i = this.mockups.findIndex((row) => row.id === m.id);
+      const updated = {...this.mockups[i], ...data.mockup};
+      if (i >= 0) this.mockups[i] = updated;
+      if (data.pin) {
+        const pinIndex = this.pins.findIndex((p) => p.id === data.pin.id);
+        if (pinIndex < 0) this.pins.push(data.pin); else this.pins[pinIndex] = data.pin;
+      }
+      if (data.removed_pin_id) this.pins = this.pins.filter((p) => p.id !== data.removed_pin_id);
+      if (value === "needs_work") this.verdictNotes.add(m.id); else this.verdictNotes.delete(m.id);
+      if (this.active?.id === m.id) {
+        this.active = updated;
+        if (this.selected === data.removed_pin_id) this.selected = null;
+        this.drawPins(); this.drawPanel();
+      }
+      this.scheduleVerdict(updated);
+      this.notify(token ? "Verdict undone." : "Verdict saved. Undo is available for 5 seconds.");
+    } catch (e) {
+      if (owner === this.getKey()) this.notify(e.message, true);
+    } finally {
+      this.busy.delete(m.id);
+      this.drawVerdicts();
+      if (this.active) this.updateNavigation();
+      this.onChange();
+    }
   }
   imageURL(raw) {
     try {
@@ -361,7 +497,9 @@ class MockupsView {
       a.id.localeCompare(b.id);
   }
   groupImages(m) {
+    if (!m) return [];
     return this.mockups.filter((image) => image.status !== "archived" &&
+      (this.verdict(image) === "scrapped") === (this.verdict(m) === "scrapped") &&
       image.project === m.project && image.batch === m.batch)
       .sort((a, b) => this.imageOrder(a, b));
   }
@@ -415,6 +553,9 @@ class MockupsView {
     head.append(title, button("Close", "", () => this.close()));
     head.lastChild.setAttribute("aria-label", "Close mockup");
     this.dialog.append(head);
+    this.verdictBar = el("div", "mockup-dialog-verdicts");
+    this.dialog.append(this.verdictBar);
+    this.drawVerdicts();
     const tools = el("div", "mockup-tools");
     tools.append(
       button("−", "", () => this.setZoom(this.zoom / 1.5)),
@@ -639,7 +780,7 @@ class MockupsView {
     this.newPin(Math.max(0,Math.min(1,(v.left+v.width/2-c.left)/c.width)),Math.max(0,Math.min(1,(v.top+v.height/2-c.top)/c.height)));
   }
   newPin(x, y) {
-    if (this.busy.has(this.active.id) || this.active.status === "archived") {
+    if (this.busy.has(this.active.id) || this.active.status === "archived" || this.verdict(this.active) === "scrapped") {
       return;
     }
     this.pending = {
@@ -813,7 +954,7 @@ class MockupsView {
       this.revision++;
       if (data.mockup) {
         const i = this.mockups.findIndex((m) => m.id === data.mockup.id);
-        if (i >= 0) this.mockups[i] = data.mockup;
+        if (i >= 0) this.mockups[i] = {...this.mockups[i], ...data.mockup};
       }
       if (data.pin) {
         const i = this.pins.findIndex((p) => p.id === data.pin.id);
@@ -826,6 +967,7 @@ class MockupsView {
         }
       }
       if (draftKey) this.drafts.delete(draftKey);
+      if (draftKey === id + ":verdict") this.verdictNotes.delete(id);
       if (this.active?.id === id) {
         this.drawPins();
         this.drawPanel();
