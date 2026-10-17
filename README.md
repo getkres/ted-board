@@ -19,7 +19,7 @@ The pinned **talk to Ted** button opens the current Ted chat in a new tab. It fa
 
 ## Mockups
 
-The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x, numbered feedback pins, threaded replies, unread dots, and image selections. Open a mockup, use the wheel, pinch, or zoom buttons, and drag to pan. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads after 1.5x when available; older images still open with their preview. Pins stay the same size as you zoom. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
+The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x actual image scale, numbered feedback pins, threaded replies, unread dots, and image selections. Images open at Fit. Use the wheel, pinch, or zoom buttons to zoom out below Fit or in to 10x, and drag to pan. The percentage shows actual image scale, and tapping it or **Fit** resets the view. Use the edge arrows, Left/Right keys, or phone swipes at Fit to step through the batch without wrapping. Choose **Add pin** to leave feedback. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads above 1.5 times Fit when the preview needs more pixels; older images still open with their preview. Pins stay the same size as you zoom. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
 
 See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
 
