@@ -4,7 +4,7 @@ Shipped October 16, 2026. Open [Ted Board](https://getkres.github.io/ted-board/)
 
 ## Reviewing designs
 
-Batches appear newest first, with a project filter and a swipeable row of large images. Open an image for fullscreen review. Tap a detail to place a numbered pin, type a comment, and choose **Send comment**. Pin positions follow the image as you resize, pan, or zoom. Use pinch gestures or the zoom controls to inspect a detail. **Add pin** places a pin in the visible area for keyboard users.
+Batches appear newest first, with a project filter and a swipeable row of large images. Open an image for fullscreen review. Tap a detail to place a numbered pin, type a comment, and choose **Send comment**. Pin positions follow the image as you resize, pan, or zoom. Zoom from fit through 10x with pinch gestures, the mouse wheel, or the visible controls. Double-tap a spot for 2.5x and again to fit. Drag or use two fingers to pan. Full detail loads above 1.5x when available. Focus the viewer and use arrow keys to pan, plus/minus to zoom, or 0 to fit. Pins stay a constant size on screen. **Add pin** places a pin in the visible area for keyboard users.
 
 Tap a numbered dot or a **Pin** button to open its conversation. Ted's replies have the same marigold treatment as card replies. Reply in that thread to keep the conversation together. A reply to a resolved pin reopens it. Green pins are resolved. Unread Ted replies add dots to the image, the pin list, and the Mockups tab; opening a thread marks it read on this device. Refresh fetches new replies.
 
@@ -42,7 +42,7 @@ $PY ~/ted-ops/ted-board/mockup_reply.py <pin_id> 'Updated the spacing. Ready for
 $PY ~/ted-ops/ted-board/mockup_pins.py --open
 ```
 
-Uploads preserve aspect ratio, flatten transparency onto white, remove metadata, convert to JPEG, and resize images taller than 1,600 pixels. A JPEG must be no larger than 4 MB. Each object receives a UUID path. Multiple files use the supplied title as a prefix followed by each filename. `--status picked` can register an already chosen design without a Sebastian receipt. `--sort` controls order within the batch. The uploader prints each confirmed ID; if a later file fails, earlier confirmed uploads remain registered.
+Uploads preserve aspect ratio and save a full WebP at quality 95, retaining transparency and capping the long edge at 8,000px. The grid uses a separate JPEG quality 95 preview, capped at 1,600px on either axis, with transparency flattened onto white. Metadata is removed. Preview files must fit 4 MB, and full files must fit 32 MB. Each image object receives a UUID path. Multiple files use the supplied title as a prefix followed by each filename. `--status picked` can register an already chosen design without a Sebastian receipt. `--sort` controls order within the batch. The uploader prints each confirmed ID; if a later file fails, earlier confirmed uploads remain registered. If full detail fails after preview registration, it prints the existing ID and a recovery command, continues the batch, and returns nonzero. Retry that row with `mockup_upload.py --attach-full MOCKUP_ID /path/to/original.png`; this does not create another row. Original source paths are recorded in a private local upload log.
 
 `mockup_pins.py --open` prints one JSON object per unresolved pin, including its image, project, batch, full thread, and latest Sebastian text. Omit `--open` to include resolved pins.
 
@@ -73,23 +73,26 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 ## Backend and deployment
 
 - Function: `ted-mockups` on Supabase project `wqnrortftkffmbeugjky`, deployed independently of the card function with JWT verification disabled and the existing page and worker secrets.
-- Private source: `~/ted-ops/ted-board/mockups-backend/supabase/functions/ted-mockups/{index,handler,domain}.ts`.
+- Private source: `~/ted-ops/ted-board/mockups-backend/supabase/functions/ted-mockups/{index,handler,domain,detail}.ts`.
 - Migration: `~/ted-ops/ted-board/mockups-backend/supabase/migrations/20261016160000_ted_mockups.sql`, applied and recorded in migration history.
 - Tables: `public.ted_mockups` and `public.ted_mockup_pins`, both with RLS, no policies, and no anonymous or authenticated grants. Only the service role can access them or the feedback RPC.
-- Storage: public `ted-mockups` bucket, UUID JPEG paths, and no public write policy. Image URLs are public to anyone who has them; the gallery, feedback, and keys stay private.
+- Storage: public `ted-mockups` previews and `ted-mockup-detail` full images and per-row metadata, with no public write policy. The private `ted-board-state` bucket holds the current chat URL, served by the authenticated board jobs endpoint. No schema change was needed for zoom or chat. Image URLs are public to anyone who has them; the gallery, feedback, and keys stay private.
 - The function uses a service-role client after validating the page or worker credential. Uploads, registration, Ted replies, and resolving pins require the worker credential.
 
-`GET ?key=...` returns `{mockups,pins}` to the page or worker key. `POST` accepts `text/plain` JSON or JSON with `key` and `action`:
+`GET ?key=...` returns `{mockups,pins}` to the page or worker key. Rows include `preview_url`, `preview_width`, and `preview_height`, plus `full_url`, `full_width`, and `full_height` when detail exists. Pins expose normalized `x` and `y` in 0..1; legacy percentage columns remain available and are translated at the API boundary. `POST` accepts `text/plain` JSON or JSON with `key` and `action`:
 
 | Action | Credential | Fields |
 | --- | --- | --- |
-| `pin` | Page | `mockup_id`, `x_pct`, `y_pct`, `text` |
+| `pin` | Page | `mockup_id`, normalized `x` and `y`, `text`; legacy `x_pct` and `y_pct` remain accepted |
 | `reply` | Page | `pin_id`, `text` |
 | `pick` | Page | `mockup_id` |
 | `ted_reply` | Worker | `pin_id`, `text`, optional `decision_id` for acknowledgment deduplication |
 | `resolve` | Worker | `pin_id`, `resolved` boolean |
-| `upload` | Worker | `project`, `batch`, `title`, `width`, `height`, base64 `jpeg`, optional `sort` and `status` |
+| `upload` | Worker | `project`, `batch`, `title`, `width`, `height`, base64 `jpeg`, optional `sort`, `status`, and base64 WebP `full` with `full_width` and `full_height` |
 | `register` | Worker | Same metadata, plus existing UUID JPEG `storage_path` instead of `jpeg` |
+| `attach_full` | Worker | Existing `mockup_id`, base64 WebP `full`, `full_width`, and `full_height` |
+| `delete_pin` | Worker | `pin_id`; removes the pin and its routing receipts |
+| `detail_setup` | Worker | Configures the detail bucket through the Storage API |
 
 The upload action uploads and registers together, removing the newly uploaded object if registration fails. Direct registration checks that the supplied storage object exists. Feedback writes serialize on the image, preserving concurrent appends. Sebastian actions share a bound of 90 receipts per ten minutes. GET paginates database reads internally rather than silently truncating at the default row limit.
 
