@@ -22,11 +22,11 @@ See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram ca
 
 ## Deploying the static page
 
-This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, this README, `REPLIES.md`, `MOCKUPS.md`, and `FRONTDOOR.md`. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, and `FRONTDOOR.md`. There is no build step. GitHub Pages publishes the root of `main`.
 
 ```sh
 git switch -c update-ted-board
-git add index.html mockups.js mockups.css README.md REPLIES.md MOCKUPS.md
+git add index.html mockups.js mockups.css cave.css README.md REPLIES.md MOCKUPS.md
 git commit -m "Update Ted Board"
 git push -u origin update-ted-board
 gh pr create --base main --fill
