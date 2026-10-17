@@ -17,14 +17,17 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 @media(min-width:700px){.shell{padding:0 36px}.masthead{padding-top:36px;padding-bottom:30px}.board-intro{margin:30px 0 28px}.board.all{grid-template-columns:repeat(2,minmax(0,1fr))}.board.all .section{display:contents}.board.all .section-heading{grid-column:1/-1;margin-bottom:0}.board.all .card{margin:0}.card{padding:22px}.guide-shell{padding:34px 40px}.guide-content{padding-top:50px}}@media(min-width:1100px){.board:not(.all){grid-template-columns:repeat(4,minmax(0,1fr));align-items:start;gap:18px}.board.all{grid-template-columns:repeat(3,minmax(0,1fr))}.board>.killed{grid-column:1/-1}.board>.killed[open]{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.board>.killed summary{grid-column:1/-1}.card{padding:18px}}@media(prefers-reduced-motion:no-preference){button,a{transition:background-color .12s ease}dialog[open]{animation:enter .16s ease-out}@keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}}
 .reply-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:middle;margin-left:6px;flex-shrink:0}.card-unread{margin:0 auto 0 0}.thread{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.thread-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:.72rem}.thread-head button,.thread-toggle{font-size:.72rem;padding:8px 4px}.messages{display:flex;flex-direction:column;gap:10px;list-style:none;padding:0;margin:8px 0 0}.message{font-size:.8rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}.message-ted{border-left:2px solid var(--accent);padding:3px 0 3px 11px}.message-label{display:block;color:var(--accent);font-size:.65rem;letter-spacing:.04em;margin-bottom:3px}.message-seb{align-self:flex-end;text-align:right;color:var(--muted);padding:3px 0 3px 20px}.thread-toggle{margin-top:4px}
 .job-list{display:grid;gap:14px;max-width:850px}.job-meta{display:flex;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:.8rem;margin-top:12px}.job-actions{display:flex;gap:10px;margin-top:14px}.approval{margin-top:16px;padding:14px;border:1px solid #805b30;border-radius:10px}.approval p{font-size:.85rem;line-height:1.5}.approval details{margin-top:10px}.approval summary{cursor:pointer;display:flex;align-items:center;font-size:.8rem;color:var(--accent)}.approval pre{max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.75rem;line-height:1.5}.job-warning{color:var(--red);font-size:.8rem;margin:12px 0}
+.masthead{padding-right:80px}.tab-wrap{padding-right:84px}.fresh-ted{position:fixed;top:max(18px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));z-index:15;width:68px;height:68px;min-width:68px;border-radius:50%;padding:8px;border:2px solid #b44b48;background:#681f20;color:#fff2e9;box-shadow:inset 0 2px 3px #ffffff18,0 3px 0 #381314;font-size:.78rem;font-weight:650;line-height:1.2}.fresh-ted:hover:not(:disabled){background:#8b292b}.fresh-ted.due{background:#c72d36;border-color:#ff9d94;box-shadow:0 0 0 5px #e5464826,0 0 24px #f0444873;animation:fresh-pulse 1.8s ease-in-out infinite}.fresh-ted:disabled{cursor:wait;opacity:.8}.fresh-status{font-size:.8rem;line-height:1.5;color:var(--muted);margin:12px 0}.fresh-status:empty{display:none}.tab-icon{width:18px;height:18px;vertical-align:-3px;margin-right:6px}@keyframes fresh-pulse{50%{box-shadow:0 0 0 9px #e5464810,0 0 34px #f04448a0}}@media(prefers-reduced-motion:reduce){.fresh-ted.due{animation:none;background:#d9343e;box-shadow:0 0 0 5px #e5464826,0 0 24px #f0444873}}
 </style>
 <link rel="stylesheet" href="mockups.css">
 </head>
 <body>
+<button id="fresh-ted" class="fresh-ted" aria-label="fresh ted" aria-describedby="fresh-status" disabled>fresh<br>ted</button>
 <div class="shell">
 <header class="masthead"><div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><h1>Ted Board</h1><p>tap it, i'll handle the rest.</p></div></div><button class="icon-button" id="refresh" aria-label="Refresh" title="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg></button></header>
 <nav class="tab-wrap" aria-label="Projects"><div class="tabs" role="tablist" aria-label="Projects" id="tabs"></div></nav>
 <div id="notice" class="status" role="status" aria-live="polite"></div>
+<p id="fresh-status" class="fresh-status" role="status" aria-live="polite"></p>
 <main id="main" role="tabpanel" tabindex="-1"><p class="loading">Opening your board…</p></main>
 <footer><span><span class="footer-mark" aria-hidden="true">●</span> you pick, i do the rest.</span><button id="change-key" class="quiet access-button">Access</button></footer>
 </div>
@@ -41,8 +44,24 @@ const state={cards:[],jobs:[],approvals:[],jobsLoaded:false,jobsLoading:false,pr
 const memory=new Map();let storageUnavailable=false;
 const storage={get(k){try{return localStorage.getItem(k)??memory.get(k)??null}catch{storageUnavailable=true;return memory.get(k)??null}},set(k,v){memory.set(k,v);try{localStorage.setItem(k,v);return true}catch{storageUnavailable=true;return false}},remove(k){memory.delete(k);try{localStorage.removeItem(k)}catch{storageUnavailable=true}}};
 let key=storage.get('ted-board-key')||'';
-const fragmentKey=new URLSearchParams(location.hash.slice(1)).get('k');
-if(fragmentKey){key=fragmentKey;if(storage.set('ted-board-key',key))history.replaceState(null,'',location.pathname+location.search)}
+const fragment=new URLSearchParams(location.hash.slice(1));
+const fragmentKey=fragment.get('k');
+if(fragmentKey){key=fragmentKey;storage.set('ted-board-key',key)}
+function deepTab(value){return ['All','Mockups','Jobs',...PROJECTS,...state.cards.map(c=>c.project)].find(p=>p.toLowerCase()===String(value||'').toLowerCase())||'All'}
+state.project=deepTab(fragment.get('tab'));
+function saveTab(){const params=new URLSearchParams();if(key)params.set('k',key);params.set('tab',state.project);history.replaceState(null,'',location.pathname+location.search+'#'+params.toString())}
+let freshState=null,freshSending=false;
+function renderFresh(){
+ const b=$('fresh-ted');const pending=freshSending||['pending','running'].includes(freshState?.status);b.disabled=!key||!freshState||pending;b.classList.toggle('due',freshState?.due===true);b.setAttribute('aria-busy',String(pending));
+ $('fresh-status').textContent=freshState?.status==='failed'?(freshState.error||'Fresh Ted could not start. Tap the red button to retry.'):pending?(freshState?.stage||'Requesting fresh Ted…'):freshState?.status==='done'?'Fresh Ted is up. Open the new Ted chat.':'';
+}
+$('fresh-ted').addEventListener('click',async()=>{
+ if(freshSending||['pending','running'].includes(freshState?.status))return;
+ if(!confirm('start a fresh ted?'))return;
+ freshSending=true;renderFresh();
+ try{freshState=await api('POST',{action:'fresh_request'});announce('Fresh Ted requested. I’ll handle the handoff.')}catch(e){announce(e.message,true)}finally{freshSending=false;renderFresh()}
+});
+window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs()});
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.type='button';b.addEventListener('click',fn);return b}
 function safeURL(raw){try{const u=new URL(raw);return ['https:','http:'].includes(u.protocol)?u.href:null}catch{return null}}
@@ -72,10 +91,10 @@ function renderTabs(){
  const tabs=$('tabs');tabs.replaceChildren();
  const projects=['All','Mockups',...PROJECTS,...new Set(state.cards.map(c=>c.project).filter(p=>p&&!PROJECTS.includes(p)&&!['Jobs','Mockups'].includes(p))),'Jobs'];
  projects.forEach((p,i)=>{
-  const b=button(p,'tab',()=>selectProject(p));b.setAttribute('role','tab');b.id='project-'+i;b.setAttribute('aria-controls','main');b.setAttribute('aria-selected',String(p===state.project));b.tabIndex=p===state.project?0:-1;
-  const n=p==='Mockups'?0:state.cards.filter(c=>c.section==='needs_you'&&(p==='All'||p===c.project)).length;
+  const b=button(p,'tab',()=>selectProject(p));if(p==='Mockups'){const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');icon.classList.add('tab-icon');const shape=document.createElementNS('http://www.w3.org/2000/svg','path');shape.setAttribute('d','M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M8 7h.01');icon.append(shape);b.prepend(icon)}b.setAttribute('role','tab');b.id='project-'+i;b.setAttribute('aria-controls','main');b.setAttribute('aria-selected',String(p===state.project));b.tabIndex=p===state.project?0:-1;
+  const n=p==='Mockups'?mockups.unreadCount():state.cards.filter(c=>c.section==='needs_you'&&(p==='All'||p===c.project)).length;
   const hasUnread=p==='Mockups'?mockups.hasUnread():state.cards.some(c=>(p==='All'||p===c.project)&&unread(c));
-  if(n||hasUnread){const count=el('span','tab-count',p==='Mockups'?'':n);if(hasUnread)count.append(replyDot());b.append(count)}
+  if(n||hasUnread){const count=el('span','tab-count',n||'');if(hasUnread)count.append(replyDot());b.append(count)}
   if(hasUnread)b.setAttribute('aria-description','Unread replies from Ted');
   b.setAttribute('aria-label',p);
   b.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const next=e.key==='Home'?0:e.key==='End'?projects.length-1:(i+(e.key==='ArrowRight'?1:-1)+projects.length)%projects.length;selectProject(projects[next]);$('tabs').children[next].focus()});
@@ -83,7 +102,7 @@ function renderTabs(){
  });
  $('main').setAttribute('aria-labelledby','project-'+projects.indexOf(state.project));
 }
-function selectProject(p){state.project=p;render();if(p==='Jobs')loadJobs();if(p==='Mockups'&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
+function selectProject(p){state.project=p;saveTab();render();if(p==='Jobs')loadJobs();if(p==='Mockups'&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
 function answerText(card){
  const a=card.answer;if(!a)return '';
  if(a.action==='stuck'||a.choice==='stuck')return 'Help requested'+(Number.isInteger(a.step_index)?' on step '+(a.step_index+1):'');
@@ -114,7 +133,7 @@ function renderCard(card){
  return article;
 }
 function render(){
- renderTabs();const main=$('main');main.replaceChildren();
+ renderFresh();renderTabs();const main=$('main');main.replaceChildren();
  if(!key){renderAccess();return}
  if(state.project==='Mockups'){mockups.render(main);return}
  if(!state.loaded){main.append(el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return}
@@ -134,7 +153,7 @@ function render(){
 }
 function renderAccess(){
  const main=$('main');main.replaceChildren();const box=el('section','state');box.append(el('h2',null,'Your board, one private link.'),el('p',null,'Open the personal link Ted gave you, or paste it below. Access is remembered on this device.'));
- const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;if(!storage.set('ted-board-key',key))history.replaceState(null,'',location.pathname+location.search+'#k='+encodeURIComponent(key));state.loaded=false;state.cards=[];mockups.reset();mockups.load();load()});box.append(form);main.append(box);
+ const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;storage.set('ted-board-key',key);freshState=null;saveTab();state.loaded=false;state.cards=[];mockups.reset();mockups.load();load()});box.append(form);main.append(box);
 }
 async function api(method,body,resource=''){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
@@ -145,7 +164,7 @@ async function api(method,body,resource=''){
 }
 async function load(){
  if(!key){render();return}if(state.loading)return;state.loading=true;const revision=state.revision;$('refresh').disabled=true;announce('');render();
- try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(revision!==state.revision)return;state.cards=data.cards;state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'')}
+ try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(revision!==state.revision)return;state.cards=data.cards;const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'')}
  catch(e){announce(e.message,true);render()}finally{state.loading=false;$('refresh').disabled=false}
 }
 function setCardBusy(id,busy){if(busy)state.busy.add(id);else state.busy.delete(id);document.querySelectorAll('[data-card-id]').forEach(e=>{if(e.dataset.cardId===id)e.querySelectorAll('button,select,textarea').forEach(c=>c.disabled=busy)})}
@@ -164,7 +183,7 @@ function renderApprovals(card,article){
 }
 async function loadJobs(){
  if(!key||state.jobsLoading)return;state.jobsLoading=true;
- try{const data=await api('GET',undefined,'jobs');state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
+ try{const data=await api('GET',undefined,'jobs');freshState=data.fresh_ted||null;renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('[data-approval-id][open]')].map(e=>e.dataset.approvalId);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
@@ -185,7 +204,7 @@ function renderJobs(main){
  }main.append(list);
 }
 function openJobCard(id){
- const card=state.cards.find(c=>c.id===id);if(!card){announce('Card is no longer available. Refresh the board.',true);return}state.project=card.project;state.readCards.add(id);render();const target=[...document.querySelectorAll('[data-card-id]')].find(e=>e.dataset.cardId===id);if(target){const parent=target.closest('details');if(parent)parent.open=true;target.scrollIntoView({block:'center',behavior:'smooth'});target.tabIndex=-1;target.focus({preventScroll:true})}
+ const card=state.cards.find(c=>c.id===id);if(!card){announce('Card is no longer available. Refresh the board.',true);return}state.project=card.project;saveTab();state.readCards.add(id);render();const target=[...document.querySelectorAll('[data-card-id]')].find(e=>e.dataset.cardId===id);if(target){const parent=target.closest('details');if(parent)parent.open=true;target.scrollIntoView({block:'center',behavior:'smooth'});target.tabIndex=-1;target.focus({preventScroll:true})}
 }
 setInterval(()=>{if(key&&!document.hidden)loadJobs()},10000);
 function progressKey(card){return 'ted-board-steps:'+card.id}
