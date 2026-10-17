@@ -180,7 +180,7 @@ function renderJobs(main){
  if(!state.jobsLoaded)list.append(el('p','status','Loading jobs…'));else if(!active.length)list.append(el('p','status','No active jobs.'));
  for(const j of active){const box=el('article','card');box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',j.engine+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
   const stale=!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000;if(stale)box.append(el('p','job-warning','Mini heartbeat is stale. Controls will wait for it to reconnect.'));
-  const actions=el('div','job-actions');const kill=button('Kill','',()=>control('kill',{job_id:j.id}));kill.disabled=stale;actions.append(kill);
+  const actions=el('div','job-actions');const kill=button('Kill','',()=>control('kill',{job_id:j.id,pid:j.pid??null,identity:j.identity||''}));kill.disabled=stale;actions.append(kill);
   if(j.card_id)actions.append(button('Open','',()=>openJobCard(j.card_id)));box.append(actions);list.append(box)
  }main.append(list);
 }
