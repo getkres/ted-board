@@ -18,9 +18,11 @@ Open the private link supplied by Ted. Its access key arrives in the URL fragmen
 
 The **Mockups** tab has swipeable design batches, fullscreen zoom, numbered feedback pins, threaded replies, unread dots, and image selections. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
 
+See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
+
 ## Deploying the static page
 
-This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, this README, `REPLIES.md`, and `MOCKUPS.md`. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, this README, `REPLIES.md`, `MOCKUPS.md`, and `FRONTDOOR.md`. There is no build step. GitHub Pages publishes the root of `main`.
 
 ```sh
 git switch -c update-ted-board
