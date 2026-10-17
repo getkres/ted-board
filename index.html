@@ -264,7 +264,11 @@ async function guideSend(action){
  if(ok&&action==='steps_done'){storage.remove(progressKey(g.card));$('guide').close();state.guide=null;$('main').focus();return}
  if(ok)$('guide-status').textContent='Ted has your note. You can keep going or close this for now.';drawGuide();
 }
-window.addEventListener('scroll',()=>{const nav=document.querySelector('.tab-wrap');nav.classList.toggle('under-controls',nav.getBoundingClientRect().top<=0)},{passive:true});
+function positionTedControls(){const nav=document.querySelector('.tab-wrap');nav.classList.toggle('under-controls',nav.getBoundingClientRect().top<=0)}
+window.addEventListener('scroll',positionTedControls,{passive:true});
+window.addEventListener('pageshow',positionTedControls);
+window.addEventListener('resize',positionTedControls);
+positionTedControls();
 $('refresh').addEventListener('click',()=>state.project==='Mockups'?mockups.load():load());
 $('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading||mockups.busy.size)return;announce('');renderAccess()});
 window.addEventListener('online',()=>{if(key&&!state.busy.size)load()});

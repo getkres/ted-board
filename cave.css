@@ -241,11 +241,11 @@ html.cave{
 @media(prefers-reduced-motion:reduce){.live-strip:before{animation:none}}
 
 /* Pinned contact control beside the Fresh Ted alarm. */
-.cave .talk-ted,.talk-ted{position:fixed;top:max(18px,env(safe-area-inset-top));right:max(94px,calc(env(safe-area-inset-right) + 78px));z-index:15;display:flex;align-items:center;justify-content:center;text-align:center;width:66px;height:68px;border:1px solid #397a96;border-radius:6px;background:#0b2330;color:#a9eaff;text-decoration:none;font-family:var(--hud,inherit);font-size:.78rem;font-weight:650;line-height:1.25;box-shadow:inset 0 1px 0 #8de2ff26,0 0 14px #259dcc1a}
+.cave .talk-ted,.talk-ted{position:fixed;top:max(18px,env(safe-area-inset-top));right:max(102px,calc(env(safe-area-inset-right) + 86px));z-index:15;display:flex;align-items:center;justify-content:center;text-align:center;width:66px;height:68px;border:1px solid #397a96;border-radius:6px;background:#0b2330;color:#a9eaff;text-decoration:none;font-family:var(--hud,inherit);font-size:.78rem;font-weight:650;line-height:1.25;box-shadow:inset 0 1px 0 #8de2ff26,0 0 14px #259dcc1a}
 .cave .talk-ted:hover{background:#12394b}
 .cave .masthead,.masthead{padding-right:160px;flex-wrap:wrap}
 .cave .brand{gap:8px}
 @media(max-width:440px){.cave .brand-mark{display:none}.cave .masthead h1{font-size:1.06rem}.cave .masthead p{font-size:.6rem;max-width:170px}.cave .masthead{gap:10px;padding-top:25px}.cave .masthead #refresh{width:44px;height:44px}}
 /* Reserve space for the fixed controls only when the tab strip reaches them. */
 .cave .tab-wrap,.tab-wrap{padding-right:0}
-.cave .tab-wrap.under-controls,.tab-wrap.under-controls{padding-right:164px}
+.cave .tab-wrap.under-controls,.tab-wrap.under-controls{padding-right:172px}

@@ -357,7 +357,7 @@ class MockupsView {
     this.resizeViewer?.disconnect();
     this.zoom = 1;
     this.panX = 0; this.panY = 0; this.baseWidth = 0; this.baseHeight = 0;
-    this.fullLoading = false; this.fullLoaded = false; this.lastTap = null;
+    this.fullLoading = false; this.fullLoaded = false; this.fullRetryAt = 0; this.lastTap = null;
     this.pointers = new Map();
     this.gesture = null;
     this.dialog.replaceChildren();
@@ -457,24 +457,26 @@ class MockupsView {
     this.zoomLabel.textContent = this.zoom === 1 ? 'Fit' : 'Fit · ' + Math.round(this.zoom * 100) + '%';
     this.viewport.dataset.zoom = this.zoom;
   }
-  setZoom(value, anchor = null) {
+  setZoom(value, anchor = null, panDelta = null) {
     if (!this.active) return;
     const old = this.zoom || 1, next = Math.max(1, Math.min(10, value));
     const x = anchor?.x ?? this.viewport.clientWidth / 2, y = anchor?.y ?? this.viewport.clientHeight / 2;
     this.panX = x - (x - this.panX) * next / old;
     this.panY = y - (y - this.panY) * next / old;
     this.zoom = next;
+    if (panDelta) {this.panX += panDelta.x;this.panY += panDelta.y;}
     if (next === 1) { this.panX = (this.viewport.clientWidth - this.baseWidth) / 2; this.panY = (this.viewport.clientHeight - this.baseHeight) / 2; }
     this.applyTransform();
     if (next > 1.5) this.loadFull();
   }
   loadFull() {
     const m = this.active, canvas = this.canvas, url = this.imageURL(m?.full_url);
-    if (!url || this.fullLoading || this.fullLoaded) return;
+    if (!url || this.fullLoading || this.fullLoaded || Date.now() < this.fullRetryAt) return;
     this.fullLoading = true;
     this.dialogStatus.textContent = 'Loading full detail…';
     const image = new Image(); image.referrerPolicy = 'no-referrer';
-    image.onload = () => {
+    image.onload = async () => {
+      try {await image.decode();} catch {}
       if (!this.active || this.canvas !== canvas) return;
       this.fullLoading = false; this.fullLoaded = true;
       this.canvas.querySelector('img').src = url;
@@ -482,7 +484,7 @@ class MockupsView {
     };
     image.onerror = () => {
       if (!this.active || this.canvas !== canvas) return;
-      this.fullLoading = false;
+      this.fullLoading = false; this.fullRetryAt = Date.now() + 1500;
       this.dialogStatus.textContent = 'Full detail could not load. Zoom again to retry.';
     };
     image.src = url;
@@ -494,6 +496,14 @@ class MockupsView {
       const r = v.getBoundingClientRect();
       return {x:(a.x+b.x)/2-r.left,y:(a.y+b.y)/2-r.top,d:Math.hypot(a.x-b.x,a.y-b.y)};
     };
+    v.addEventListener('keydown', e => {
+      if (e.target !== v || e.ctrlKey || e.metaKey || e.altKey) return;
+      const r = {ArrowLeft:[60,0],ArrowRight:[-60,0],ArrowUp:[0,60],ArrowDown:[0,-60]}[e.key];
+      if (r) {e.preventDefault();this.panX += r[0];this.panY += r[1];this.applyTransform();}
+      else if (['+','=','-','0','Home'].includes(e.key)) {
+        e.preventDefault();this.setZoom(['0','Home'].includes(e.key) ? 1 : this.zoom + (e.key === '-' ? -.5 : .5));
+      }
+    });
     v.addEventListener('wheel', e => {
       // Ctrl-wheel is browser page zoom (including trackpad pinch); leave it alone.
       if (e.ctrlKey || e.metaKey) return;
@@ -517,9 +527,8 @@ class MockupsView {
       const g = this.gesture;
       if (this.pointers.size === 2) {
         const now = pair(), old = g.pair;
-        this.setZoom(this.zoom * now.d / Math.max(1,old.d), old);
-        this.panX += now.x-old.x; this.panY += now.y-old.y;
-        this.applyTransform(); g.pair = now; g.moved = true;
+        this.setZoom(this.zoom * now.d / Math.max(1,old.d), old, {x:now.x-old.x,y:now.y-old.y});
+        g.pair = now; g.moved = true;
       } else {
         if (Math.hypot(e.clientX-g.start.x,e.clientY-g.start.y) > 8) g.moved = true;
         if (g.moved || g.multi) {
