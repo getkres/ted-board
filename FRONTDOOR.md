@@ -49,3 +49,15 @@ All source, local job state, operational tests, and credentials remain private o
 - `co.ted.telegram`: existing owner-only bot, with `#CARD_ID` routing.
 
 Use the mini's launchd definitions in `~/Library/LaunchAgents`. Do not install these routines on a MacBook. Logs and source deployment instructions live in the private operational directory. Keys stay in the existing secrets file and never appear in commands, Git, or public documentation.
+
+## Fresh Ted
+
+The round red **fresh ted** button stays at the top-right on every tab. Tap it, then confirm **start a fresh ted?** once. The mini handles the handoff on its next 30-second heartbeat. Progress appears below the tabs. Repeated requests share the same rollover, and failures leave the old chat available.
+
+Ted can set the reminder with `python3 card.py fresh-due on` or `off` on the mini. It also turns on Monday at 06:00 local time, and when the newest front-door transcript exceeds the context estimate. The private constant is 2.4 MB, estimated as 60% of a 4 MB transcript budget. Transcript size includes tool output and JSON overhead, so this is a reminder estimate, not a token meter. The button glows when due, with a solid bright red under reduced motion.
+
+A rollover writes a complete `~/ted-ops/ted-state/HANDOFF-TODAY.md`, including every open card, current work, approvals, and decisions waiting on Sebastian. It asks the old chat to save unsaved context, waits up to 120 seconds, and starts **Ted MM-DD** in the Fictora working directory with Remote Control. The old chat is renamed only after the fresh prompt confirms startup and the new Remote Control bridge is registered. Its conversation is retained. Sebastian receives one Telegram line naming the new chat, and the reminder clears. A failed retry resumes the same request. An uncertain CLI launch requires checking the private log before another launch, so retries cannot silently create extra chats.
+
+`fresh_ted.sh`, its durable state, and `fresh_ted.log` remain private on the mini. The existing jobs heartbeat performs the weekly and context checks, and dispatches the rollover separately so card jobs continue. No additional scheduled service is needed.
+
+**Mockups** is immediately after **All**, with an image icon and a count of unopened images plus unread feedback threads. Opening an image marks it seen on this device. Upload acknowledgments include a **mockups** link. Private deep links accept `#k=YOUR_KEY&tab=mockups`, `tab=jobs`, or a project name, such as `tab=Ted%20ops`. The key stays in the fragment when switching tabs. Do not share these private links.

@@ -4,7 +4,7 @@ A phone-first roadmap for Sebastian and Ted. Choose a project, answer a card, or
 
 **Live page:** https://getkres.github.io/ted-board/
 
-Open the private link supplied by Ted. Its access key arrives in the URL fragment, is saved on your device, and is removed from the address bar. If access is missing or expired, use **Access** to paste the private link again. Do not post that link in issues or commits.
+Open the private link supplied by Ted. Its access key arrives in the URL fragment, is saved on your device, and stays in the fragment for private tab links. If access is missing or expired, use **Access** to paste the private link again. Do not post that link in issues or commits.
 
 ## Using the board
 

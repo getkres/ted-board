@@ -43,8 +43,11 @@ class MockupsView {
     const marker = this.marker(pin);
     return !!marker && this.storage.get("ted-mockup-read:" + pin.id) !== marker;
   }
+  unreadCount() {
+    return this.mockups.filter((m) => m.status !== "archived" && this.storage.get("ted-mockup-seen:" + m.id) !== (m.created_at || m.id)).length + this.pins.filter((p) => this.unread(p)).length;
+  }
   hasUnread() {
-    return this.pins.some((p) => this.unread(p));
+    return this.unreadCount() > 0;
   }
   reset() {
     this.revision++;
@@ -341,6 +344,7 @@ class MockupsView {
     return b;
   }
   open(m, pinId = null) {
+    this.storage.set("ted-mockup-seen:" + m.id, m.created_at || m.id);
     this.active = m;
     this.selected = pinId;
     this.pending = null;
@@ -405,6 +409,7 @@ class MockupsView {
     this.setZoom(1);
     this.drawPins();
     this.drawPanel();
+    this.onChange();
     img.addEventListener("error", () => {
       this.dialogStatus.textContent =
         "Image could not load. Close and refresh to try again.";
