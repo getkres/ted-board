@@ -150,9 +150,9 @@ function renderCard(card){
  return article;
 }
 function render(){
- renderFresh();renderTabs();const main=$('main');main.replaceChildren();
+ const main=$('main'),gallery=mockups.captureView(main);renderFresh();renderTabs();main.replaceChildren();
  if(!key){renderAccess();return}
- if(state.project==='Mockups'){mockups.render(main);return}
+ if(state.project==='Mockups'){mockups.render(main);mockups.restoreView(main,gallery);return}
  if(!state.loaded){main.append(el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return}
  if(state.project==='Jobs'){renderJobs(main);return}
  const cards=projectCards();const n=cards.filter(c=>c.section==='needs_you').length;

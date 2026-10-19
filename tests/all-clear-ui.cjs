@@ -43,7 +43,7 @@ async function scenario(name, mobile, run, setup = {}) {
   page.setDefaultTimeout(8000);
   page.on('pageerror', e => errors.push(e.message));
   const data = fixtures();
-  const state = {enabled: true, fail: false, lose: false, delay: 0, undoDeadline: 30000, ...data, ...setup};
+  const state = {enabled: true, projectEnabled: true, fail: false, lose: false, delay: 0, undoDeadline: 30000, ...data, ...setup};
   if (setup.storageThrows) await page.addInitScript(() => {
     Storage.prototype.getItem = Storage.prototype.setItem = () => { throw Error('test-storage blocked'); };
   });
@@ -57,11 +57,11 @@ async function scenario(name, mobile, run, setup = {}) {
     if (request.method() === 'GET') {
       if (state.failRefresh && posts.length) return route.fulfill({status: 503, json: {error: 'test-refresh unavailable'}});
       if (state.holdRefresh && posts.length) {
-        const snapshot = clone({mockups: state.images, pins: state.pins, verdicts_enabled: true, verdict_batch_enabled: state.enabled});
+        const snapshot = clone({mockups: state.images, pins: state.pins, verdicts_enabled: true, verdict_batch_enabled: state.enabled, verdict_project_enabled: state.projectEnabled});
         await new Promise(resolve => { state.releaseRefresh = () => { state.holdRefresh = false; resolve(); }; state.onRefreshHeld?.(); });
         return route.fulfill({json: snapshot});
       }
-      return route.fulfill({json: {mockups: state.images, pins: state.pins, verdicts_enabled: true, verdict_batch_enabled: state.enabled}});
+      return route.fulfill({json: {mockups: state.images, pins: state.pins, verdicts_enabled: true, verdict_batch_enabled: state.enabled, verdict_project_enabled: state.projectEnabled}});
     }
     const body = request.postDataJSON(); posts.push(body);
     if (state.delay) await new Promise(resolve => setTimeout(resolve, state.delay));
@@ -69,12 +69,14 @@ async function scenario(name, mobile, run, setup = {}) {
     if (body.action === 'verdict_batch') {
       assert.ok(body.ids.length > 0 && body.ids.length <= 200);
       assert.equal(new Set(body.ids).size, body.ids.length);
+      if (body.scope === 'project') assert.equal(Object.hasOwn(body, 'batch'), false, 'Project requests omit batch');
+      else assert.equal(Object.hasOwn(body, 'scope'), false, 'Existing batch requests omit scope');
       let operation = operations.get(body.operation_id);
       if (!operation) {
         const before = [], changed = [], skipped = [], deadline = new Date(Date.now() + state.undoDeadline).toISOString();
         for (const id of body.ids) {
           const m = state.images.find(row => row.id === id);
-          if (!m || m.project !== body.project || m.batch !== body.batch || m.status !== 'open' || m.verdict || state.pins.some(p => p.mockup_id === id && !p.resolved)) { skipped.push({id, reason: 'unresolved_pins'}); continue; }
+          if (!m || m.project !== body.project || (body.scope !== 'project' && m.batch !== body.batch) || m.status !== 'open' || m.verdict || state.pins.some(p => p.mockup_id === id && !p.resolved)) { skipped.push({id, reason: 'unresolved_pins'}); continue; }
           before.push(clone(m));
           Object.assign(m, {status: 'picked', verdict: 'approved', verdict_change: {token: uuid(2001 + changed.length), batch_operation_id: body.operation_id, at: new Date().toISOString(), undo_until: deadline}});
           changed.push(id);
@@ -131,6 +133,84 @@ async function confirmBatch(page, batch) {
   await new Promise(resolve => server.once('listening', resolve));
   browser = await chromium.launch({headless: true});
   for (const mobile of [true, false]) {
+    await scenario('Project All clear confirms every exact-project batch despite Open pins', mobile, async ({page, state, posts, card}) => {
+      assert.equal(await page.getByRole('button', {name: 'Project All clear', exact: true}).count(), 0, 'All projects has no project action');
+      state.images.push(image(12, {batch: 'test-Only judged', verdict: 'needs_work'}), image(13, {batch: 'test-Only archived', status: 'archived'}));
+      state.pins.push(pin(12, 12)); await page.evaluate(() => mockups.load());
+      await page.getByRole('combobox', {name: 'Filter mockups by project'}).selectOption('Bookish');
+      await page.getByRole('button', {name: 'Open pins (7)', exact: true}).click();
+      const opener = page.getByRole('button', {name: 'Project All clear', exact: true}); await opener.focus(); await page.keyboard.press('Enter');
+      const sheet = page.getByRole('dialog', {name: 'All clear?', exact: true}); await sheet.getByText('Mark 3 images good to go?', {exact: true}).waitFor();
+      await sheet.getByText('6 with open pins stay put.', {exact: true}).waitFor();
+      const rows = sheet.getByRole('table', {name: 'Batches in Bookish'}).getByRole('row');
+      assert.deepEqual(await rows.allTextContents(), ['BatchGood to goWith open pins', 'Bookish full app24', 'Cover options11', 'test-Only judged01']);
+      assert.equal(await sheet.getByText('test-Only archived', {exact: true}).count(), 0);
+      assert.equal(await sheet.getByRole('button', {name: 'Cancel', exact: true}).evaluate(e => e === document.activeElement), true);
+      const dir = path.join(__dirname, 'screenshots'); fs.mkdirSync(dir, {recursive: true});
+      await page.screenshot({path: path.join(dir, mobile ? 'project-all-clear-phone.png' : 'project-all-clear-desktop.png')});
+      await page.keyboard.press('Escape'); assert.equal(await opener.evaluate(e => e === document.activeElement), true);
+      await page.screenshot({path: path.join(dir, mobile ? 'project-controls-phone.png' : 'project-controls-desktop.png')});
+      await opener.click();
+      state.images.push(image(14, {batch: 'test-Arrived after confirmation'}));
+      await sheet.getByRole('button', {name: 'Mark 3 good to go', exact: true}).click();
+      const toast = page.locator('.mockup-batch-toast'); await toast.getByRole('button', {name: 'Undo', exact: true}).waitFor();
+      assert.equal(posts.length, 1); assert.equal(posts[0].scope, 'project'); assert.equal(posts[0].project, 'Bookish'); assert.deepEqual(posts[0].ids, [uuid(1), uuid(2), uuid(10)]);
+      assert.equal(Object.hasOwn(posts[0], 'batch'), false); assert.equal(state.images.find(m => m.id === uuid(14)).verdict, null);
+      assert.equal(state.images.find(m => m.id === uuid(9)).verdict, null); assert.equal(state.images.find(m => m.id === uuid(12)).verdict, 'needs_work');
+      assert.equal(await page.getByRole('button', {name: 'Undo', exact: true}).count(), 1);
+      await toast.getByRole('button', {name: 'Undo', exact: true}).click(); await page.waitForFunction(() => !mockups.batchOperation?.busy);
+      assert.equal(posts[1].action, 'undo_verdict_batch'); assert.equal(Object.hasOwn(posts[1], 'scope'), false); assert.equal(Object.hasOwn(posts[1], 'batch'), false);
+      assert.equal(state.images.find(m => m.id === uuid(10)).verdict, null);
+      await toast.getByRole('button', {name: 'Dismiss', exact: true}).click(); assert.equal(await opener.evaluate(e => e === document.activeElement), true);
+    });
+    await scenario('Project capability fails closed independently of batch capability', mobile, async ({page, state, batch}) => {
+      await page.getByRole('combobox', {name: 'Filter mockups by project'}).selectOption('Bookish');
+      const opener = page.getByRole('button', {name: 'Project All clear', exact: true});
+      assert.equal(await opener.isDisabled(), true); assert.equal(await batch('Bookish full app').getByRole('button', {name: 'All clear', exact: true}).isDisabled(), false);
+      state.projectEnabled = undefined; await page.evaluate(() => mockups.load()); assert.equal(await opener.isDisabled(), true);
+      state.projectEnabled = true; state.enabled = false; await page.evaluate(() => mockups.load());
+      assert.equal(await opener.isDisabled(), false); assert.equal(await batch('Bookish full app').getByRole('button', {name: 'All clear', exact: true}).isDisabled(), true);
+      await opener.click(); const sheet = page.getByRole('dialog', {name: 'All clear?', exact: true});
+      await sheet.getByRole('button', {name: 'Mark 3 good to go', exact: true}).click(); await page.locator('.mockup-batch-toast').getByRole('button', {name: 'Undo', exact: true}).waitFor();
+    }, {projectEnabled: false});
+    await scenario('Project lost-response retry reuses one operation and one 30-second Undo', mobile, async ({page, posts}) => {
+      await page.clock.install(); await page.getByRole('combobox', {name: 'Filter mockups by project'}).selectOption('Bookish');
+      await page.getByRole('button', {name: 'Project All clear', exact: true}).click();
+      await page.getByRole('dialog', {name: 'All clear?', exact: true}).getByRole('button', {name: 'Mark 3 good to go', exact: true}).click();
+      const toast = page.locator('.mockup-batch-toast'); await toast.getByRole('button', {name: 'Retry', exact: true}).click(); await toast.getByRole('button', {name: 'Undo', exact: true}).waitFor();
+      assert.deepEqual(posts[1], posts[0]); assert.equal(posts[0].scope, 'project');
+      await page.clock.fastForward(6000); assert.equal(await page.getByRole('button', {name: 'Undo', exact: true}).count(), 1);
+      await toast.getByRole('button', {name: 'Undo', exact: true}).click(); await page.waitForFunction(() => !mockups.batchOperation?.busy);
+      assert.equal(posts[2].operation_id, posts[0].operation_id); assert.equal(posts[2].action, 'undo_verdict_batch');
+    }, {lose: true});
+    await scenario('Project zero and over-limit counts disable submission and exact 200 uses one request', mobile, async ({page, state, posts}) => {
+      state.images = [image(1, {verdict: 'needs_work'})]; state.pins = []; await page.evaluate(() => mockups.load());
+      await page.getByRole('combobox', {name: 'Filter mockups by project'}).selectOption('Bookish');
+      const opener = page.getByRole('button', {name: 'Project All clear', exact: true}); await opener.click();
+      const sheet = page.getByRole('dialog', {name: 'All clear?', exact: true});
+      assert.equal(await sheet.getByRole('button', {name: 'Mark 0 good to go', exact: true}).isDisabled(), true); await sheet.getByRole('button', {name: 'Cancel', exact: true}).click();
+      state.images = Array.from({length: 201}, (_, i) => image(i + 20, {batch: i < 100 ? 'test-First batch' : 'test-Second batch'})); await page.evaluate(() => mockups.load()); await opener.click();
+      assert.equal(await sheet.getByRole('button', {name: 'Mark 201 good to go', exact: true}).isDisabled(), true); await sheet.getByText(/supports up to 200/).waitFor();
+      await sheet.getByRole('button', {name: 'Cancel', exact: true}).click(); assert.equal(posts.length, 0);
+      state.images.pop(); await page.evaluate(() => mockups.load()); await opener.click(); await sheet.getByRole('button', {name: 'Mark 200 good to go', exact: true}).click();
+      await page.locator('.mockup-batch-toast').getByRole('button', {name: 'Undo', exact: true}).waitFor(); assert.equal(posts.length, 1); assert.equal(posts[0].ids.length, 200); assert.equal(posts[0].scope, 'project');
+    });
+    await scenario('Project confirmation fits long batch names and scrolls many batches', mobile, async ({page, state}) => {
+      if (mobile) await page.setViewportSize({width: 320, height: 568});
+      state.images = Array.from({length: 18}, (_, i) => image(i + 20, {batch: 'test-' + i + '-VeryLongBatchName'.repeat(7)})); state.pins = []; await page.evaluate(() => mockups.load());
+      await page.getByRole('combobox', {name: 'Filter mockups by project'}).selectOption('Bookish'); await page.getByRole('button', {name: 'Project All clear', exact: true}).click();
+      const sheet = page.getByRole('dialog', {name: 'All clear?', exact: true}), box = await sheet.boundingBox(), viewport = page.viewportSize();
+      assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height);
+      assert.equal(await sheet.evaluate(e => e.scrollWidth <= e.clientWidth), true, 'Dialog has no horizontal overflow');
+      const details = sheet.getByRole('region', {name: 'Project confirmation details'});
+      assert.equal(await details.evaluate(e => e.scrollHeight > e.clientHeight), true, 'Many batches scroll within the confirmation');
+      await details.focus(); await page.keyboard.press('PageDown'); await page.waitForFunction(() => document.querySelector('.mockup-batch-confirm-copy').scrollTop > 0);
+      await sheet.getByRole('button', {name: 'Mark 18 good to go', exact: true}).focus();
+      assert.equal(await sheet.getByRole('button', {name: 'Mark 18 good to go', exact: true}).isVisible(), true);
+      const actionBox = await sheet.getByRole('button', {name: 'Mark 18 good to go', exact: true}).boundingBox();
+      assert.ok(actionBox.y >= 0 && actionBox.y + actionBox.height <= viewport.height, 'Confirmation actions stay within the viewport');
+      await page.keyboard.press('Escape'); assert.equal(await page.getByRole('button', {name: 'Project All clear', exact: true}).evaluate(e => e === document.activeElement), true);
+    });
     await scenario('Open pins includes hidden groups, respects project, and persists', mobile, async ({page, card}) => {
       await page.getByRole('combobox', {name: 'Filter mockups by project'}).selectOption('Bookish');
       const toggle = page.getByRole('button', {name: 'Open pins (6)', exact: true});
