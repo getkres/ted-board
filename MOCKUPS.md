@@ -12,6 +12,12 @@ Choose **Pick this one** below an image to record a selection. Repeated picks ar
 
 Sebastian comments allow 1,200 characters, leaving room for the full comment, mockup title, project, batch, and coordinates in the existing 2,000-character decision receipt. Ted replies allow 2,000 characters and reject U+2014. Failed saves retain the draft. If a connection times out, refresh before sending again to check whether it arrived. Read markers are local to the browser, and feedback needs an internet connection.
 
+Every gallery card has a **Whole-image comment** box below the image and above its verdict controls. It starts at one line, grows as you type, and accepts up to 1,200 characters. Choose **Send** or press Enter to post, and use Shift+Enter for a newline. Drafts remain separate from optional verdict notes and survive verdict taps, scrolling, and refreshes. A delayed successful send clears only the text it submitted, preserving newer edits.
+
+Sent comments appear in a card thread preview with Ted's replies. They use the existing pin action, thread, receipt, and resolution path, with an explicit whole-image marker and a receipt location of **n/a (whole image)**. They do not place a misleading center dot on the image. An unresolved whole-image comment counts as an open pin for the filter and both All clear scopes. All clear waits while feedback is being sent. Open the thread in the fullscreen viewer to reply. Normal point pins retain their actual coordinates.
+
+Whole-image submission stays disabled until the edge function and unapplied `all-clear-apply.sql` advertise support. The SQL adds the marker idempotently and updates the existing pin RPC without changing its signature. No additional receipt system or edge action is introduced. Individual feedback retains its existing 90-receipt limit per ten minutes.
+
 ## Current designs
 
 The gallery was seeded with 20 real mockups:
@@ -53,7 +59,7 @@ call('archive', project='Fictora', batch='Top bar v2')
 call('archive', ids=['<mockup UUID>'])
 ```
 
-Good to go images move out of the main grid after 24 hours into a collapsed **Done** group at the bottom of the tab. They remain viewable, with their pins and verdict controls, and follow the project filter. Changing the verdict restores them to the appropriate group. The clock starts at `verdict_change.at`, or the actual pick receipt for legacy picked rows. Images registered as already picked, with no receipt, use their upload time. The open tab updates at the next deadline without a scheduled routine. Done grouping does not archive or delete anything.
+Good to go images move out of the main grid after 24 hours into a **Done** group at the bottom of the tab. It starts collapsed and opens when needed to keep the reviewed card in view. They remain viewable, with their pins and verdict controls, and follow the project filter. Changing the verdict restores them to the appropriate group. The clock starts at `verdict_change.at`, or the actual pick receipt for legacy picked rows. Images registered as already picked, with no receipt, use their upload time. The open tab updates at the next deadline without a scheduled routine. Done grouping does not archive or delete anything.
 
 `mockup_pins.py --open` prints one JSON object per unresolved pin, including its image, project, batch, full thread, and latest Sebastian text. Omit `--open` to include resolved pins.
 
@@ -90,7 +96,7 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 - Storage: public `ted-mockups` previews and `ted-mockup-detail` full images and per-row metadata, with no public write policy. The private `ted-board-state` bucket holds the current chat URL, served by the authenticated board jobs endpoint. No schema change was needed for zoom or chat. Image URLs are public to anyone who has them; the gallery, feedback, and keys stay private.
 - The function uses a service-role client after validating the page or worker credential. Uploads, registration, Ted replies, and resolving pins require the worker credential.
 
-`GET ?key=...` returns `{mockups,pins}` to the page or worker key. Rows include `preview_url`, `preview_width`, and `preview_height`, plus `full_url`, `full_width`, and `full_height` when detail exists. Pins expose normalized `x` and `y` in 0..1; legacy percentage columns remain available and are translated at the API boundary. `POST` accepts `text/plain` JSON or JSON with `key` and `action`:
+`GET ?key=...` returns `{mockups,pins}` and capability flags to the page or worker key. `verdict_batch_enabled` enables exact-batch All clear, and `verdict_project_enabled` separately enables project All clear. Rows include `preview_url`, `preview_width`, and `preview_height`, plus `full_url`, `full_width`, and `full_height` when detail exists. Pins expose normalized `x` and `y` in 0..1; legacy percentage columns remain available and are translated at the API boundary. `POST` accepts `text/plain` JSON or JSON with `key` and `action`:
 
 | Action | Credential | Fields |
 | --- | --- | --- |
@@ -100,6 +106,8 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 | `verdict` | Page | `mockup_id`, `verdict` (`approved`, `needs_work`, or `scrapped`), optional `text` |
 | `verdict_note` | Page | `mockup_id`, current `token`, and `text`; coalesces into the verdict during Undo grace |
 | `undo_verdict` | Page | `mockup_id`, `token` from `verdict_change`, within five seconds |
+| `verdict_batch` | Page | `operation_id` UUID, exact `project` and `batch`, and 1 to 200 unique mockup `ids`; project-wide mode uses `scope:"project"`, exact `project`, and `ids`, with `batch` omitted |
+| `undo_verdict_batch` | Page | `operation_id` and the returned batch `token`, within 30 seconds |
 | `ted_reply` | Worker | `pin_id`, `text`, optional `decision_id` for acknowledgment deduplication |
 | `resolve` | Worker | `pin_id`, `resolved` boolean |
 | `upload` | Worker | `project`, `batch`, `title`, `width`, `height`, base64 `jpeg`, optional `sort`, `status`, and base64 WebP `full` with `full_width` and `full_height` |
@@ -109,7 +117,7 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 | `delete_pin` | Worker | `pin_id`; removes the pin and its routing receipts |
 | `detail_setup` | Worker | Configures the detail bucket through the Storage API |
 
-The upload action uploads and registers together, removing the newly uploaded object if registration fails. Direct registration checks that the supplied storage object exists. Feedback writes serialize on the image, preserving concurrent appends. Sebastian actions share a bound of 90 receipts per ten minutes. GET paginates database reads internally rather than silently truncating at the default row limit.
+The upload action uploads and registers together, removing the newly uploaded object if registration fails. Direct registration checks that the supplied storage object exists. Feedback writes serialize on the image, preserving concurrent appends. Individual Sebastian actions retain a bound of 90 receipts per ten minutes. All clear uses the same receipt count and lock, with a batch ceiling of 290 receipts per ten minutes, so one 200-image batch can fit after 90 recent receipts. A batch that would exceed its ceiling fails atomically. Because the count is shared, a large batch can temporarily block individual feedback under its existing 90-receipt ceiling until enough receipts age out or are undone. GET paginates database reads internally rather than silently truncating at the default row limit.
 
 Redeploy only the mockups function:
 
@@ -135,10 +143,22 @@ Each image has **Good to go**, **Needs work**, and **Scrap** controls in the gal
 
 - **Good to go** stores `verdict='approved'`, shows a green **GOOD TO GO** badge, and keeps legacy status `picked`. The owning project or batch worker must treat this as final art to build from. Stop design iteration unless Sebastian changes the verdict.
 - **Needs work** stores `verdict='needs_work'`, shows an amber **NEEDS WORK** badge, and opens an optional “what's off?” note. Existing pins count as feedback. The action creates a whole-image pin thread and matching receipt, even without a note. An optional note updates that thread. During Undo grace, it updates the same verdict receipt and initial message, so it cannot double-route or outlive an undone verdict. Notes sent after grace append a new reply. The existing decisions watcher, now polling every 20 seconds on the Mac mini, acknowledges the feedback in that thread and queues it for the existing `markup-watch` / `figma-fast` consumer. It uses the same delivery path as a new pin. Workers inspect the image, existing pins, and full conversation, then post the outcome or blocker on the original mockup using `mockup_reply.py` with the actual pin ID. The five-second undo delay, 20-second decisions poll, and existing 30-second design poll target pickup within a minute when workers are idle. Busy workers or network delays can delay pickup or the outcome. No new routine was created.
-- **Scrap** stores `verdict='scrapped'`, greys the preview, and moves the image to its batch's collapsed **Scrapped** group. It preserves the image, pins, and history. Workers must not iterate on scrapped art. Choose another verdict to restore it.
+- **Scrap** stores `verdict='scrapped'`, greys the preview, and moves the image to its batch's **Scrapped** group. The group starts collapsed and opens when needed to keep the reviewed card in view. It preserves the image, pins, and history. Workers must not iterate on scrapped art. Choose another verdict to restore it.
 
 Workers must load current rows with the private `mockup_client.call()` before editing and again before uploading. Check `verdict`, with `status='picked'` as the legacy approval fallback. The router and queue dispatcher both recheck the current verdict, and exclude approved, scrapped, archived, removed, undone, or superseded work as appropriate. Pass these rules to every delegated worker, including batch owners. A queued brief does not override a newer verdict. New feedback on approved or scrapped art receives an explanation in its own pin thread, asking Sebastian to choose Needs work before iteration. A mockup fetch failure leaves unrelated card and Figma briefs available for dispatch.
 
 Verdict receipts wait for the five-second undo window before acknowledgment or routing. Undo restores the previous verdict and legacy status only if its token is still current. It removes that verdict's receipt and its untouched generated pin. If someone already added a reply, the pin is retained and resolved. A newer verdict prevents an older undo from overwriting it.
 
 Storage is additive: nullable `ted_mockups.verdict` and `verdict_change` fields, plus the service-role-only `ted_mockup_verdict` RPC. The page uses the existing `ted-mockups` edge function, which already owns mockup writes. GET includes `verdicts_enabled`; controls remain disabled until the RPC capability check succeeds. Ted must apply the private, idempotent `~/ted-ops/ted-board/mockup-zoom/verdicts-apply.sql`. The verdicts worker must not run that SQL. No schema migration is applied during a function deployment.
+
+## All clear and Open pins
+
+Each batch header has **All clear**. Selecting one project also shows **Project All clear** beside the filters, with a confirmation breakdown for every nonarchived batch in that exact project. Both actions use the same approval and Undo operation, and the 200-image bound applies to the total confirmed selection. Its confirmation sheet counts images in that exact project and batch, including images hidden by the Open pins filter. Confirming marks only open images with no verdict and no unresolved pins as **Good to go**. Existing verdicts, legacy picks, archived images, and images with open pins stay as they are. Resolved pins do not block approval. One batch supports up to 200 images. The database rechecks eligibility while holding image locks, so feedback arriving before the save is respected.
+
+One toast offers **Undo** until the server's common 30-second deadline. Each changed image still writes its own standard approved decision receipt, held until that deadline. Undo restores only this operation's approvals and removes only their receipts. Newer verdicts and archives are preserved, and conflicts are reported. Retrying a lost response uses the same operation ID, creates no extra receipts, and does not extend the deadline.
+
+**Open pins**, beside Project, shows only nonarchived images with unresolved pins across all batches in the selected project, including Done and Scrapped images. The filter badge counts unresolved pins, and each card shows its open pin count. The toggle is remembered on this device when browser storage is available.
+
+Batch All clear stays disabled until the edge function and SQL both advertise batch support. Project All clear has a separate capability check, so an older database setup cannot accidentally accept a project-wide request as a batch request. Ted must apply the private, idempotent `~/ted-ops/ted-board/mockup-zoom/all-clear-apply.sql`, then deploy the `ted-mockups` edge function with the command above. The SQL includes a commented rollback block. This feature PR does not deploy either component. The static frontend can be reviewed with fixture data through `tests/all-clear-ui.cjs`; its screenshots contain fixture images only.
+
+Verdict saves, refreshes, and the 24-hour Done regrouping preserve each gallery row's horizontal position and the keyboard control being used. If the reviewed card moves into Done or Scrapped, its destination opens and keeps that card in view. A later focus or scroll choice during a delayed save is respected.

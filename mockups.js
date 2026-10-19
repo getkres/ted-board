@@ -18,13 +18,37 @@ class MockupsView {
     this.loading = false;
     this.revision = 0;
     this.drafts = new Map();
+    this.quickStatus = new Map();
+    this.wholeImageEnabled = false;
     this.busy = new Set();
     this.verdictsEnabled = false;
+    this.batchEnabled = false;
+    this.projectEnabled = false;
+    this.batchOperation = null;
+    this.batchEpoch = 0;
     this.verdictNotes = new Set();
     this.verdictTimers = new Map();
     this.scrappedOpen = new Set();
     this.doneOpen = false;
+    this.galleryRows = new Map();
+    this.galleryFocus = null;
+    this.galleryReview = null;
+    this.galleryFollowCanceled = false;
+    // Browser scroll anchoring also emits scroll events, so cancel only for user gestures.
+    const stopFollowing = () => { this.galleryReview = null; this.galleryFollowCanceled = true; };
+    document.addEventListener("wheel", stopFollowing, {passive: true});
+    document.addEventListener("touchmove", stopFollowing, {passive: true});
+    document.addEventListener("pointerdown", stopFollowing, {passive: true});
+    document.addEventListener("focusin", e => {
+      if (e.target.closest(".mockup-card")) this.galleryFollowCanceled = false;
+      else stopFollowing();
+    });
+    document.addEventListener("keydown", e => {
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", "Tab"].includes(e.key)) stopFollowing();
+    });
     this.filter = "All projects";
+    this.openPins = false;
+    try { this.openPins = storage.get("ted-mockup-open-pins") === "true"; } catch {}
     this.error = "";
     this.owner = "";
     this.dialog = el("dialog", "mockup-dialog");
@@ -49,6 +73,16 @@ class MockupsView {
       this.active = null;
       document.body.style.overflow = "";
     });
+    this.batchDialog = el("dialog", "mockup-batch-confirm");
+    this.batchDialog.setAttribute("aria-labelledby", "mockup-batch-confirm-title");
+    this.batchDialog.setAttribute("aria-describedby", "mockup-batch-confirm-copy");
+    document.body.append(this.batchDialog);
+    this.batchDialog.addEventListener("close", () => this.focusBatch(this.confirmBatchKey));
+    this.batchToast = el("div", "mockup-batch-toast");
+    this.batchToast.setAttribute("role", "status");
+    this.batchToast.setAttribute("aria-live", "polite");
+    this.batchToast.hidden = true;
+    document.body.append(this.batchToast);
   }
   marker(pin) {
     const ted = pin.thread.filter((m) => m.who === "ted");
@@ -68,6 +102,10 @@ class MockupsView {
   reset() {
     clearTimeout(this.doneTimer);
     this.doneOpen = false;
+    this.galleryRows.clear();
+    this.galleryFocus = null;
+    this.galleryReview = null;
+    this.galleryFollowCanceled = false;
     this.revision++;
     this.mockups = [];
     this.pins = [];
@@ -75,10 +113,21 @@ class MockupsView {
     this.error = "";
     this.owner = this.getKey();
     this.drafts.clear();
+    this.quickStatus.clear();
+    this.wholeImageEnabled = false;
     this.verdictNotes.clear();
     this.verdictTimers.forEach(clearTimeout);
     this.verdictTimers.clear();
     this.verdictsEnabled = false;
+    this.batchEnabled = false;
+    this.projectEnabled = false;
+    this.batchEpoch++;
+    this.batchOperation = null;
+    clearTimeout(this.batchTimer);
+    this.batchToast.hidden = true;
+    this.batchToast.replaceChildren();
+    this.batchDialog.close();
+    this.busy.clear();
     this.close();
   }
   async api(method, body) {
@@ -133,7 +182,7 @@ class MockupsView {
     this.loading = true;
     this.error = "";
     const rev = this.revision, key = this.getKey();
-    this.onChange();
+    this.redraw();
     try {
       const data = await this.api("GET");
       if (!Array.isArray(data.mockups) || !Array.isArray(data.pins)) {
@@ -142,6 +191,9 @@ class MockupsView {
       if (rev !== this.revision || key !== this.getKey()) return;
       this.mockups = data.mockups;
       this.verdictsEnabled = data.verdicts_enabled === true;
+      this.batchEnabled = data.verdict_batch_enabled === true;
+      this.projectEnabled = data.verdict_project_enabled === true;
+      this.wholeImageEnabled = data.whole_image_comments_enabled === true;
       this.mockups.forEach((m) => this.scheduleVerdict(m));
       this.pins = data.pins.map((p) => ({
         ...p,
@@ -168,13 +220,109 @@ class MockupsView {
       if (this.isSelected()) this.notify(e.message, true);
     } finally {
       this.loading = false;
-      this.onChange();
+      this.redraw();
+      if (this.refreshAfterLoad) {
+        this.refreshAfterLoad = false;
+        this.load();
+      }
     }
   }
   imagePins(id) {
     return this.pins.filter((p) => p.mockup_id === id).sort((a, b) =>
       a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)
     );
+  }
+  openPinCount(id) {
+    return this.pins.filter(p => p.mockup_id === id && !p.resolved).length;
+  }
+  projectImages() {
+    return this.mockups.filter(m => m.status !== "archived" &&
+      (this.filter === "All projects" || m.project === this.filter));
+  }
+  redraw() {
+    this.onChange();
+  }
+  reviewCard(source) {
+    const card = source?.closest(".mockup-card") || [...document.querySelectorAll(".mockup-card")].find(card => card.dataset.mockupId === source?.dataset.galleryMockup);
+    if (!card) return;
+    this.galleryFollowCanceled = false;
+    const row = card.closest(".mockup-row"), cardRect = card.getBoundingClientRect(), rect = cardRect.width ? cardRect : source.getBoundingClientRect();
+    this.galleryReview = {card: card.dataset.mockupId, row: row.dataset.galleryRow,
+      left: rect.left, top: rect.top, rowLeft: row.scrollLeft};
+  }
+  captureView(root) {
+    if (!root.querySelector(".mockup-intro")) return null;
+    root.querySelectorAll("details[data-gallery-group]").forEach(group => {
+      const key = group.dataset.galleryGroup;
+      if (key === "done") this.doneOpen = group.open;
+      else if (group.open) this.scrappedOpen.add(key);
+      else this.scrappedOpen.delete(key);
+    });
+    root.querySelectorAll(".mockup-row").forEach(row => {
+      if (!row.clientWidth) return;
+      const left = row.getBoundingClientRect().left,
+        cards = [...row.children].map(card => ({id: card.dataset.mockupId, offset: card.getBoundingClientRect().left - left})),
+        first = cards.findIndex(card => card.offset + row.children[0].getBoundingClientRect().width > 0);
+      this.galleryRows.set(row.dataset.galleryRow, {
+        left: row.scrollLeft, anchors: [...cards.slice(Math.max(0, first)), ...cards.slice(0, Math.max(0, first)).reverse()],
+      });
+    });
+    const active = document.activeElement;
+    if (root.contains(active) && active.dataset.galleryFocus) {
+      const card = active.closest(".mockup-card") || [...root.querySelectorAll(".mockup-card")].find(card => card.dataset.mockupId === active.dataset.galleryMockup),
+        cardRect = card?.getBoundingClientRect(), rect = cardRect?.width ? cardRect : active.getBoundingClientRect();
+      this.galleryFocus = {key: active.dataset.galleryFocus, card: card?.dataset.mockupId,
+        row: card?.closest(".mockup-row")?.dataset.galleryRow, left: rect?.left, top: rect?.top,
+        start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection};
+    } else if (active !== document.body) this.galleryFocus = null;
+    // Body focus can be the temporary result of replacing a disabled save control.
+    let review = this.galleryReview;
+    if (review) {
+      const card = [...root.querySelectorAll(".mockup-card")].find(card => card.dataset.mockupId === review.card), row = card?.closest(".mockup-row");
+      if (!card || Math.abs(row.scrollLeft - review.rowLeft) > 2 ||
+          (active !== document.body && active.closest(".mockup-card") !== card && active.dataset.galleryMockup !== review.card)) review = this.galleryReview = null;
+    }
+    const card = [...root.querySelectorAll(".mockup-card")].find(card => card.dataset.mockupId === this.galleryFocus?.card), rect = card?.getBoundingClientRect();
+    if (!review && !this.galleryFollowCanceled && rect?.width && rect.bottom > 0 && rect.top < innerHeight) review = this.galleryFocus;
+    return {rows: this.galleryRows, focus: this.galleryFocus, review, x: scrollX, y: scrollY};
+  }
+  restoreView(root, view) {
+    if (!view) return;
+    const focusedCard = [...root.querySelectorAll(".mockup-card")].find(card => card.dataset.mockupId === view.focus?.card),
+      reviewedCard = [...root.querySelectorAll(".mockup-card")].find(card => card.dataset.mockupId === view.review?.card),
+      moved = reviewedCard && reviewedCard.closest(".mockup-row")?.dataset.galleryRow !== view.review.row;
+    if (moved) {
+      const group = reviewedCard.closest("details");
+      if (group) {
+        group.open = true;
+        if (group.dataset.galleryGroup === "done") this.doneOpen = true;
+        else this.scrappedOpen.add(group.dataset.galleryGroup);
+      }
+    }
+    root.querySelectorAll(".mockup-row").forEach(row => {
+      const saved = view.rows.get(row.dataset.galleryRow);
+      if (!saved || !row.clientWidth) return;
+      const anchor = saved.anchors.find(anchor => [...row.children].some(card => card.dataset.mockupId === anchor.id)),
+        card = anchor && [...row.children].find(card => card.dataset.mockupId === anchor.id);
+      row.scrollLeft = card ? row.scrollLeft + card.getBoundingClientRect().left - row.getBoundingClientRect().left - anchor.offset : saved.left;
+    });
+    if (moved) {
+      const row = reviewedCard.closest(".mockup-row");
+      row.scrollLeft += reviewedCard.getBoundingClientRect().left - view.review.left;
+    }
+    const target = [...root.querySelectorAll("[data-gallery-focus]")].find(node => node.dataset.galleryFocus === view.focus?.key)
+      || focusedCard?.querySelector(".mockup-verdict-button");
+    if (target && !target.disabled) {
+      target.focus({preventScroll: true});
+      if (typeof view.focus.start === "number" && target.setSelectionRange) target.setSelectionRange(view.focus.start, view.focus.end, view.focus.direction);
+      this.galleryFocus = null;
+    }
+    scrollTo(view.x, view.y);
+    if (moved) scrollBy(0, reviewedCard.getBoundingClientRect().top - view.review.top);
+    if (this.galleryReview && reviewedCard) {
+      const row = reviewedCard.closest(".mockup-row"), rect = reviewedCard.getBoundingClientRect();
+      Object.assign(this.galleryReview, {row: row.dataset.galleryRow, rowLeft: row.scrollLeft, left: rect.left, top: rect.top});
+    }
   }
   dot() {
     const dot = this.el("span", "reply-dot");
@@ -212,6 +360,7 @@ class MockupsView {
     const filter = el("label", "mockup-filter", "Project");
     const select = el("select");
     select.setAttribute("aria-label", "Filter mockups by project");
+    select.dataset.galleryFocus = "project-filter";
     ["All projects", ...new Set(this.mockups.map((m) => m.project))].forEach(
       (p) => {
         const option = el("option", null, p);
@@ -225,7 +374,30 @@ class MockupsView {
       this.onChange();
     });
     filter.append(select);
-    intro.append(filter);
+    const filters = el("div", "mockup-filters"),
+      total = this.projectImages().reduce((n, m) => n + this.openPinCount(m.id), 0),
+      openPins = button("", "mockup-open-pins", () => {
+        this.openPins = !this.openPins;
+        try { this.storage.set("ted-mockup-open-pins", String(this.openPins)); } catch {}
+        this.onChange();
+        document.querySelector(".mockup-open-pins")?.focus({preventScroll: true});
+      });
+    openPins.setAttribute("aria-label", "Open pins (" + total + ")");
+    openPins.dataset.galleryFocus = "open-pins";
+    openPins.setAttribute("aria-pressed", String(this.openPins));
+    openPins.append(el("span", null, "Open pins"), el("span", "mockup-open-pins-count", String(total)));
+    filters.append(filter, openPins);
+    if (this.filter !== "All projects") {
+      const projectClear = button("Project All clear", "mockup-project-all-clear", () => this.confirmAllClear(this.filter));
+      projectClear.dataset.batchKey = JSON.stringify([this.filter, null]);
+      projectClear.dataset.galleryFocus = "project-clear:" + this.filter;
+      projectClear.setAttribute("aria-haspopup", "dialog");
+      projectClear.disabled = !!this.busy.size || !this.projectEnabled || !!this.batchOperation?.busy || !!this.batchOperation?.failed;
+      filters.append(projectClear);
+    }
+    intro.append(filters);
+    if (!this.batchEnabled) intro.append(el("p", "mockup-status", "All clear will be ready after Ted applies the batch setup."));
+    if (this.filter !== "All projects" && !this.projectEnabled) intro.append(el("p", "mockup-status", "Project All clear will be ready after Ted applies the project setup."));
     clearTimeout(this.doneTimer);
     const now = Date.now(), day = 24 * 60 * 60 * 1000;
     const pending = this.mockups.filter(m => m.status !== "archived" && this.verdict(m) === "approved")
@@ -233,10 +405,7 @@ class MockupsView {
     if (pending.length) this.doneTimer = setTimeout(() => this.onChange(), Math.min(...pending, day) + 50);
     const done = [];
     const batches = new Map();
-    this.mockups.filter((m) =>
-      m.status !== "archived" &&
-      (this.filter === "All projects" || m.project === this.filter)
-    ).forEach((m) => {
+    this.projectImages().filter(m => !this.openPins || this.openPinCount(m.id) > 0).forEach((m) => {
       if (this.isDone(m, now)) { done.push(m); return; }
       const key = JSON.stringify([m.project, m.batch]);
       if (!batches.has(key)) {
@@ -254,8 +423,8 @@ class MockupsView {
     if (!batches.size && !done.length) {
       const empty = el("div", "state");
       empty.append(
-        el("h3", null, "Room for the next idea."),
-        el("p", null, "Ted will add the next batch here."),
+        el("h3", null, this.openPins ? "No open pins here." : "Room for the next idea."),
+        el("p", null, this.openPins ? "Every pin in this project is resolved. Turn off Open pins to see all images." : "Ted will add the next batch here."),
       );
       root.append(empty);
       return;
@@ -274,9 +443,16 @@ class MockupsView {
               (batch.images.length === 1 ? " image" : " images"),
           ),
         );
-        head.append(text);
+        const allClear = button("All clear", "mockup-all-clear", () => this.confirmAllClear(batch.project, batch.title));
+        allClear.dataset.batchKey = JSON.stringify([batch.project, batch.title]);
+        allClear.dataset.galleryFocus = "batch:" + allClear.dataset.batchKey;
+        allClear.disabled = !!this.busy.size || !this.batchEnabled || !!this.batchOperation?.busy || !!this.batchOperation?.failed;
+        allClear.setAttribute("aria-haspopup", "dialog");
+        head.append(text, allClear);
         section.append(head);
         const row = el("div", "mockup-row");
+        row.dataset.galleryRow = JSON.stringify(["normal", batch.project, batch.title]);
+        row.dataset.galleryFocus = "row:" + row.dataset.galleryRow;
         row.setAttribute("aria-label", batch.title + " images");
         row.tabIndex = 0;
         batch.images.sort((a, b) => this.imageOrder(a, b)).filter((m) => this.verdict(m) !== "scrapped").forEach((m) => row.append(this.card(m)));
@@ -286,16 +462,24 @@ class MockupsView {
           const undo = el("div", "mockup-verdicts mockup-scrap-undo");
           undo.dataset.verdictId = m.id;
           undo.setAttribute("role", "status");
-          const restore = button("Undo", "mockup-verdict-undo", () => this.saveVerdict(m, null, m.verdict_change.token));
+          const restore = button("Undo", "mockup-verdict-undo", e => this.saveVerdict(m, null, m.verdict_change.token, e.currentTarget));
+          restore.dataset.galleryFocus = "scrap-undo:" + m.id;
+          restore.dataset.galleryMockup = m.id;
           restore.disabled = this.busy.has(m.id);
           undo.append(el("span", null, m.title + " scrapped."), restore);
           section.append(undo);
         });
         if (scrapped.length) {
           const group = el("details", "mockup-scrapped"), key = JSON.stringify([batch.project, batch.title]);
+          group.dataset.galleryGroup = key;
           group.open = this.scrappedOpen.has(key);
-          group.append(el("summary", null, "Scrapped (" + scrapped.length + ")"));
+          const summary = el("summary", null, "Scrapped (" + scrapped.length + ")");
+          summary.dataset.galleryFocus = "scrapped:" + key;
+          group.append(summary);
           const discarded = el("div", "mockup-row");
+          discarded.dataset.galleryRow = JSON.stringify(["scrapped", batch.project, batch.title]);
+          discarded.dataset.galleryFocus = "row:" + discarded.dataset.galleryRow;
+          discarded.tabIndex = 0;
           scrapped.forEach((m) => discarded.append(this.card(m)));
           group.append(discarded);
           group.addEventListener("toggle", () => {
@@ -310,9 +494,14 @@ class MockupsView {
     );
     if (done.length) {
       const group = el("details", "mockup-scrapped mockup-done");
+      group.dataset.galleryGroup = "done";
       group.open = this.doneOpen;
-      group.append(el("summary", null, "Done (" + done.length + ")"));
+      const summary = el("summary", null, "Done (" + done.length + ")");
+      summary.dataset.galleryFocus = "done";
+      group.append(summary);
       const row = el("div", "mockup-row");
+      row.dataset.galleryRow = JSON.stringify(["done"]);
+      row.dataset.galleryFocus = "row:" + row.dataset.galleryRow;
       row.setAttribute("aria-label", "Done mockups");
       row.tabIndex = 0;
       done.sort((a, b) => b.created_at.localeCompare(a.created_at) || this.imageOrder(a, b))
@@ -320,6 +509,187 @@ class MockupsView {
       group.append(row);
       group.addEventListener("toggle", () => { if (group.isConnected) this.doneOpen = group.open; });
       root.append(group);
+    }
+  }
+  batchSnapshot(project, batch = null) {
+    const images = this.mockups.filter(m => m.project === project && (batch === null || m.batch === batch) && m.status !== "archived");
+    const eligible = images.filter(m => m.status === "open" && !this.verdict(m) && !this.openPinCount(m.id));
+    return {images, eligible, pinned: images.filter(m => this.openPinCount(m.id) > 0).length};
+  }
+  focusBatch(key) {
+    document.querySelectorAll(".mockup-all-clear,.mockup-project-all-clear").forEach(b => {
+      if (b.dataset.batchKey === key) b.focus({preventScroll: true});
+    });
+  }
+  allClearEnabled(scope) {
+    return !this.busy.size && (scope === "project" ? this.projectEnabled : this.batchEnabled);
+  }
+  confirmAllClear(project, batch = null) {
+    const scope = batch === null ? "project" : undefined;
+    if (!this.allClearEnabled(scope) || this.batchOperation?.busy || this.batchOperation?.failed) return;
+    const {el, button} = this, snapshot = this.batchSnapshot(project, batch), n = snapshot.eligible.length;
+    this.confirmBatchKey = JSON.stringify([project, batch]);
+    this.batchDialog.replaceChildren();
+    this.batchDialog.classList.toggle("is-project", scope === "project");
+    const title = el("h2", null, "All clear?");
+    title.id = "mockup-batch-confirm-title";
+    const copy = el("div", "mockup-batch-confirm-copy");
+    copy.id = "mockup-batch-confirm-copy";
+    copy.append(el("p", "mockup-batch-context", scope ? project + " · All batches" : project + " · " + batch),
+      el("p", "mockup-batch-question", "Mark " + n + (n === 1 ? " image" : " images") + " good to go?"),
+      el("p", null, snapshot.pinned + " with open pins stay put."),
+      el("p", null, "Already marked and archived images stay as they are. Counts include this whole " + (scope ? "project" : "batch") + ", even with Open pins on."));
+    if (scope) {
+      copy.tabIndex = 0;
+      copy.setAttribute("role", "region");
+      copy.setAttribute("aria-label", "Project confirmation details");
+      const table = el("table", "mockup-project-breakdown"), head = el("thead"), headings = el("tr"), body = el("tbody");
+      table.setAttribute("aria-label", "Batches in " + project);
+      ["Batch", "Good to go", "With open pins"].forEach(label => {
+        const cell = el("th", null, label); cell.scope = "col"; headings.append(cell);
+      });
+      head.append(headings);
+      [...new Set(snapshot.images.map(m => m.batch))].sort((a, b) => a.localeCompare(b)).forEach(batch => {
+        const counts = this.batchSnapshot(project, batch), row = el("tr"), title = el("th", null, batch);
+        title.scope = "row";
+        row.append(title, el("td", null, String(counts.eligible.length)), el("td", null, String(counts.pinned)));
+        body.append(row);
+      });
+      table.append(head, body); copy.append(table);
+    }
+    if (n > 200) copy.append(el("p", "mockup-batch-warning", scope
+      ? "This project has more than 200 eligible images. All clear supports up to 200 in one request. Use All clear on smaller batches, or mark images individually."
+      : "This batch has more than 200 eligible images. All clear supports up to 200 in one request. Mark images individually, or ask Ted to split the batch."));
+    if (!n) copy.append(el("p", null, "There are no unmarked images without open pins in this " + (scope ? "project." : "batch.")));
+    const actions = el("div", "mockup-batch-confirm-actions"),
+      cancel = button("Cancel", "", () => this.batchDialog.close()),
+      approve = button("Mark " + n + " good to go", "primary", () => {
+        if (!this.allClearEnabled(scope) || this.batchOperation?.busy || !n || n > 200) return;
+        this.batchDialog.close();
+        this.batchOperation = {
+          operation_id: crypto.randomUUID(), project, batch, scope, ids: snapshot.eligible.map(m => m.id),
+          epoch: this.batchEpoch, owner: this.getKey(), busy: false, failed: false, action: "verdict_batch",
+        };
+        this.sendBatch(this.batchOperation);
+      });
+    approve.disabled = !n || n > 200;
+    actions.append(cancel, approve);
+    this.batchDialog.append(title, copy, actions);
+    this.batchDialog.showModal();
+    cancel.focus();
+  }
+  batchCurrent(op) {
+    return this.batchOperation === op && op.epoch === this.batchEpoch && op.owner === this.getKey();
+  }
+  drawBatchToast() {
+    const op = this.batchOperation, hadFocus = this.batchToast.contains(document.activeElement);
+    this.batchToast.replaceChildren();
+    this.batchToast.hidden = !op;
+    if (!op) return;
+    const {el, button} = this;
+    this.batchToast.classList.toggle("is-error", !!op.failed);
+    this.batchToast.setAttribute("aria-busy", String(op.busy));
+    const remaining = Math.ceil((Date.parse(op.undo_until) - Date.now()) / 1000),
+      available = !op.busy && !op.failed && !op.undone && op.token && remaining > 0;
+    this.batchToast.append(el("p", null, (op.message || "") + (available
+      ? " Undo is available for " + remaining + (remaining === 1 ? " second." : " seconds.") : "")));
+    if (op.failed) {
+      const retry = button("Retry", "", () => this.sendBatch(op));
+      retry.disabled = !this.allClearEnabled(op.scope);
+      this.batchToast.append(retry);
+    } else if (!op.busy && !op.undone && op.token && Date.parse(op.undo_until) > Date.now()) {
+      this.batchToast.append(button("Undo", "", () => {
+        if (Date.parse(op.undo_until) <= Date.now()) { this.drawBatchToast(); return; }
+        op.action = "undo_verdict_batch";
+        this.sendBatch(op);
+      }));
+    }
+    if (!op.busy) this.batchToast.append(button("Dismiss", "quiet", () => {
+      this.batchOperation = null;
+      clearTimeout(this.batchTimer);
+      this.drawBatchToast();
+      this.onChange();
+      this.focusBatch(JSON.stringify([op.project, op.batch]));
+    }));
+    if (hadFocus) this.batchToast.querySelector("button")?.focus({preventScroll: true});
+  }
+  mergeBatchRows(rows) {
+    for (const row of rows) {
+      const i = this.mockups.findIndex(m => m.id === row.id);
+      if (i >= 0) {
+        this.mockups[i] = {...this.mockups[i], ...row};
+        this.scheduleVerdict(this.mockups[i]);
+        if (this.active?.id === row.id) this.active = this.mockups[i];
+      }
+    }
+    this.drawVerdicts();
+    if (this.active) { this.updateNavigation(); this.drawPins(); this.drawPanel(); }
+  }
+  async sendBatch(op) {
+    if (!this.batchCurrent(op) || op.busy || !this.allClearEnabled(op.scope)) return;
+    if (!op.ids.length || op.ids.length > 200) return;
+    const undo = op.action === "undo_verdict_batch";
+    if (undo && !op.undoAttempted && Date.parse(op.undo_until) <= Date.now()) {
+      op.failed = false;
+      op.message = "The Undo window has ended. Refresh to check the current verdicts.";
+      this.drawBatchToast();
+      return;
+    }
+    op.busy = true;
+    op.failed = false;
+    if (undo) op.undoAttempted = true;
+    op.message = undo ? "Undoing this " + (op.scope === "project" ? "project…" : "batch…") : "Saving " + op.ids.length + (op.ids.length === 1 ? " image…" : " images…");
+    this.revision++;
+    op.ids.forEach(id => this.busy.add(id));
+    this.drawBatchToast(); this.drawVerdicts(); this.redraw();
+    let refresh = false;
+    try {
+      const data = await this.api("POST", undo
+        ? {action: "undo_verdict_batch", operation_id: op.operation_id, token: op.token}
+        : {action: "verdict_batch", operation_id: op.operation_id, project: op.project, ids: op.ids,
+          ...(op.scope === "project" ? {scope: "project"} : {batch: op.batch})});
+      if (!this.batchCurrent(op)) return;
+      if (!data.ok || data.operation_id !== op.operation_id || !Array.isArray(data.mockups) ||
+          !Array.isArray(data.skipped) || !data.token || !Number.isFinite(Date.parse(data.undo_until))) {
+        throw Error("All clear was not confirmed. Retry to check the same operation safely.");
+      }
+      this.revision++;
+      this.mergeBatchRows(data.mockups);
+      op.token = data.token;
+      op.undo_until = data.undo_until;
+      op.undone = data.undone === true;
+      const changed = data.mockups.length, skipped = data.skipped.length, conflicts = (data.conflicts || []).length;
+      op.message = data.duplicate
+        ? "This " + (op.scope === "project" ? "project" : "batch") + (op.undone ? " was already undone." : " was already saved.")
+        : op.undone
+          ? changed + (changed === 1 ? " image restored." : " images restored.")
+          : changed + (changed === 1 ? " image marked good to go." : " images marked good to go.");
+      if (skipped) op.message += " " + skipped + (skipped === 1 ? " image skipped after checking its current state." : " images skipped after checking their current state.");
+      if (conflicts) op.message += " " + conflicts + (conflicts === 1 ? " newer change kept." : " newer changes kept.");
+      clearTimeout(this.batchTimer);
+      if (!op.undone) this.batchTimer = setTimeout(() => {
+        if (this.batchCurrent(op)) this.drawBatchToast();
+      }, Math.max(0, Date.parse(op.undo_until) - Date.now()) + 20);
+      refresh = true;
+    } catch (e) {
+      if (!this.batchCurrent(op)) return;
+      op.failed = true;
+      op.message = e.message + " Retry checks the same operation without approving twice.";
+    } finally {
+      if (this.batchCurrent(op)) {
+        const focusToast = document.activeElement === document.body || this.batchToast.contains(document.activeElement);
+        op.busy = false;
+        op.ids.forEach(id => this.busy.delete(id));
+        this.drawBatchToast(); this.drawVerdicts(); this.redraw();
+        if (this.isSelected() && focusToast) {
+          this.batchToast.querySelector("button")?.focus({preventScroll: true});
+        }
+      }
+    }
+    // Expose Undo before refreshing skipped rows, pins, and Storage enrichment.
+    if (refresh && this.batchCurrent(op)) {
+      if (this.loading) this.refreshAfterLoad = true;
+      else this.load();
     }
   }
   doneAt(m) {
@@ -340,6 +710,7 @@ class MockupsView {
     const preview = el("div", "mockup-preview"),
       open = button("", "mockup-open", () => this.open(m));
     open.setAttribute("aria-label", "Open " + m.title);
+    open.dataset.galleryFocus = "card:" + m.id + ":open";
     const img = el("img");
     img.src = this.imageURL(m.preview_url || m.image_url);
     img.alt = m.title;
@@ -368,9 +739,11 @@ class MockupsView {
       );
     });
     pins.forEach((p, i) =>
-      overlay.append(this.pinButton(p, i, () => this.open(m, p.id)))
+      !p.whole_image && overlay.append(this.pinButton(p, i, () => this.open(m, p.id)))
     );
-    card.append(preview);
+    card.append(preview, this.quickComposer(m));
+    const wholePins = pins.filter(p => p.whole_image);
+    if (wholePins.length) card.append(this.quickThreads(m, wholePins));
     const foot = el("div", "mockup-card-foot"),
       n = pins.filter((p) => !p.resolved).length;
     foot.append(
@@ -384,6 +757,76 @@ class MockupsView {
     foot.append(this.verdictControls(m));
     card.append(foot);
     return card;
+  }
+  quickComposer(m) {
+    const {el, button} = this, form = el("form", "mockup-quick-comment"),
+      input = el("textarea"), key = m.id + ":whole", status = el("p", "mockup-quick-status");
+    input.setAttribute("aria-label", "Comment on whole image");
+    input.placeholder = "Comment on this image…";
+    input.dataset.galleryFocus = "card:" + m.id + ":whole-comment";
+    input.rows = 1;
+    input.maxLength = 1200;
+    input.value = this.drafts.get(key) || "";
+    input.disabled = m.status === "archived";
+    const grow = () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(112, Math.max(44, input.scrollHeight)) + "px";
+    };
+    // A fresh element has no layout until the gallery has been restored.
+    requestAnimationFrame(() => { if (input.isConnected) grow(); });
+    input.addEventListener("input", () => {
+      this.drafts.set(key, input.value);
+      grow();
+    });
+    let composing = false;
+    input.addEventListener("compositionstart", () => { composing = true; });
+    input.addEventListener("compositionend", () => { composing = false; });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !composing && e.keyCode !== 229) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    const send = button("Send", "mockup-quick-send", () => {});
+    send.type = "submit";
+    send.dataset.galleryFocus = "card:" + m.id + ":whole-send";
+    send.disabled = !this.wholeImageEnabled || this.busy.has(m.id) || m.status === "archived";
+    status.setAttribute("role", "status");
+    status.textContent = this.busy.has(m.id) && this.quickStatus.get(m.id) === "Sending to Ted…"
+      ? "Sending to Ted…" : this.quickStatus.get(m.id) || (!this.wholeImageEnabled ? "Comments will be ready after Ted applies the setup." : "");
+    form.append(input, send, status);
+    form.addEventListener("submit", async e => {
+      e.preventDefault();
+      if (!this.wholeImageEnabled || this.busy.has(m.id) || m.status === "archived") return;
+      if (!input.value.trim() || input.value.length > 1200) {
+        status.textContent = input.value.length > 1200 ? "Use at most 1,200 characters." : "Write a comment first.";
+        return;
+      }
+      this.quickStatus.set(m.id, "Sending to Ted…");
+      await this.save({action: "pin", mockup_id: m.id, text: input.value.trim(), whole_image: true}, m.id, key);
+    });
+    return form;
+  }
+  quickThreads(m, pins) {
+    const {el, button} = this, box = el("div", "mockup-quick-threads");
+    pins.forEach(pin => {
+      const thread = el("section", "mockup-quick-thread");
+      thread.append(el("p", "mockup-quick-thread-label", "Whole image" + (pin.resolved ? " · Resolved" : "")));
+      // Preserve Ted's latest answer even after Sebastian follows up.
+      const preview = new Set([pin.thread[0], pin.thread.findLast(message => message.who === "ted"), pin.thread.at(-1)]);
+      const messages = pin.thread.filter(message => preview.has(message));
+      messages.forEach(message => {
+        const line = el("div", "mockup-quick-message" + (message.who === "ted" ? " is-ted" : ""));
+        line.append(el("span", "mockup-quick-author", message.who === "ted" ? "Ted" : "Sebastian"), el("p", null, message.text));
+        thread.append(line);
+      });
+      const open = button("Open thread", "quiet", () => this.open(m, pin.id));
+      open.setAttribute("aria-label", "Open whole-image thread");
+      open.dataset.galleryFocus = "card:" + m.id + ":whole-thread:" + pin.id;
+      thread.append(open);
+      box.append(thread);
+    });
+    return box;
   }
   verdict(m) {
     return m.verdict || (m.status === "picked" ? "approved" : null);
@@ -410,21 +853,24 @@ class MockupsView {
     if (labels[value]) box.append(el("span", "mockup-verdict-badge verdict-" + value, labels[value]));
     const actions = el("div", "mockup-verdict-actions");
     [["approved", "Good to go"], ["needs_work", "Needs work"], ["scrapped", "Scrap"]].forEach(([verdict, label]) => {
-      const b = button(label, "mockup-verdict-button verdict-" + verdict, () => this.saveVerdict(m, verdict));
+      const b = button(label, "mockup-verdict-button verdict-" + verdict, e => this.saveVerdict(m, verdict, null, e.currentTarget));
       b.setAttribute("aria-pressed", String(value === verdict));
+      b.dataset.galleryFocus = "card:" + m.id + ":verdict:" + verdict;
       b.disabled = !this.verdictsEnabled || this.busy.has(m.id) || m.status === "archived";
       actions.append(b);
     });
     box.append(actions);
     const change = m.verdict_change;
-    if (change?.token && Date.parse(change.undo_until) > Date.now()) {
-      const undo = button("Undo", "quiet mockup-verdict-undo", () => this.saveVerdict(m, null, change.token));
+    if (change?.token && !change.batch_operation_id && Date.parse(change.undo_until) > Date.now()) {
+      const undo = button("Undo", "quiet mockup-verdict-undo", e => this.saveVerdict(m, null, change.token, e.currentTarget));
+      undo.dataset.galleryFocus = "card:" + m.id + ":undo";
       undo.disabled = this.busy.has(m.id);
       box.append(undo);
     }
     if (value === "needs_work" && this.verdictNotes.has(m.id)) {
       const form = el("form", "mockup-verdict-note"), input = el("textarea"), key = m.id + ":verdict";
       input.setAttribute("aria-label", "What's off? (optional)");
+      input.dataset.galleryFocus = "card:" + m.id + ":note";
       input.placeholder = "What's off? Pins also count.";
       input.maxLength = 1200;
       input.rows = 2;
@@ -432,11 +878,13 @@ class MockupsView {
       input.addEventListener("input", () => this.drafts.set(key, input.value));
       const send = button("Send note", "", () => {});
       send.type = "submit";
+      send.dataset.galleryFocus = "card:" + m.id + ":send-note";
       const skip = button("Send without note", "quiet", () => {
         this.verdictNotes.delete(m.id);
         this.drawVerdicts();
         this.onChange();
       });
+      skip.dataset.galleryFocus = "card:" + m.id + ":skip-note";
       form.append(input, send, skip);
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -454,8 +902,9 @@ class MockupsView {
     }
     return box;
   }
-  async saveVerdict(m, value, token = null) {
+  async saveVerdict(m, value, token = null, source = null) {
     if (!this.verdictsEnabled || this.busy.has(m.id)) return;
+    this.reviewCard(source);
     if (!token && this.verdict(m) === value) {
       if (value === "needs_work") this.verdictNotes.add(m.id);
       this.drawVerdicts(); this.onChange(); return;
@@ -518,6 +967,7 @@ class MockupsView {
       "Pin " + (index + 1) + (pin.resolved ? ", resolved" : ""),
     );
     b.setAttribute("aria-pressed", String(this.selected === pin.id));
+    b.dataset.galleryFocus = "card:" + pin.mockup_id + ":pin:" + pin.id;
     b.append(this.el("span", null, index + 1));
     return b;
   }
@@ -835,9 +1285,9 @@ class MockupsView {
         this.drawPins();
         this.drawPanel();
       };
-      this.canvas.append(this.pinButton(p, i, select));
+      if (!p.whole_image) this.canvas.append(this.pinButton(p, i, select));
       const b = this.button(
-        "Pin " + (i + 1) + (p.resolved ? " ✓" : ""),
+        (p.whole_image ? "Whole image " : "Pin ") + (i + 1) + (p.resolved ? " ✓" : ""),
         "",
         select,
       );
@@ -872,7 +1322,7 @@ class MockupsView {
         "h3",
         null,
         pin
-          ? "Pin " + (all.indexOf(pin) + 1) +
+          ? (pin.whole_image ? "Whole image " : "Pin ") + (all.indexOf(pin) + 1) +
             (pin.resolved ? " · Resolved" : "")
           : "New pin",
       ),
@@ -967,7 +1417,7 @@ class MockupsView {
   async save(body, id, draftKey = null) {
     if (this.busy.has(id)) return;
     this.busy.add(id);
-    const owner = this.getKey();
+    const owner = this.getKey(), submittedDraft = this.drafts.get(draftKey), quick = draftKey === id + ":whole";
     if (this.active) {
       this.dialog.querySelectorAll("button,textarea").forEach((e) =>
         e.disabled = true
@@ -996,7 +1446,8 @@ class MockupsView {
           this.pinMode = false;
         }
       }
-      if (draftKey) this.drafts.delete(draftKey);
+      if (draftKey && this.drafts.get(draftKey) === submittedDraft) this.drafts.delete(draftKey);
+      if (quick) this.quickStatus.set(id, "Sent to Ted. Whole-image comment saved.");
       if (draftKey === id + ":verdict") this.verdictNotes.delete(id);
       if (this.active?.id === id) {
         this.drawPins();
@@ -1009,6 +1460,8 @@ class MockupsView {
           : "Sent to Ted.",
       );
     } catch (e) {
+      if (owner !== this.getKey()) return;
+      if (quick) this.quickStatus.set(id, e.message);
       if (this.active?.id === id) {
         const target = this.panel.hidden ? this.dialogStatus : this.panelStatus;
         target.textContent = e.message;
