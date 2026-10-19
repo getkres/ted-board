@@ -19,13 +19,13 @@ The pinned **talk to Ted** button opens the current Ted chat in a new tab. It fa
 
 ## Mockups
 
-The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x actual image scale, numbered feedback pins, threaded replies, unread dots, and image selections. Images open at Fit. Use the wheel, pinch, or zoom buttons to zoom out below Fit or in to 10x, and drag to pan. The percentage shows actual image scale, and tapping it or **Fit** resets the view. Use the edge arrows, Left/Right keys, or phone swipes at Fit to step through the batch without wrapping. Choose **Add pin** to leave feedback. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads above 1.5 times Fit when the preview needs more pixels; older images still open with their preview. Pins stay the same size as you zoom. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
+The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x actual image scale, numbered feedback pins, threaded replies, unread dots, and image selections. Images open at Fit. Use the wheel, pinch, or zoom buttons to zoom out below Fit or in to 10x, and drag to pan. The percentage shows actual image scale, and tapping it or **Fit** resets the view. Use the edge arrows, Left/Right keys, or phone swipes at Fit to step through the batch without wrapping. Choose **Add pin** to leave feedback. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads above 1.5 times Fit when the preview needs more pixels; older images still open with their preview. Pins stay the same size as you zoom. Use **All clear** in a batch header to approve unmarked images without open pins after confirming the count, with one 30-second Undo. Toggle **Open pins** beside Project to review unresolved feedback across batches. All clear requires Ted to apply the private SQL and deploy the edge function first. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
 
 See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
 
 ## Deploying the static page
 
-This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, and `FRONTDOOR.md`. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, `FRONTDOOR.md`, and fixture UI tests and screenshots under `tests/`. There is no build step. GitHub Pages publishes the root of `main`.
 
 ```sh
 git switch -c update-ted-board
@@ -36,4 +36,16 @@ gh pr create --base main --fill
 gh pr merge --squash
 ```
 
-The backend, card data, worker tools, screenshots, and keyed URL are local operational files. They are not part of this public repository. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
+The backend, card data, worker tools, live screenshots, and keyed URL are local operational files. They are not part of this public repository. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
+
+## Fixture UI tests
+
+The All clear browser suite intercepts backend requests and uses only `test-` fixture feedback. It never writes live decisions. Install Playwright in a separate development environment, then run:
+
+```sh
+node tests/all-clear-ui.cjs
+# If Playwright is installed outside the normal Node resolution path:
+PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/all-clear-ui.cjs
+```
+
+Phone and desktop fixture screenshots are in `tests/screenshots/`. Backend tests and unapplied SQL remain in the private operational checkout.

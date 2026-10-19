@@ -100,6 +100,8 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 | `verdict` | Page | `mockup_id`, `verdict` (`approved`, `needs_work`, or `scrapped`), optional `text` |
 | `verdict_note` | Page | `mockup_id`, current `token`, and `text`; coalesces into the verdict during Undo grace |
 | `undo_verdict` | Page | `mockup_id`, `token` from `verdict_change`, within five seconds |
+| `verdict_batch` | Page | `operation_id` UUID, exact `project` and `batch`, and 1 to 200 unique mockup `ids` |
+| `undo_verdict_batch` | Page | `operation_id` and the returned batch `token`, within 30 seconds |
 | `ted_reply` | Worker | `pin_id`, `text`, optional `decision_id` for acknowledgment deduplication |
 | `resolve` | Worker | `pin_id`, `resolved` boolean |
 | `upload` | Worker | `project`, `batch`, `title`, `width`, `height`, base64 `jpeg`, optional `sort`, `status`, and base64 WebP `full` with `full_width` and `full_height` |
@@ -109,7 +111,7 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 | `delete_pin` | Worker | `pin_id`; removes the pin and its routing receipts |
 | `detail_setup` | Worker | Configures the detail bucket through the Storage API |
 
-The upload action uploads and registers together, removing the newly uploaded object if registration fails. Direct registration checks that the supplied storage object exists. Feedback writes serialize on the image, preserving concurrent appends. Sebastian actions share a bound of 90 receipts per ten minutes. GET paginates database reads internally rather than silently truncating at the default row limit.
+The upload action uploads and registers together, removing the newly uploaded object if registration fails. Direct registration checks that the supplied storage object exists. Feedback writes serialize on the image, preserving concurrent appends. Individual Sebastian actions retain a bound of 90 receipts per ten minutes. All clear uses the same receipt count and lock, with a batch ceiling of 290 receipts per ten minutes, so one 200-image batch can fit after 90 recent receipts. A batch that would exceed its ceiling fails atomically. Because the count is shared, a large batch can temporarily block individual feedback under its existing 90-receipt ceiling until enough receipts age out or are undone. GET paginates database reads internally rather than silently truncating at the default row limit.
 
 Redeploy only the mockups function:
 
@@ -142,3 +144,13 @@ Workers must load current rows with the private `mockup_client.call()` before ed
 Verdict receipts wait for the five-second undo window before acknowledgment or routing. Undo restores the previous verdict and legacy status only if its token is still current. It removes that verdict's receipt and its untouched generated pin. If someone already added a reply, the pin is retained and resolved. A newer verdict prevents an older undo from overwriting it.
 
 Storage is additive: nullable `ted_mockups.verdict` and `verdict_change` fields, plus the service-role-only `ted_mockup_verdict` RPC. The page uses the existing `ted-mockups` edge function, which already owns mockup writes. GET includes `verdicts_enabled`; controls remain disabled until the RPC capability check succeeds. Ted must apply the private, idempotent `~/ted-ops/ted-board/mockup-zoom/verdicts-apply.sql`. The verdicts worker must not run that SQL. No schema migration is applied during a function deployment.
+
+## All clear and Open pins
+
+Each batch header has **All clear**. Its confirmation sheet counts images in that exact project and batch, including images hidden by the Open pins filter. Confirming marks only open images with no verdict and no unresolved pins as **Good to go**. Existing verdicts, legacy picks, archived images, and images with open pins stay as they are. Resolved pins do not block approval. One batch supports up to 200 images. The database rechecks eligibility while holding image locks, so feedback arriving before the save is respected.
+
+One toast offers **Undo** until the server's common 30-second deadline. Each changed image still writes its own standard approved decision receipt, held until that deadline. Undo restores only this operation's approvals and removes only their receipts. Newer verdicts and archives are preserved, and conflicts are reported. Retrying a lost response uses the same operation ID, creates no extra receipts, and does not extend the deadline.
+
+**Open pins**, beside Project, shows only nonarchived images with unresolved pins across all batches in the selected project, including Done and Scrapped images. The filter badge counts unresolved pins, and each card shows its open pin count. The toggle is remembered on this device when browser storage is available.
+
+All clear stays disabled until the edge function and SQL both advertise batch support. Ted must apply the private, idempotent `~/ted-ops/ted-board/mockup-zoom/all-clear-apply.sql`, then deploy the `ted-mockups` edge function with the command above. The SQL includes a commented rollback block. This feature PR does not deploy either component. The static frontend can be reviewed with fixture data through `tests/all-clear-ui.cjs`; its screenshots contain fixture images only.
