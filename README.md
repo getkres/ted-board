@@ -21,6 +21,8 @@ The pinned **talk to Ted** button opens the current Ted chat in a new tab. It fa
 
 The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x actual image scale, numbered feedback pins, threaded replies, unread dots, and image selections. Images open at Fit. Use the wheel, pinch, or zoom buttons to zoom out below Fit or in to 10x, and drag to pan. The percentage shows actual image scale, and tapping it or **Fit** resets the view. Use the edge arrows, Left/Right keys, or phone swipes at Fit to step through the batch without wrapping. Choose **Add pin** to leave feedback. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads above 1.5 times Fit when the preview needs more pixels; older images still open with their preview. Pins stay the same size as you zoom. Use **All clear** in a batch header to approve unmarked images without open pins after confirming the count, with one 30-second Undo. With one project selected, **Project All clear** confirms counts per batch and approves eligible images across that project in one operation. Gallery rows keep their scroll position and keyboard focus while verdicts save, the page refreshes, and images move into Done. Toggle **Open pins** beside Project to review unresolved feedback across batches. All clear requires Ted to apply the private SQL and deploy the edge function first. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
 
+Each gallery card also has a **Whole-image comment** box above its verdict controls. Press Enter or choose **Send** to post, and use Shift+Enter for a newline. Drafts stay with their card through verdicts, scrolling, and refreshes. Sent comments and Ted's replies appear in the card's thread preview. An unresolved whole-image comment counts as an open pin and prevents All clear from approving that image. Comment submission requires Ted's updated private SQL and edge function.
+
 See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
 
 ## Deploying the static page
@@ -45,6 +47,7 @@ The All clear browser suite intercepts backend requests and uses only `test-` fi
 ```sh
 node tests/all-clear-ui.cjs
 node tests/gallery-position-ui.cjs
+node tests/quick-comments-ui.cjs
 # If Playwright is installed outside the normal Node resolution path:
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright node tests/all-clear-ui.cjs
 ```

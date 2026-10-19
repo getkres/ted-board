@@ -146,7 +146,7 @@ async function scenario(name, mobile, run, setup = {}) {
       assert.equal(await card(4).getByRole('button', {name: 'Good to go', exact: true}).evaluate(e => e === document.activeElement), true, 'Standalone Undo has an explicit restored-card focus fallback');
     });
     await scenario('Refresh and direct parent render retain all row positions and note selection', mobile, async ({page, card, positions, samePositions}) => {
-      await card(4).getByRole('button', {name: 'Needs work', exact: true}).click(); const note = card(4).getByRole('textbox'); await note.waitFor();
+      await card(4).getByRole('button', {name: 'Needs work', exact: true}).click(); const note = card(4).getByRole('textbox', {name: "What's off? (optional)", exact: true}); await note.waitFor();
       await note.fill('test-review this spacing'); await note.evaluate(e => { e.focus({preventScroll: true}); e.setSelectionRange(5, 11); });
       const before = await positions(); await page.evaluate(() => mockups.load()); await samePositions(before);
       assert.equal(await note.inputValue(), 'test-review this spacing');

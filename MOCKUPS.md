@@ -12,6 +12,12 @@ Choose **Pick this one** below an image to record a selection. Repeated picks ar
 
 Sebastian comments allow 1,200 characters, leaving room for the full comment, mockup title, project, batch, and coordinates in the existing 2,000-character decision receipt. Ted replies allow 2,000 characters and reject U+2014. Failed saves retain the draft. If a connection times out, refresh before sending again to check whether it arrived. Read markers are local to the browser, and feedback needs an internet connection.
 
+Every gallery card has a **Whole-image comment** box below the image and above its verdict controls. It starts at one line, grows as you type, and accepts up to 1,200 characters. Choose **Send** or press Enter to post, and use Shift+Enter for a newline. Drafts remain separate from optional verdict notes and survive verdict taps, scrolling, and refreshes. A delayed successful send clears only the text it submitted, preserving newer edits.
+
+Sent comments appear in a card thread preview with Ted's replies. They use the existing pin action, thread, receipt, and resolution path, with an explicit whole-image marker and a receipt location of **n/a (whole image)**. They do not place a misleading center dot on the image. An unresolved whole-image comment counts as an open pin for the filter and both All clear scopes. All clear waits while feedback is being sent. Open the thread in the fullscreen viewer to reply. Normal point pins retain their actual coordinates.
+
+Whole-image submission stays disabled until the edge function and unapplied `all-clear-apply.sql` advertise support. The SQL adds the marker idempotently and updates the existing pin RPC without changing its signature. No additional receipt system or edge action is introduced. Individual feedback retains its existing 90-receipt limit per ten minutes.
+
 ## Current designs
 
 The gallery was seeded with 20 real mockups:

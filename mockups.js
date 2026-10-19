@@ -18,6 +18,8 @@ class MockupsView {
     this.loading = false;
     this.revision = 0;
     this.drafts = new Map();
+    this.quickStatus = new Map();
+    this.wholeImageEnabled = false;
     this.busy = new Set();
     this.verdictsEnabled = false;
     this.batchEnabled = false;
@@ -111,6 +113,8 @@ class MockupsView {
     this.error = "";
     this.owner = this.getKey();
     this.drafts.clear();
+    this.quickStatus.clear();
+    this.wholeImageEnabled = false;
     this.verdictNotes.clear();
     this.verdictTimers.forEach(clearTimeout);
     this.verdictTimers.clear();
@@ -189,6 +193,7 @@ class MockupsView {
       this.verdictsEnabled = data.verdicts_enabled === true;
       this.batchEnabled = data.verdict_batch_enabled === true;
       this.projectEnabled = data.verdict_project_enabled === true;
+      this.wholeImageEnabled = data.whole_image_comments_enabled === true;
       this.mockups.forEach((m) => this.scheduleVerdict(m));
       this.pins = data.pins.map((p) => ({
         ...p,
@@ -387,7 +392,7 @@ class MockupsView {
       projectClear.dataset.batchKey = JSON.stringify([this.filter, null]);
       projectClear.dataset.galleryFocus = "project-clear:" + this.filter;
       projectClear.setAttribute("aria-haspopup", "dialog");
-      projectClear.disabled = !this.projectEnabled || !!this.batchOperation?.busy || !!this.batchOperation?.failed;
+      projectClear.disabled = !!this.busy.size || !this.projectEnabled || !!this.batchOperation?.busy || !!this.batchOperation?.failed;
       filters.append(projectClear);
     }
     intro.append(filters);
@@ -441,7 +446,7 @@ class MockupsView {
         const allClear = button("All clear", "mockup-all-clear", () => this.confirmAllClear(batch.project, batch.title));
         allClear.dataset.batchKey = JSON.stringify([batch.project, batch.title]);
         allClear.dataset.galleryFocus = "batch:" + allClear.dataset.batchKey;
-        allClear.disabled = !this.batchEnabled || !!this.batchOperation?.busy || !!this.batchOperation?.failed;
+        allClear.disabled = !!this.busy.size || !this.batchEnabled || !!this.batchOperation?.busy || !!this.batchOperation?.failed;
         allClear.setAttribute("aria-haspopup", "dialog");
         head.append(text, allClear);
         section.append(head);
@@ -517,7 +522,7 @@ class MockupsView {
     });
   }
   allClearEnabled(scope) {
-    return scope === "project" ? this.projectEnabled : this.batchEnabled;
+    return !this.busy.size && (scope === "project" ? this.projectEnabled : this.batchEnabled);
   }
   confirmAllClear(project, batch = null) {
     const scope = batch === null ? "project" : undefined;
@@ -734,9 +739,11 @@ class MockupsView {
       );
     });
     pins.forEach((p, i) =>
-      overlay.append(this.pinButton(p, i, () => this.open(m, p.id)))
+      !p.whole_image && overlay.append(this.pinButton(p, i, () => this.open(m, p.id)))
     );
-    card.append(preview);
+    card.append(preview, this.quickComposer(m));
+    const wholePins = pins.filter(p => p.whole_image);
+    if (wholePins.length) card.append(this.quickThreads(m, wholePins));
     const foot = el("div", "mockup-card-foot"),
       n = pins.filter((p) => !p.resolved).length;
     foot.append(
@@ -750,6 +757,76 @@ class MockupsView {
     foot.append(this.verdictControls(m));
     card.append(foot);
     return card;
+  }
+  quickComposer(m) {
+    const {el, button} = this, form = el("form", "mockup-quick-comment"),
+      input = el("textarea"), key = m.id + ":whole", status = el("p", "mockup-quick-status");
+    input.setAttribute("aria-label", "Comment on whole image");
+    input.placeholder = "Comment on this image…";
+    input.dataset.galleryFocus = "card:" + m.id + ":whole-comment";
+    input.rows = 1;
+    input.maxLength = 1200;
+    input.value = this.drafts.get(key) || "";
+    input.disabled = m.status === "archived";
+    const grow = () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(112, Math.max(44, input.scrollHeight)) + "px";
+    };
+    // A fresh element has no layout until the gallery has been restored.
+    requestAnimationFrame(() => { if (input.isConnected) grow(); });
+    input.addEventListener("input", () => {
+      this.drafts.set(key, input.value);
+      grow();
+    });
+    let composing = false;
+    input.addEventListener("compositionstart", () => { composing = true; });
+    input.addEventListener("compositionend", () => { composing = false; });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !composing && e.keyCode !== 229) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    const send = button("Send", "mockup-quick-send", () => {});
+    send.type = "submit";
+    send.dataset.galleryFocus = "card:" + m.id + ":whole-send";
+    send.disabled = !this.wholeImageEnabled || this.busy.has(m.id) || m.status === "archived";
+    status.setAttribute("role", "status");
+    status.textContent = this.busy.has(m.id) && this.quickStatus.get(m.id) === "Sending to Ted…"
+      ? "Sending to Ted…" : this.quickStatus.get(m.id) || (!this.wholeImageEnabled ? "Comments will be ready after Ted applies the setup." : "");
+    form.append(input, send, status);
+    form.addEventListener("submit", async e => {
+      e.preventDefault();
+      if (!this.wholeImageEnabled || this.busy.has(m.id) || m.status === "archived") return;
+      if (!input.value.trim() || input.value.length > 1200) {
+        status.textContent = input.value.length > 1200 ? "Use at most 1,200 characters." : "Write a comment first.";
+        return;
+      }
+      this.quickStatus.set(m.id, "Sending to Ted…");
+      await this.save({action: "pin", mockup_id: m.id, text: input.value.trim(), whole_image: true}, m.id, key);
+    });
+    return form;
+  }
+  quickThreads(m, pins) {
+    const {el, button} = this, box = el("div", "mockup-quick-threads");
+    pins.forEach(pin => {
+      const thread = el("section", "mockup-quick-thread");
+      thread.append(el("p", "mockup-quick-thread-label", "Whole image" + (pin.resolved ? " · Resolved" : "")));
+      // Preserve Ted's latest answer even after Sebastian follows up.
+      const preview = new Set([pin.thread[0], pin.thread.findLast(message => message.who === "ted"), pin.thread.at(-1)]);
+      const messages = pin.thread.filter(message => preview.has(message));
+      messages.forEach(message => {
+        const line = el("div", "mockup-quick-message" + (message.who === "ted" ? " is-ted" : ""));
+        line.append(el("span", "mockup-quick-author", message.who === "ted" ? "Ted" : "Sebastian"), el("p", null, message.text));
+        thread.append(line);
+      });
+      const open = button("Open thread", "quiet", () => this.open(m, pin.id));
+      open.setAttribute("aria-label", "Open whole-image thread");
+      open.dataset.galleryFocus = "card:" + m.id + ":whole-thread:" + pin.id;
+      thread.append(open);
+      box.append(thread);
+    });
+    return box;
   }
   verdict(m) {
     return m.verdict || (m.status === "picked" ? "approved" : null);
@@ -1208,9 +1285,9 @@ class MockupsView {
         this.drawPins();
         this.drawPanel();
       };
-      this.canvas.append(this.pinButton(p, i, select));
+      if (!p.whole_image) this.canvas.append(this.pinButton(p, i, select));
       const b = this.button(
-        "Pin " + (i + 1) + (p.resolved ? " ✓" : ""),
+        (p.whole_image ? "Whole image " : "Pin ") + (i + 1) + (p.resolved ? " ✓" : ""),
         "",
         select,
       );
@@ -1245,7 +1322,7 @@ class MockupsView {
         "h3",
         null,
         pin
-          ? "Pin " + (all.indexOf(pin) + 1) +
+          ? (pin.whole_image ? "Whole image " : "Pin ") + (all.indexOf(pin) + 1) +
             (pin.resolved ? " · Resolved" : "")
           : "New pin",
       ),
@@ -1340,7 +1417,7 @@ class MockupsView {
   async save(body, id, draftKey = null) {
     if (this.busy.has(id)) return;
     this.busy.add(id);
-    const owner = this.getKey();
+    const owner = this.getKey(), submittedDraft = this.drafts.get(draftKey), quick = draftKey === id + ":whole";
     if (this.active) {
       this.dialog.querySelectorAll("button,textarea").forEach((e) =>
         e.disabled = true
@@ -1369,7 +1446,8 @@ class MockupsView {
           this.pinMode = false;
         }
       }
-      if (draftKey) this.drafts.delete(draftKey);
+      if (draftKey && this.drafts.get(draftKey) === submittedDraft) this.drafts.delete(draftKey);
+      if (quick) this.quickStatus.set(id, "Sent to Ted. Whole-image comment saved.");
       if (draftKey === id + ":verdict") this.verdictNotes.delete(id);
       if (this.active?.id === id) {
         this.drawPins();
@@ -1382,6 +1460,8 @@ class MockupsView {
           : "Sent to Ted.",
       );
     } catch (e) {
+      if (owner !== this.getKey()) return;
+      if (quick) this.quickStatus.set(id, e.message);
       if (this.active?.id === id) {
         const target = this.panel.hidden ? this.dialogStatus : this.panelStatus;
         target.textContent = e.message;
