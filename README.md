@@ -36,3 +36,7 @@ QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
 Additional existing action contracts remain documented in [MOCKUPS.md](MOCKUPS.md), [FRONTDOOR.md](FRONTDOOR.md), [REPLIES.md](REPLIES.md), and [APPLY.md](APPLY.md).
 
 Final verification notes and review resolutions are in [CONTROL-CENTER-V3-QA.md](docs/CONTROL-CENTER-V3-QA.md). The complete local fixture suite is `node qa/run.cjs`.
+
+## Supabase table grants
+
+New public Supabase tables require explicit grants and RLS in their creating migration. Ted Board uses `service_role` only. See [AGENTS.md](AGENTS.md) for the SQL template, the offline check (`python3 scripts/check_data_api_grants.py`), and the local backend boundary, and [the grant audit](docs/data-api-grants-audit.md) for historical coverage.
