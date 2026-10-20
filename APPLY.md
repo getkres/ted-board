@@ -72,3 +72,9 @@ First stop the new pod publisher and pause the affected existing jobs on the min
 Sebastian approved completing the cutover after Ted applied all four migrations on 2026-10-20. Missing Gmail credentials no longer block publication. Timed sends remain disabled by default. The server rejects veto marking and sending before calling database actions, and expiry is a no-op while disabled. The Control tab and pending or cleared veto rows show `sending off: gmail not connected`. Stop remains available to cancel existing proposals.
 
 Gmail setup is separate work. Complete credentials alone cannot enable sending: a later explicit `TED_VETO_SENDS_ENABLED=true` opt-in is also required after the separate review. Do not enable it during this cutover. No database migration is required for this state change. The original bundle remains an audit artifact; the job's refreshed private cutover patch and new sources include this update.
+
+## Approval artifact isolation
+
+The runtime now rejects an unsafe, unreadable, or oversized approval artifact on its own card. It supersedes that card's pending approvals, records one retry note, and lets other cards continue through collection and dispatch. The live-status reaper returns the affected card to Needs you with a reason that bypasses unrelated rule matches. A repaired artifact can enter the normal approval flow on a later scan.
+
+The additional private change is a small patch to `sessions.py` and `board_live.py`, with regression tests for oversized files, symlinks, invalid encoding, unreadable artifacts, approved-artifact rechecks, deduplicated notes, recovery, and the Needs you transition. Apply it as patch hunks after backing up the current files. The earlier reviewed SQL has already been applied by Ted and archived outside active approval scanning. No further migration is required.
