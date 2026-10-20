@@ -1,6 +1,6 @@
 # Apply the integrated Ted Board changes from 2026-10-19
 
-This is the single handoff for `integrate-1019`. It combines the approval and mockup fixes, Control Center, and Pod pulse in that order. Nothing in this worktree has been deployed, applied to a production database, pushed, merged to `main`, or loaded into launchd.
+This is the single handoff for `integrate-1019`. It combines the approval and mockup fixes, Control Center, and Pod pulse in that order. The static PR is a release candidate. No production database change, backend deployment, merge to `main`, or launchd change has been performed. Ted must review and apply the private database handoff before the operational cutover and public merge.
 
 ## Artifacts and verification
 
@@ -9,6 +9,16 @@ This is the single handoff for `integrate-1019`. It combines the approval and mo
 - The bundle contains one `patches/merged-private.patch` for every existing private file changed by the three branches. That patch includes both `sessions.py` and the complete combined `ted-board/handler.ts`. The bundle also contains new source files, four forward SQL files, four rollback SQL files, the read-only `audit/BACKLOG-APPROVED.md`, a mini-only launchd plist, and `MANIFEST.sha256`.
 - The patch was dry-run and replayed against copies of the current operational baseline. Every replayed file matched this integration worktree byte for byte. Recheck it against the target tree before applying it.
 - The 375px screenshots are in `screenshots/integrate-1019/` for Kres + clients, Fictora, Bookish, and Control. They use local fixture content.
+
+## Release verification, 2026-10-20
+
+C1 is present in `39300e5`: Stop remains available after countdown expiry and clearance. C3 returns a stale bundle approval to Needs you, while preserving a newer decision. C4 has explicit transactions, repeatable migration objects, and a tested drop script. C5 removes the unreachable duplicate-revision check, while retaining pending-proposal uniqueness before the card update. C6 resets Control state on a key change and discards responses from the previous key. These fixes were already present in the integration sources and have been verified again.
+
+Fresh isolated runs passed 151 board Python tests, 18 decisions Python tests, and 129 Deno TypeScript tests across the board and mockups backend. The Node approval test and both approval SQL fixture checks also passed. Control passed 18 browser scenarios, pod pulse passed 8 scenario groups, and mockup batches passed desktop and phone checks. The initial broad Deno invocation picked up a Node-only SQL fixture and failed on its Node import; explicit TypeScript selection and a separate Node run passed. The board, Jobs, Fresh Ted, live-status, and current viewer browser checks also passed. A legacy viewer fixture was updated from obsolete click-to-pin and Fit assumptions and then passed on desktop and phone, with no product change.
+
+The private patch was dry-run and replayed against copies of the current operational files. All 16 patched files matched the integration sources, including both worker policy and approval changes in `sessions.py` and all three feature sets in `handler.ts`. Operational files have not been installed while the schema gate is pending. Never install either file wholesale.
+
+The private job handoff contains exact `apply.sql`, `rollback.sql`, `backup.sh`, `checks-before.sql`, and `checks-after.sql`, plus the verified private bundle and fresh test output. The combined forward SQL applies twice in an isolated database while retaining rules. Its rollback runs twice while preserving cards and decision receipts. The backup procedure requires Ted's private database connection and has not been executed. This verifies the scripts against fixtures; Ted must inspect the production preflight results and backup before applying them.
 
 ## Application order on `sebastians-mac-mini`
 
@@ -26,7 +36,7 @@ This is the single handoff for `integrate-1019`. It combines the approval and mo
 
    If the dry run conflicts with intervening edits, stop and review the affected hunks against this worktree. Never copy a whole `handler.ts` or `sessions.py` over the target tree. After a clean dry run, apply the same patch with `patch -p1`. The patch covers the board worker, mockups handler, `ted-board` Edge Function, and decisions watcher together.
 3. Install only the four new source files from the bundle into their matching paths: `ted-board/pod_pulse.py`, `ted-board/veto_worker.py`, `ted-board/supabase/functions/ted-board/control.ts`, and `ted-board/supabase/functions/ted-board/veto-mail.ts`. Remove the obsolete operational `pod_pulse_config.json` after confirming no caller uses it. Keep the existing page key, worker key, credentials, job data, and ledgers.
-4. Apply the four complete forward SQL files to Supabase project `wqnrortftkffmbeugjky` in numeric order. Each file is idempotent and explicitly wrapped in `begin;` and `commit;`. Use the reviewed migration process, record each migration, and confirm each succeeds before moving to the next. The approval transition SQL requires the existing board live status columns. The mockup batch SQL requires the existing `mockup-zoom/verdicts-apply.sql` RPC. The rollback scripts have matching numbers in `rollback/` and are for a separately reviewed backout, after preserving any new data and reconciling any in-flight send.
+4. Ted must review, back up, and apply the four complete forward SQL files to Supabase project `wqnrortftkffmbeugjky` in numeric order. Each file is idempotent and explicitly wrapped in `begin;` and `commit;`. Use the reviewed migration process, record each migration, and confirm each succeeds before moving to the next. The approval transition SQL requires the existing board live status columns. The mockup batch SQL requires the existing `mockup-zoom/verdicts-apply.sql` RPC. The rollback scripts have matching numbers in `rollback/` and are for a separately reviewed backout, after preserving any new data and reconciling any in-flight send.
 
    | Order | Forward SQL | Main effect |
    | --- | --- | --- |
