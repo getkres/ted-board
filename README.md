@@ -13,6 +13,7 @@ Open the private link supplied by Ted. Its access key arrives in the URL fragmen
 - **▶ Steps** opens a full-screen walkthrough. Open links in a new tab, use Back or Done, next, or send a stuck note. Finishing moves the card to Done. Progress is saved on this device, and step changes reset outdated progress.
 - Each card keeps a conversation under its actions. Ted replies have a marigold border; your messages sit on the right. The latest three messages show first. Use **show all** for the full thread, or **Mark replies read** to clear the unread dots on this device. Refresh to fetch new replies.
 - Every card in Ted’s doing shows its current step or blocker, a colored activity dot, and the update age. Running work turns amber after two hours without a changed update. Cards refresh every 20 seconds while the page is visible, preserving your draft and focused controls.
+- The Kres + clients and Fictora project tabs show a Pods strip above their cards. Each pod shows its health, source update age, and current headline. Open a row to see shipped work and current tests. A source older than 26 hours appears red and stale.
 - Use the refresh button for the latest cards. Failed requests show a message and keep the card available to retry. The board needs an internet connection.
 
 The pinned **talk to Ted** button opens the current Ted chat in a new tab. It falls back to Claude Code when the current session is unknown. Fresh Ted updates the link after a successful rollover.
