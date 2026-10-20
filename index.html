@@ -179,10 +179,10 @@ async function api(method,body,resource=''){
  return data;
  }catch(e){if(e.name==='AbortError')throw new Error('The connection timed out. Refresh to check whether your answer arrived.');if(e instanceof TypeError)throw new Error('Could not connect. Check your connection and try again.');throw e}finally{clearTimeout(timeout)}
 }
-async function load(){
- if(!key){render();return}if(state.loading)return;state.loading=true;const revision=state.revision;$('refresh').disabled=true;announce('');render();
+async function load(force=false){
+ if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;const request={};state.loadRequest=request;const revision=state.revision;$('refresh').disabled=true;announce('');render();
  try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(revision!==state.revision)return;state.cards=data.cards;const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'')}
- catch(e){announce(e.message,true);render()}finally{state.loading=false;$('refresh').disabled=false}
+ catch(e){if(revision===state.revision){announce(e.message,true);render()}}finally{if(state.loadRequest===request){state.loading=false;$('refresh').disabled=false}}
 }
 async function pollCards(){
  if(!key||document.hidden||state.loading||state.polling||state.busy.size)return;
@@ -224,7 +224,7 @@ async function loadJobs(){
  }catch(e){if(state.project==='Jobs')announce(e.message,true)}finally{state.jobsLoading=false}
 }
 async function control(action,body){
- try{await api('POST',{action,...body});announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');await loadJobs()}catch(e){announce(e.message,true)}
+ try{await api('POST',{action,...body});announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');if(action==='approval')await load(true);else await loadJobs()}catch(e){announce(e.message,true)}
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);

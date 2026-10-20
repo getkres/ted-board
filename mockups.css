@@ -27,6 +27,16 @@
   font-size: 0.75rem;
   margin-top: 5px;
 }
+.mockup-batch-head { align-items: center; flex-wrap: wrap; }
+.mockup-batch-head > div:first-child { min-width: 0; }
+.mockup-batch-head h2 { overflow-wrap: anywhere; }
+.mockup-batch-approval { display: flex; flex-wrap: wrap; gap: 8px; }
+.mockup-batch-approval button { min-width: 44px; min-height: 44px; }
+.mockup-approve-batch { color: var(--green); border-color: var(--green); }
+@media (max-width: 480px) {
+  .mockup-batch-approval { width: 100%; }
+  .mockup-batch-approval button { flex: 1 1 auto; }
+}
 .mockup-row {
   display: flex;
   gap: 16px;
