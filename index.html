@@ -21,6 +21,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 </style>
 <link rel="stylesheet" href="mockups.css">
 <link rel="stylesheet" href="cave.css">
+<link rel="stylesheet" href="control-center.css">
 </head>
 <body>
 <a id="talk-ted" class="talk-ted" href="https://claude.ai/code" target="_blank" rel="noopener noreferrer" aria-label="talk to Ted">talk to<br>Ted</a>
@@ -36,6 +37,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <dialog id="guide" aria-labelledby="guide-heading"><div class="guide-shell"><div class="guide-header"><span class="guide-project" id="guide-project"></span><button class="icon-button" id="guide-close" aria-label="Close guided mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><h2 class="guide-title" id="guide-heading"></h2><div class="progress-track" id="guide-progress" aria-hidden="true"></div><div class="guide-content"><p class="step-count" id="step-count"></p><p class="step-text" id="step-text" tabindex="-1"></p><div id="guide-link"></div><div class="guide-note"><label for="step-note">stuck? tell me why (optional)</label><textarea id="step-note" maxlength="1900" placeholder="what's in the way?"></textarea></div><p class="status guide-status" id="guide-status" role="status" aria-live="polite"></p></div><div class="guide-actions"><button id="guide-back">Back</button><button class="primary" id="guide-next">Done, next</button></div><button class="quiet stuck" id="guide-stuck">Stuck</button><p class="paused" id="guide-save-status">close anytime, i'll keep your spot.</p></div></dialog>
 <noscript><div class="shell state"><h2>JavaScript is needed</h2><p>Open this link in Safari or Chrome to use your board.</p></div></noscript>
 <script src="mockups.js"></script>
+<script src="control-center.js"></script>
 <script>
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
@@ -49,7 +51,7 @@ let key=storage.get('ted-board-key')||'';
 const fragment=new URLSearchParams(location.hash.slice(1));
 const fragmentKey=fragment.get('k');
 if(fragmentKey){key=fragmentKey;storage.set('ted-board-key',key)}
-function deepTab(value){return ['All','Mockups','Jobs',...PROJECTS,...state.cards.map(c=>c.project)].find(p=>p.toLowerCase()===String(value||'').toLowerCase())||'All'}
+function deepTab(value){return ['All','Mockups','Control','Jobs',...PROJECTS,...state.cards.map(c=>c.project)].find(p=>p.toLowerCase()===String(value||'').toLowerCase())||'All'}
 state.project=deepTab(fragment.get('tab'));
 function saveTab(){const params=new URLSearchParams();if(key)params.set('k',key);params.set('tab',state.project);history.replaceState(null,'',location.pathname+location.search+'#'+params.toString())}
 let freshState=null,freshSending=false;
@@ -68,7 +70,7 @@ $('fresh-ted').addEventListener('click',async()=>{
  freshSending=true;renderFresh();
  try{freshState=await api('POST',{action:'fresh_request'});announce('Fresh Ted requested. I’ll handle the handoff.')}catch(e){announce(e.message,true)}finally{freshSending=false;renderFresh()}
 });
-window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;updateTedChat();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs()});
+window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;updateTedChat();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&state.project==='Control')controlCenter.load()});
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.type='button';b.addEventListener('click',fn);return b}
 function safeURL(raw){try{const u=new URL(raw);return ['https:','http:'].includes(u.protocol)?u.href:null}catch{return null}}
@@ -96,7 +98,7 @@ function renderThread(card){
 const mockups=new MockupsView({el,button,storage,getKey:()=>key,onChange:()=>{if(state.project==='Mockups')render();else renderTabs()},notify:announce,isSelected:()=>state.project==='Mockups'});
 function renderTabs(){
  const tabs=$('tabs');tabs.replaceChildren();
- const projects=['All','Mockups',...PROJECTS,...new Set(state.cards.map(c=>c.project).filter(p=>p&&!PROJECTS.includes(p)&&!['Jobs','Mockups'].includes(p))),'Jobs'];
+ const projects=['All','Mockups','Control',...PROJECTS,...new Set(state.cards.map(c=>c.project).filter(p=>p&&!PROJECTS.includes(p)&&!['Jobs','Mockups','Control'].includes(p))),'Jobs'];
  projects.forEach((p,i)=>{
   const b=button(p,'tab',()=>selectProject(p));if(p==='Mockups'){const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');icon.classList.add('tab-icon');const shape=document.createElementNS('http://www.w3.org/2000/svg','path');shape.setAttribute('d','M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M8 7h.01');icon.append(shape);b.prepend(icon)}b.setAttribute('role','tab');b.id='project-'+i;b.setAttribute('aria-controls','main');b.setAttribute('aria-selected',String(p===state.project));b.tabIndex=p===state.project?0:-1;
   const n=p==='Mockups'?mockups.unreadCount():state.cards.filter(c=>c.section==='needs_you'&&(p==='All'||p===c.project)).length;
@@ -109,7 +111,7 @@ function renderTabs(){
  });
  $('main').setAttribute('aria-labelledby','project-'+projects.indexOf(state.project));
 }
-function selectProject(p){state.project=p;saveTab();render();if(p==='Jobs')loadJobs();if(p==='Mockups'&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
+function selectProject(p){state.project=p;saveTab();render();if(p==='Jobs')loadJobs();if(p==='Control')controlCenter.load();if(p==='Mockups'&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
 function answerText(card){
  const a=card.answer;if(!a)return '';
  if(a.action==='stuck'||a.choice==='stuck')return 'Help requested'+(Number.isInteger(a.step_index)?' on step '+(a.step_index+1):'');
@@ -141,6 +143,7 @@ function renderCard(card){
  const opts=options(card);if(opts.length){const row=el('div','options');opts.forEach(o=>row.append(button(o.label,'option',()=>act(card,'choice',o.value))));article.append(row)}
  const form=el('form','note-form');const text=el('textarea');text.setAttribute('aria-label','Answer for '+card.title);text.placeholder='or just tell me…';text.maxLength=2000;text.rows=1;text.value=state.drafts[card.id]||'';text.addEventListener('input',()=>state.drafts[card.id]=text.value);
  const send=button('Send','',()=>{});send.type='submit';form.append(text,send);form.addEventListener('submit',e=>{e.preventDefault();if(!text.value.trim()){text.focus();announce('Write a note first.',true);return}act(card,'note','',text.value.trim())});article.append(form);
+ if(card.section==='needs_you')article.append(button('Make this a rule','make-rule',()=>controlCenter.openRule(card)));
  const bottom=el('div','card-footer');bottom.append(button('Ted, you do it','quiet delegate',()=>act(card,'ted_do_it')));
  if(steps(card).length){const play=button('▶  Steps','play',()=>openGuide(card));play.setAttribute('aria-label','Play guided steps');bottom.append(play)}article.append(bottom);
  if(card.answer){const answer=el('div','answer');const copy=el('div');copy.append(el('p',null,answerText(card)));if(card.answer.note&&card.answer.choice!=='note'&&card.answer.choice!=='stuck')copy.append(el('p','card-body',card.answer.note));answer.append(copy,el('span','sent','sent ✓'));article.append(answer)}
@@ -155,8 +158,9 @@ function render(){
  if(state.project==='Mockups'){mockups.render(main);return}
  if(!state.loaded){main.append(el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return}
  if(state.project==='Jobs'){renderJobs(main);return}
+ if(state.project==='Control'){controlCenter.render(main);return}
  const cards=projectCards();const n=cards.filter(c=>c.section==='needs_you').length;
- const intro=el('div','board-intro');const introText=el('div');introText.append(el('h2',null,state.project==='All'?'what i need from you':state.project));const sub=el('p',null,state.project==='All'?(n===1?'just one thing.':n?n+' things, quick ones mostly.':'nothing on you right now. go live a little.'):'your calls, what i\'m on, and what\'s next.');sub.style.marginTop='8px';introText.append(sub);intro.append(introText);main.append(intro);
+ const intro=el('div','board-intro');const introText=el('div');introText.append(el('h2',null,state.project==='All'?'what i need from you':state.project));const sub=el('p',null,state.project==='All'?(n===1?'just one thing.':n?n+' things, quick ones mostly.':'nothing on you right now. go live a little.'):'your calls, what i\'m on, and what\'s next.');sub.style.marginTop='8px';introText.append(sub);intro.append(introText);if(n){const controls=el('div','board-control-actions');controls.append(button('Start a sprint','',()=>controlCenter.open('Sprint')),button('Open batches','',()=>controlCenter.open('Batches')));intro.append(controls)}main.append(intro);
  const board=el('div','board'+(state.project==='All'?' all':''));
  if(state.project==='All'&&!cards.length){const clear=el('div','state');clear.append(el('h2',null,'You’re all clear.'),el('p',null,'Ted can keep moving. Open a project to see what’s in progress, or come back when there’s a new decision.'));board.append(clear)}
  (state.project==='All'?[SECTIONS[0]]:SECTIONS).forEach(([id,label])=>{
@@ -264,15 +268,16 @@ async function guideSend(action){
  if(ok&&action==='steps_done'){storage.remove(progressKey(g.card));$('guide').close();state.guide=null;$('main').focus();return}
  if(ok)$('guide-status').textContent='Ted has your note. You can keep going or close this for now.';drawGuide();
 }
+const controlCenter=new ControlCenter({api,getCards:()=>state.cards,answer:act,reloadCards:load,redraw:render,notice:announce,select:()=>{state.project='Control';saveTab();render()}});
 function positionTedControls(){const nav=document.querySelector('.tab-wrap');nav.classList.toggle('under-controls',nav.getBoundingClientRect().top<=0)}
 window.addEventListener('scroll',positionTedControls,{passive:true});
 window.addEventListener('pageshow',positionTedControls);
 window.addEventListener('resize',positionTedControls);
 positionTedControls();
-$('refresh').addEventListener('click',()=>state.project==='Mockups'?mockups.load():load());
+$('refresh').addEventListener('click',()=>{if(state.project==='Mockups')mockups.load();else{load();if(state.project==='Control')controlCenter.load()}});
 $('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading||mockups.busy.size)return;announce('');renderAccess()});
 window.addEventListener('online',()=>{if(key&&!state.busy.size)load()});
-render();if(key){load();mockups.load();}
+render();if(key){load();mockups.load();if(state.project==='Control')controlCenter.load()}
 </script>
 </body>
 </html>
