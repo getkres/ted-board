@@ -27,7 +27,7 @@ See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram ca
 
 The **Control** tab has four ways to clear real cards: **Veto** shows routine drafts with a worker set countdown and a Stop button, **Rules** stores editable decisions for Ted's workers to check before asking again, **Sprint** gives you five minutes with one Needs you card at a time, and **Batches** groups cards with explicit action kinds for one approval per checked group. A Needs you card can also start a rule, and the All view can start a sprint or open batches.
 
-Veto expiry only clears a proposal for Ted's worker. The board does not send a message or spend money. An unclassified card stays out of bundle approval, and a spend card needs a recorded amount. Bundle approval moves the checked cards to Ted for review; an exact email or spend can still need a later approval. Sprint ordering uses card value and effort fields when available, and labels fallback numbers as estimates.
+Veto expiry only clears a proposal for Ted's worker. Stop stays available after expiry and clearance until the server starts the send. The server verifies that every exact To, CC, and BCC address has prior sent mail from `hello@getkres.com`; missing history or Gmail configuration blocks the send. The board does not send a message or spend money. An unclassified card stays out of bundle approval, and a spend card needs a recorded amount. Bundle approval moves the checked cards to Ted for review; an exact email or spend can still need a later approval. Sprint ordering uses card value and effort fields when available, and labels fallback numbers as estimates.
 
 The public page depends on private Edge Function and worker changes. See [APPLY.md](APPLY.md) before publishing this branch.
 

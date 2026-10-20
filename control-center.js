@@ -3,13 +3,17 @@
 
 class ControlCenter {
  constructor({api,getCards,answer,reloadCards,redraw,select,notice}) {
-  this.api=api;this.getCards=getCards;this.answer=answer;this.reloadCards=reloadCards;
+  this.api=async(...args)=>{const generation=this.generation;const result=await api(...args);if(generation!==this.generation)throw new Error('Control request belongs to a previous key');return result};this.getCards=getCards;this.answer=answer;this.reloadCards=reloadCards;
   this.redraw=redraw;this.select=select;this.notice=notice;
+  this.generation=0;this.reset();
+  this.clock=setInterval(()=>this.tick(),1000);
+ }
+ reset(){
+  this.generation++;
   this.view='Veto';this.vetoes=[];this.rules=[];this.loaded=false;this.loading=false;
   this.serverOffset=0;this.fallbackExpiry=new Map();this.busy=false;this.ruleCardId=null;
   this.ruleDraft=null;this.ruleEditDraft=null;this.editingRuleId=null;this.deletingRuleId=null;
   this.batchSelection=new Map();this.sprint={phase:'ready',endsAt:0,startedAt:0,queue:[],cleared:0,skipped:0,pending:false};
-  this.clock=setInterval(()=>this.tick(),1000);
  }
  node(tag,cls,value){const node=document.createElement(tag);if(cls)node.className=cls;if(value!==undefined)node.textContent=String(value);return node}
  button(label,cls,fn){const node=this.node('button',cls,label);node.type='button';node.addEventListener('click',fn);return node}
@@ -22,13 +26,13 @@ class ControlCenter {
   if(!this.fallbackExpiry.has(veto.card_id))this.fallbackExpiry.set(veto.card_id,this.now()+7200000);
   return this.fallbackExpiry.get(veto.card_id)}
  duration(seconds){const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=seconds%60;return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`}
- async load(){if(this.loading)return;this.loading=true;this.redraw();
-  try{const data=await this.api('GET',undefined,'control');
+ async load(){if(this.loading)return;const generation=this.generation;this.loading=true;this.redraw();
+  try{const data=await this.api('GET',undefined,'control');if(generation!==this.generation)return;
    if(!Array.isArray(data.vetoes)||!Array.isArray(data.rules))throw new Error('Control data could not be read. Refresh to try again.');
    this.vetoes=data.vetoes;this.rules=data.rules;this.loaded=true;
    const serverTime=Date.parse(data.server_time);this.serverOffset=Number.isFinite(serverTime)?serverTime-Date.now():0;
    this.redraw();
-  }catch(error){this.notice(error.message,true);this.redraw()}finally{this.loading=false}
+  }catch(error){if(generation===this.generation){this.notice(error.message,true);this.redraw()}}finally{if(generation===this.generation)this.loading=false}
  }
  open(view){this.view=view;this.select();this.load()}
  openRule(card){this.ruleCardId=card.id;this.ruleDraft={answer_action:null,answer_text:'',choice_value:'',sentence:'',scope_project:card.project||'',scope_kind:this.kind(card)||'other',exampleIds:new Set([card.id])};this.open('Rules')}
@@ -63,11 +67,11 @@ class ControlCenter {
    else if(status!=='pending'){clock.textContent=status.replaceAll('_',' ');row.dataset.vetoStatus=status}
    else if(left===0){clock.textContent='time up, waiting for worker clearance';row.dataset.vetoStatus='elapsed'}
    else{clock.textContent=this.duration(left);clock.dateTime=veto.due_at||veto.expires_at||'';row.dataset.vetoStatus='pending'}
-   const stop=this.button('Stop','control-stop',()=>this.stopVeto(veto));stop.disabled=this.busy||status!=='pending'||left===0;
+   const stop=this.button('Stop','control-stop',()=>this.stopVeto(veto));stop.disabled=this.busy||!['pending','elapsed','cleared'].includes(status);
    side.append(clock,stop);row.append(main,side);list.append(row)
   }parent.append(list);
  }
- async stopVeto(veto){if(this.busy||veto.status!=='pending'||this.now()>=this.expiry(veto))return;this.busy=true;this.redraw();
+ async stopVeto(veto){if(this.busy||!['pending','elapsed','cleared'].includes(veto.status))return;this.busy=true;this.redraw();
   try{const data=await this.api('POST',{action:'veto_stop',card_id:veto.card_id,revision:veto.revision});
    if(!data.ok||!data.veto)throw new Error('Stop was not confirmed. Refresh to check this draft.');
    this.vetoes=this.vetoes.map(item=>item.card_id===veto.card_id?data.veto:item);
@@ -81,7 +85,7 @@ class ControlCenter {
   for(const veto of this.vetoes){if(veto.status!=='pending')continue;const row=[...document.querySelectorAll('[data-veto-card-id]')].find(el=>el.dataset.vetoCardId===veto.card_id);if(!row)continue;
    const clock=row.querySelector('[data-veto-clock]');if(!clock)continue;const left=Math.max(0,Math.ceil((this.expiry(veto)-this.now())/1000));
    clock.textContent=left?this.duration(left):'time up, waiting for worker clearance';
-   row.dataset.vetoStatus=left?'pending':'elapsed';if(!left)row.querySelector('.control-stop').disabled=true;
+   row.dataset.vetoStatus=left?'pending':'elapsed';row.querySelector('.control-stop').disabled=this.busy;
   }
  }
  renderRules(parent){

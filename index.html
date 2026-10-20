@@ -70,7 +70,7 @@ $('fresh-ted').addEventListener('click',async()=>{
  freshSending=true;renderFresh();
  try{freshState=await api('POST',{action:'fresh_request'});announce('Fresh Ted requested. I’ll handle the handoff.')}catch(e){announce(e.message,true)}finally{freshSending=false;renderFresh()}
 });
-window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;updateTedChat();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&state.project==='Control')controlCenter.load()});
+window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;updateTedChat();mockups.reset();controlCenter.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&state.project==='Control')controlCenter.load()});
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.type='button';b.addEventListener('click',fn);return b}
 function safeURL(raw){try{const u=new URL(raw);return ['https:','http:'].includes(u.protocol)?u.href:null}catch{return null}}
@@ -194,6 +194,7 @@ async function pollCards(){
  try{
   const data=await api('GET');if(revision!==state.revision||!Array.isArray(data.cards))return;
   state.cards=data.cards;
+  if(state.project==='Control'&&controlCenter.view==='Veto'&&!controlCenter.busy)controlCenter.load();
   const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT','BUTTON'].includes(focused.tagName);
   if(!editing&&!state.guide&&state.project!=='Mockups'&&state.project!=='Jobs'){
    const opened=[...document.querySelectorAll('details[open]')].map(e=>e.dataset.approvalId||e.className);
