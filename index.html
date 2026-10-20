@@ -224,7 +224,7 @@ async function loadJobs(){
  }catch(e){if(state.project==='Jobs')announce(e.message,true)}finally{state.jobsLoading=false}
 }
 async function control(action,body){
- try{await api('POST',{action,...body});announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');await loadJobs()}catch(e){announce(e.message,true)}
+ try{await api('POST',{action,...body});announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');if(action==='approval')await load();else await loadJobs()}catch(e){announce(e.message,true)}
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);
