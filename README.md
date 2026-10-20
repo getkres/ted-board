@@ -23,13 +23,21 @@ The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x ac
 
 See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
 
+## Control center
+
+The **Control** tab has four ways to clear real cards: **Veto** shows routine drafts with a worker set countdown and a Stop button, **Rules** stores editable decisions for Ted's workers to check before asking again, **Sprint** gives you five minutes with one Needs you card at a time, and **Batches** groups cards with explicit action kinds for one approval per checked group. A Needs you card can also start a rule, and the All view can start a sprint or open batches.
+
+Veto expiry only clears a proposal for Ted's worker. Stop stays available after expiry and clearance until the server starts the send. The server verifies that every exact To, CC, and BCC address has prior sent mail from `hello@getkres.com`; missing history or Gmail configuration blocks the send. The board does not send a message or spend money. An unclassified card stays out of bundle approval, and a spend card needs a recorded amount. Bundle approval moves the checked cards to Ted for review; an exact email or spend can still need a later approval. Sprint ordering uses card value and effort fields when available, and labels fallback numbers as estimates.
+
+The public page depends on private Edge Function and worker changes. See [APPLY.md](APPLY.md) before publishing this branch.
+
 ## Deploying the static page
 
-This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, and `FRONTDOOR.md`. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository contains `index.html`, `mockups.js`, `mockups.css`, `control-center.js`, `control-center.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, `FRONTDOOR.md`, and `APPLY.md`. There is no build step. GitHub Pages publishes the root of `main`.
 
 ```sh
 git switch -c update-ted-board
-git add index.html mockups.js mockups.css cave.css README.md REPLIES.md MOCKUPS.md
+git add index.html mockups.js mockups.css control-center.js control-center.css cave.css README.md REPLIES.md MOCKUPS.md APPLY.md
 git commit -m "Update Ted Board"
 git push -u origin update-ted-board
 gh pr create --base main --fill
