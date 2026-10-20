@@ -13,6 +13,7 @@ Open the private link supplied by Ted. Its access key arrives in the URL fragmen
 - **▶ Steps** opens a full-screen walkthrough. Open links in a new tab, use Back or Done, next, or send a stuck note. Finishing moves the card to Done. Progress is saved on this device, and step changes reset outdated progress.
 - Each card keeps a conversation under its actions. Ted replies have a marigold border; your messages sit on the right. The latest three messages show first. Use **show all** for the full thread, or **Mark replies read** to clear the unread dots on this device. Refresh to fetch new replies.
 - Every card in Ted’s doing shows its current step or blocker, a colored activity dot, and the update age. Running work turns amber after two hours without a changed update. Cards refresh every 20 seconds while the page is visible, preserving your draft and focused controls.
+- The Kres + clients, Fictora, and Bookish project tabs show a Pods strip above their cards. Each pod shows its health, source update age, and current headline. Open a row to see shipped work and current tests. A source older than 26 hours appears red and stale.
 - Use the refresh button for the latest cards. Failed requests show a message and keep the card available to retry. The board needs an internet connection.
 
 The pinned **talk to Ted** button opens the current Ted chat in a new tab. It falls back to Claude Code when the current session is unknown. Fresh Ted updates the link after a successful rollover.
@@ -23,13 +24,21 @@ The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x ac
 
 See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
 
+## Control center
+
+The **Control** tab has four ways to clear real cards: **Veto** shows routine drafts with a worker set countdown and a Stop button, **Rules** stores editable decisions for Ted's workers to check before asking again, **Sprint** gives you five minutes with one Needs you card at a time, and **Batches** groups cards with explicit action kinds for one approval per checked group. A Needs you card can also start a rule, and the All view can start a sprint or open batches.
+
+Timed sending is currently off. The Control tab and veto rows show **sending off: gmail not connected** until Gmail is configured and sending is separately enabled. Stop remains available. When sending is enabled, veto expiry only clears a proposal for Ted's worker. Stop stays available after expiry and clearance until the server starts the send. The server verifies that every exact To, CC, and BCC address has prior sent mail from `hello@getkres.com`; missing history or Gmail configuration blocks the send. The board does not send a message or spend money. An unclassified card stays out of bundle approval, and a spend card needs a recorded amount. Bundle approval moves the checked cards to Ted for review; an exact email or spend can still need a later approval. Sprint ordering uses card value and effort fields when available, and labels fallback numbers as estimates.
+
+The public page depends on private Edge Function and worker changes. See [APPLY.md](APPLY.md) before publishing this branch.
+
 ## Deploying the static page
 
-This public repository deliberately contains `index.html`, `mockups.js`, `mockups.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, and `FRONTDOOR.md`. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository contains `index.html`, `mockups.js`, `mockups.css`, `control-center.js`, `control-center.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, `FRONTDOOR.md`, and `APPLY.md`. There is no build step. GitHub Pages publishes the root of `main`.
 
 ```sh
 git switch -c update-ted-board
-git add index.html mockups.js mockups.css cave.css README.md REPLIES.md MOCKUPS.md
+git add index.html mockups.js mockups.css control-center.js control-center.css cave.css README.md REPLIES.md MOCKUPS.md APPLY.md
 git commit -m "Update Ted Board"
 git push -u origin update-ted-board
 gh pr create --base main --fill

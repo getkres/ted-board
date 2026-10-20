@@ -20,6 +20,11 @@ class MockupsView {
     this.drafts = new Map();
     this.busy = new Set();
     this.verdictsEnabled = false;
+    this.approveBatchEnabled = false;
+    this.batchApprovals = new Map();
+    this.batchBusy = new Set();
+    this.batchTimers = new Map();
+    this.batchRequestIds = new Map();
     this.verdictNotes = new Set();
     this.verdictTimers = new Map();
     this.scrappedOpen = new Set();
@@ -79,6 +84,12 @@ class MockupsView {
     this.verdictTimers.forEach(clearTimeout);
     this.verdictTimers.clear();
     this.verdictsEnabled = false;
+    this.approveBatchEnabled = false;
+    this.batchApprovals.clear();
+    this.batchBusy.clear();
+    this.batchTimers.forEach(clearTimeout);
+    this.batchTimers.clear();
+    this.batchRequestIds.clear();
     this.close();
   }
   async api(method, body) {
@@ -141,7 +152,18 @@ class MockupsView {
       }
       if (rev !== this.revision || key !== this.getKey()) return;
       this.mockups = data.mockups;
+      this.batchRequestIds.clear();
       this.verdictsEnabled = data.verdicts_enabled === true;
+      this.approveBatchEnabled = data.approve_batch_enabled === true;
+      this.batchApprovals.clear();
+      this.mockups.forEach((m) => {
+        const change = m.verdict_change;
+        if (change?.approval_batch_operation_id && change?.token && Date.parse(change.undo_until) > Date.now()) {
+          this.rememberBatchApproval(this.batchKey(m.project, m.batch), {
+            operation_id: change.approval_batch_operation_id, token: change.token, undo_until: change.undo_until,
+          });
+        }
+      });
       this.mockups.forEach((m) => this.scheduleVerdict(m));
       this.pins = data.pins.map((p) => ({
         ...p,
@@ -274,7 +296,7 @@ class MockupsView {
               (batch.images.length === 1 ? " image" : " images"),
           ),
         );
-        head.append(text);
+        head.append(text, this.batchApprovalControls(batch));
         section.append(head);
         const row = el("div", "mockup-row");
         row.setAttribute("aria-label", batch.title + " images");
@@ -388,6 +410,88 @@ class MockupsView {
   verdict(m) {
     return m.verdict || (m.status === "picked" ? "approved" : null);
   }
+  batchKey(project, batch) {
+    return JSON.stringify([project, batch]);
+  }
+  rememberBatchApproval(key, approval) {
+    clearTimeout(this.batchTimers.get(key));
+    this.batchApprovals.set(key, approval);
+    const left = Date.parse(approval.undo_until) - Date.now();
+    if (left > 0) this.batchTimers.set(key, setTimeout(() => {
+      if (this.batchApprovals.get(key)?.operation_id !== approval.operation_id) return;
+      this.batchApprovals.delete(key);
+      this.batchTimers.delete(key);
+      this.onChange();
+    }, left + 30));
+  }
+  batchApprovalControls(batch) {
+    const {el, button} = this, key = this.batchKey(batch.project, batch.title),
+      box = el("div", "mockup-batch-approval"),
+      images = this.mockups.filter((m) => m.project === batch.project && m.batch === batch.title && m.status !== "archived"),
+      eligible = images.filter((m) => this.verdict(m) !== "scrapped" && this.verdict(m) !== "approved"),
+      waiting = this.batchBusy.has(key) || images.some((m) => this.busy.has(m.id));
+    const pending = this.batchApprovals.get(key), undoOpen = pending && Date.parse(pending.undo_until) > Date.now();
+    const approve = button("Good to go: whole batch", "mockup-approve-batch", () => this.saveBatchApproval(batch.project, batch.title));
+    approve.disabled = !this.approveBatchEnabled || waiting || eligible.length === 0 || !!undoOpen;
+    if (!this.approveBatchEnabled) approve.title = "Whole-batch approval is waiting for database setup.";
+    else if (!eligible.length) approve.title = "Every active image is already approved or scrapped.";
+    box.append(approve);
+    if (undoOpen) {
+      const undo = button("Undo whole-batch approval", "quiet mockup-approve-batch-undo", () => this.saveBatchApproval(batch.project, batch.title, pending));
+      undo.disabled = waiting;
+      box.append(undo);
+    }
+    return box;
+  }
+  async saveBatchApproval(project, batch, undo = null) {
+    const key = this.batchKey(project, batch);
+    if (!this.approveBatchEnabled || this.batchBusy.has(key)) return;
+    if (!undo && Date.parse(this.batchApprovals.get(key)?.undo_until) > Date.now()) return;
+    const images = this.mockups.filter((m) => m.project === project && m.batch === batch && m.status !== "archived");
+    if (images.some((m) => this.busy.has(m.id))) return;
+    if (!undo && !images.some((m) => this.verdict(m) !== "approved" && this.verdict(m) !== "scrapped")) return;
+    this.batchBusy.add(key);
+    images.forEach((m) => this.busy.add(m.id));
+    const owner = this.getKey(), operation = undo?.operation_id || this.batchRequestIds.get(key) || crypto.randomUUID();
+    if (!undo) this.batchRequestIds.set(key, operation);
+    this.onChange();
+    try {
+      const data = await this.api("POST", undo
+        ? {action:"undo_approve_batch", operation_id:operation, token:undo.token}
+        : {action:"approve_batch", operation_id:operation, project, batch});
+      if (!data.ok || !Array.isArray(data.mockups)) throw Error("Batch approval was not confirmed. Refresh to check it.");
+      if (owner !== this.getKey()) return;
+      if (!undo) this.batchRequestIds.delete(key);
+      this.revision++;
+      data.mockups.forEach((row) => {
+        const i = this.mockups.findIndex((m) => m.id === row.id);
+        if (i < 0) return;
+        this.mockups[i] = {...this.mockups[i], ...row};
+        this.scheduleVerdict(this.mockups[i]);
+        if (this.active?.id === row.id) this.active = this.mockups[i];
+      });
+      if (undo) {
+        this.batchRequestIds.delete(key);
+        this.batchApprovals.delete(key);
+        clearTimeout(this.batchTimers.get(key));
+        this.batchTimers.delete(key);
+        this.notify(data.conflicts?.length ? "Some images have newer verdicts. Refresh to review them." : "Batch approval undone.");
+      } else if (data.undone) {
+        this.notify("This batch approval was already undone. Refreshing the images.");
+        await this.load();
+      } else if (data.approved_count && data.token && data.undo_until) {
+        this.rememberBatchApproval(key, data);
+        this.notify("Batch approved. Undo is available for 5 seconds.");
+      } else this.notify("This batch is already approved or scrapped.");
+      if (this.active) { this.drawVerdicts(); this.drawPins(); this.drawPanel(); }
+    } catch (e) {
+      if (owner === this.getKey()) this.notify(e.message, true);
+    } finally {
+      this.batchBusy.delete(key);
+      images.forEach((m) => this.busy.delete(m.id));
+      this.onChange();
+    }
+  }
   scheduleVerdict(m) {
     clearTimeout(this.verdictTimers.get(m.id));
     const left = Date.parse(m.verdict_change?.undo_until) - Date.now();
@@ -412,12 +516,14 @@ class MockupsView {
     [["approved", "Good to go"], ["needs_work", "Needs work"], ["scrapped", "Scrap"]].forEach(([verdict, label]) => {
       const b = button(label, "mockup-verdict-button verdict-" + verdict, () => this.saveVerdict(m, verdict));
       b.setAttribute("aria-pressed", String(value === verdict));
-      b.disabled = !this.verdictsEnabled || this.busy.has(m.id) || m.status === "archived";
+      const batchUndoOpen = m.verdict_change?.approval_batch_operation_id &&
+        Date.parse(m.verdict_change.undo_until) > Date.now();
+      b.disabled = !this.verdictsEnabled || this.busy.has(m.id) || m.status === "archived" || !!batchUndoOpen;
       actions.append(b);
     });
     box.append(actions);
     const change = m.verdict_change;
-    if (change?.token && Date.parse(change.undo_until) > Date.now()) {
+    if (change?.token && !change.approval_batch_operation_id && Date.parse(change.undo_until) > Date.now()) {
       const undo = button("Undo", "quiet mockup-verdict-undo", () => this.saveVerdict(m, null, change.token));
       undo.disabled = this.busy.has(m.id);
       box.append(undo);

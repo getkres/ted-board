@@ -77,7 +77,7 @@ For pin feedback, the watcher posts a short acknowledgment in the same pin threa
 
 The watcher sends its acknowledgment with `--decision-id` semantics through the client. The database deduplicates that acknowledgment by decision ID, and stable queue markers prevent repeated design work if a route is retried. Routing failures remain eligible for retry even after a Telegram acknowledgment. Test notes starting with `test-` never post a mockup reply or enqueue design work.
 
-Good to go and Scrap enter the queue as completed, informational verdict records. Legacy picks also remain informational. They do not launch design work and have no pin thread, so the watcher does not pass a mockup ID to the pin reply command. Any follow-up belongs in a related actual pin thread.
+Good to go creates or updates one `build approved: <batch>` card per project and batch in Ted's doing. Its body lists each currently approved image and mockup ID. More approvals update that same card. A whole-batch Good to go action creates one `approved_batch` decision receipt for the batch, and the watcher uses the current image rows to update the same card. Scrap and Needs work can refresh an existing build card's image list but never create one. Legacy picks remain informational. Verdicts have no pin thread, so the watcher does not pass a mockup ID to the pin reply command. Any design follow-up belongs in a related actual pin thread.
 
 The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dispatch.py` to distinguish mockup, card, and legacy Figma briefs. Mockup workers upload to Ted Board and reply to the original pin. Card workers retain their exact card outcome command. Existing Figma briefs retain their original delivery surface. A failed Figma poll does not prevent independent design briefs from running. Queued mockup commands use the direct Command Line Tools interpreter.
 
@@ -98,6 +98,8 @@ The existing fast queue consumer uses the new `~/ted-ops/markup-watch/design_dis
 | `reply` | Page | `pin_id`, `text` |
 | `pick` | Page | `mockup_id`, legacy compatibility only |
 | `verdict` | Page | `mockup_id`, `verdict` (`approved`, `needs_work`, or `scrapped`), optional `text` |
+| `approve_batch` | Page | Exact `project`, exact `batch`, and a new UUID `operation_id`; approves every non-scrapped, non-approved active image in that batch |
+| `undo_approve_batch` | Page | Original `operation_id` and `token`, within five seconds |
 | `verdict_note` | Page | `mockup_id`, current `token`, and `text`; coalesces into the verdict during Undo grace |
 | `undo_verdict` | Page | `mockup_id`, `token` from `verdict_change`, within five seconds |
 | `ted_reply` | Worker | `pin_id`, `text`, optional `decision_id` for acknowledgment deduplication |
@@ -132,6 +134,8 @@ A live test uploaded one temporary JPEG, added a Sebastian pin, posted a Ted rep
 ## Verdicts
 
 Each image has **Good to go**, **Needs work**, and **Scrap** controls in the gallery and fullscreen viewer. All targets are at least 44px. Verdicts save on one tap, and Undo is available for five seconds. Existing `status='picked'` rows display **GOOD TO GO**. A saved verdict takes precedence over legacy status.
+
+Each batch header also has **Good to go: whole batch** and a five-second Undo. The action approves every active image in that exact project and batch except images already approved or scrapped. It includes images previously marked Needs work. One receipt covers the batch, and Ted's build card lists every currently approved image in it. The control remains disabled until GET reports `approve_batch_enabled` after database setup.
 
 - **Good to go** stores `verdict='approved'`, shows a green **GOOD TO GO** badge, and keeps legacy status `picked`. The owning project or batch worker must treat this as final art to build from. Stop design iteration unless Sebastian changes the verdict.
 - **Needs work** stores `verdict='needs_work'`, shows an amber **NEEDS WORK** badge, and opens an optional “what's off?” note. Existing pins count as feedback. The action creates a whole-image pin thread and matching receipt, even without a note. An optional note updates that thread. During Undo grace, it updates the same verdict receipt and initial message, so it cannot double-route or outlive an undone verdict. Notes sent after grace append a new reply. The existing decisions watcher, now polling every 20 seconds on the Mac mini, acknowledges the feedback in that thread and queues it for the existing `markup-watch` / `figma-fast` consumer. It uses the same delivery path as a new pin. Workers inspect the image, existing pins, and full conversation, then post the outcome or blocker on the original mockup using `mockup_reply.py` with the actual pin ID. The five-second undo delay, 20-second decisions poll, and existing 30-second design poll target pickup within a minute when workers are idle. Busy workers or network delays can delay pickup or the outcome. No new routine was created.
