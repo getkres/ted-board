@@ -101,6 +101,13 @@ alter table a enable row level security; alter table b enable row level security
         self.assertTrue(self.errors(sql + "alter table a enable row level security, disable row level security;"))
         self.assertEqual(self.errors(sql + "alter table a disable row level security, enable row level security;"), [])
 
+    def test_procedural_revokes_and_search_path_cannot_hide_access(self):
+        sql = "create table a(id int); grant all on a to service_role; alter table a enable row level security;"
+        self.assertTrue(self.errors(sql + "do $$ begin revoke all on a from service_role; end $$;"))
+        self.assertTrue(self.errors(sql + "do $$ begin alter table a disable row level security; end $$;"))
+        self.assertTrue(self.errors("set local search_path = private, public;" + sql))
+        self.assertTrue(self.errors("select set_config('search_path', 'private', true);" + sql))
+
 
 if __name__ == "__main__":
     unittest.main()

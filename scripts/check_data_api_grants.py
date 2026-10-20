@@ -19,6 +19,10 @@ TOKEN = re.compile(
     + IDENTIFIER + r"|[^\s]",
     re.DOTALL,
 )
+PROCEDURAL_MUTATION = re.compile(
+    r"\bcreate\s+(?:unlogged\s+)?table\b|\b(?:execute|grant|revoke|set_config)\b|\brow\s+level\s+security\b|\bsearch_path\b",
+    re.I,
+)
 
 
 def statements(sql):
@@ -52,8 +56,8 @@ def statements(sql):
                 unsupported.extend(nested_errors)
                 executable = " ".join(nested)
                 # Conservatively reject dynamic SQL, which can assemble arbitrary DDL.
-                if re.search(r"\bcreate\s+(?:unlogged\s+)?table\b|\bexecute\b", executable, re.I):
-                    unsupported.append("Procedural table DDL or dynamic EXECUTE requires review and literal top-level migration SQL.")
+                if PROCEDURAL_MUTATION.search(executable):
+                    unsupported.append("Procedural DDL, ACL, RLS, search_path, or dynamic EXECUTE requires review and literal top-level migration SQL.")
             cursor = end + len(token) if end >= 0 else len(sql)
             current.append("<literal>")
         elif token.startswith(("'", "E'", "e'")):
@@ -61,8 +65,8 @@ def statements(sql):
                 body = token[2:-1] if token.startswith(("E'", "e'")) else token[1:-1]
                 nested, nested_errors = statements(body.replace("''", "'"))
                 unsupported.extend(nested_errors)
-                if re.search(r"\bcreate\s+(?:unlogged\s+)?table\b|\bexecute\b", " ".join(nested), re.I):
-                    unsupported.append("Procedural table DDL or dynamic EXECUTE requires review and literal top-level migration SQL.")
+                if PROCEDURAL_MUTATION.search(" ".join(nested)):
+                    unsupported.append("Procedural DDL, ACL, RLS, search_path, or dynamic EXECUTE requires review and literal top-level migration SQL.")
             if current and current[-1].lower() == "execute" and re.search(r"\bcreate\s+table\b", token, re.I):
                 unsupported.append("Dynamic table DDL requires a literal top-level migration and explicit grants.")
             current.append("<literal>")
@@ -93,6 +97,8 @@ def check_sql(sql):
     sql_statements, errors = statements(sql)
     created = {}
     for statement in sql_statements:
+        if re.match(r"^set\s+(?:(?:local|session)\s+)?search_path\b", statement, re.I) or re.search(r"\bset_config\s*\(", statement, re.I):
+            errors.append("SET search_path or set_config requires review; use schema-qualified names and literal top-level access controls.")
         create = re.match(rf"^create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?({RELATION})", statement, re.I)
         if create:
             table = name(create[1])

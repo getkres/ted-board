@@ -21,7 +21,7 @@ For a separately approved browser-facing table, the standard grant is:
 grant select, insert, update, delete on table public.example to anon, authenticated, service_role;
 ```
 
-Keep RLS enabled, and define reviewed policies for any browser operations. Never use default privileges as a substitute for a table-specific grant. Use literal top-level DDL and grants so the offline guard can inspect them. Dynamic or procedural table creation requires conversion to literal migration SQL. The guard conservatively rejects procedural `EXECUTE`, including dynamic queries that do not create tables, because it cannot establish their effects offline. Avoid custom `search_path`; explicitly qualify public table names.
+Keep RLS enabled, and define reviewed policies for any browser operations. Never use default privileges as a substitute for a table-specific grant. Use literal top-level DDL and grants so the offline guard can inspect them. Dynamic or procedural table creation requires conversion to literal migration SQL. The guard conservatively rejects procedural `EXECUTE`, including dynamic queries that do not create tables, because it cannot establish their effects offline. It also rejects procedural grants, revokes, RLS changes, and search-path changes, plus top-level `SET search_path` and `set_config` calls. Explicitly qualify public table names.
 
 Run `python3 scripts/check_data_api_grants.py` and `python3 -m unittest discover -s tests -p 'test_data_api_grants.py'` before committing. The guard requires explicit service-role CRUD and RLS for every new public table, checks each creating migration independently, and covers all three migration roots. Historical cutoffs are fixed in the script. Do not advance them to suppress failures.
 
