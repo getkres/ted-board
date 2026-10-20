@@ -66,3 +66,9 @@ The private job handoff contains exact `apply.sql`, `rollback.sql`, `backup.sh`,
 ## Backout
 
 First stop the new pod publisher and pause the affected existing jobs on the mini. Restore the backed-up static page, workers, watcher, and Edge Function trees, then deploy the prior `ted-board` and `ted-mockups` functions. Preserve ledgers and job state. The four numbered rollback SQL files are idempotent and transactional, but may remove stored Control data or a pod snapshot. Review and back up that data, reconcile every in-flight or uncertain send, and apply the matching rollback only when the impact is understood.
+
+## Authorized cutover with sending off
+
+Sebastian approved completing the cutover after Ted applied all four migrations on 2026-10-20. Missing Gmail credentials no longer block publication. Timed sends remain disabled by default. The server rejects veto marking and sending before calling database actions, and expiry is a no-op while disabled. The Control tab and pending or cleared veto rows show `sending off: gmail not connected`. Stop remains available to cancel existing proposals.
+
+Gmail setup is separate work. Complete credentials alone cannot enable sending: a later explicit `TED_VETO_SENDS_ENABLED=true` opt-in is also required after the separate review. Do not enable it during this cutover. No database migration is required for this state change. The original bundle remains an audit artifact; the job's refreshed private cutover patch and new sources include this update.

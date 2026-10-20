@@ -11,6 +11,7 @@ class ControlCenter {
  reset(){
   this.generation++;
   this.view='Veto';this.vetoes=[];this.rules=[];this.loaded=false;this.loading=false;
+  this.vetoDelivery={enabled:false,message:'sending off: gmail not connected'};
   this.serverOffset=0;this.fallbackExpiry=new Map();this.busy=false;this.ruleCardId=null;
   this.ruleDraft=null;this.ruleEditDraft=null;this.editingRuleId=null;this.deletingRuleId=null;
   this.batchSelection=new Map();this.sprint={phase:'ready',endsAt:0,startedAt:0,queue:[],cleared:0,skipped:0,pending:false};
@@ -30,6 +31,7 @@ class ControlCenter {
   try{const data=await this.api('GET',undefined,'control');if(generation!==this.generation)return;
    if(!Array.isArray(data.vetoes)||!Array.isArray(data.rules))throw new Error('Control data could not be read. Refresh to try again.');
    this.vetoes=data.vetoes;this.rules=data.rules;this.loaded=true;
+   this.vetoDelivery={enabled:data.veto_delivery?.enabled===true,message:data.veto_delivery?.message==='sending off: timed sends disabled'?'sending off: timed sends disabled':'sending off: gmail not connected'};
    const serverTime=Date.parse(data.server_time);this.serverOffset=Number.isFinite(serverTime)?serverTime-Date.now():0;
    this.redraw();
   }catch(error){if(generation===this.generation){this.notice(error.message,true);this.redraw()}}finally{if(generation===this.generation)this.loading=false}
@@ -54,6 +56,7 @@ class ControlCenter {
   this.heading(parent,'Only stop what looks wrong','Drafts wait for a timed worker review. The board shows the brake; it does not send or spend.');
   const held=this.node('p','veto-held');held.append(this.node('strong',null,'Held for you. '),document.createTextNode('Contracts and signatures, spending, pricing or scope commitments, legal matters, new external people, production database writes, and App Store submits stay with you. No timer.'));parent.append(held);
   if(!this.loaded){this.empty(parent,this.loading?'Opening timed drafts…':'Timed drafts could not be loaded. Tap Refresh to try again.');return}
+  if(!this.vetoDelivery.enabled){const off=this.node('p','veto-held',this.vetoDelivery.message);off.setAttribute('role','status');parent.append(off)}
   if(!this.vetoes.length){this.empty(parent,'No timed drafts are waiting.');return}
   const list=this.node('div','veto-list');
   for(const veto of this.vetoes){const row=this.node('article','veto-row');row.dataset.vetoCardId=veto.card_id;
@@ -63,6 +66,7 @@ class ControlCenter {
    const side=this.node('div','veto-side');const status=String(veto.status||'pending').toLowerCase();const left=Math.max(0,Math.ceil((this.expiry(veto)-this.now())/1000));
    const clock=this.node('time','veto-clock');clock.dataset.vetoClock=veto.card_id;
    if(status==='stopped'){clock.textContent='stopped';row.dataset.vetoStatus='stopped'}
+   else if(!this.vetoDelivery.enabled&&['pending','elapsed','cleared'].includes(status)){clock.textContent=this.vetoDelivery.message;row.dataset.vetoStatus=status}
    else if(status==='cleared'){clock.textContent='cleared by worker';row.dataset.vetoStatus='cleared'}
    else if(status!=='pending'){clock.textContent=status.replaceAll('_',' ');row.dataset.vetoStatus=status}
    else if(left===0){clock.textContent='time up, waiting for worker clearance';row.dataset.vetoStatus='elapsed'}
@@ -84,7 +88,7 @@ class ControlCenter {
   if(this.view!=='Veto')return;
   for(const veto of this.vetoes){if(veto.status!=='pending')continue;const row=[...document.querySelectorAll('[data-veto-card-id]')].find(el=>el.dataset.vetoCardId===veto.card_id);if(!row)continue;
    const clock=row.querySelector('[data-veto-clock]');if(!clock)continue;const left=Math.max(0,Math.ceil((this.expiry(veto)-this.now())/1000));
-   clock.textContent=left?this.duration(left):'time up, waiting for worker clearance';
+   clock.textContent=!this.vetoDelivery.enabled?this.vetoDelivery.message:left?this.duration(left):'time up, waiting for worker clearance';
    row.dataset.vetoStatus=left?'pending':'elapsed';row.querySelector('.control-stop').disabled=this.busy;
   }
  }
