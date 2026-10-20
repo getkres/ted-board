@@ -249,3 +249,36 @@ html.cave{
 /* Reserve space for the fixed controls only when the tab strip reaches them. */
 .cave .tab-wrap,.tab-wrap{padding-right:0}
 .cave .tab-wrap.under-controls,.tab-wrap.under-controls{padding-right:172px}
+
+/* A compact readout for the pods assigned to the selected project. */
+.cave .pod-pulse{min-width:0;margin:-4px 0 25px;border:1px solid var(--line);border-radius:6px;background:linear-gradient(180deg,rgba(13,31,41,.95),rgba(6,17,23,.96));box-shadow:var(--glow)}
+.cave .pod-pulse-heading{display:flex;align-items:baseline;gap:9px;padding:10px 14px;border-top:2px solid var(--cyan)}
+.cave .pod-pulse-heading h2{font-size:.88rem;letter-spacing:.08em}
+.cave .pod-pulse-count{font-family:var(--mono);font-size:.68rem;color:var(--muted)}
+.cave .pod-row{min-width:0;border-top:1px solid var(--line)}
+.cave .pod-summary{display:grid;grid-template-columns:9px minmax(0,1fr) 14px;align-items:center;gap:11px;min-width:0;min-height:64px;padding:9px 14px;cursor:pointer;list-style:none}
+.cave .pod-summary::-webkit-details-marker{display:none}
+.cave .pod-summary:hover{background:rgba(95,212,255,.06)}
+.cave .pod-summary:after{content:"+";font-family:var(--mono);font-size:1rem;line-height:1;color:var(--muted);text-align:center}
+.cave .pod-row[open] .pod-summary:after{content:"−"}
+.cave .pod-status-dot{width:8px;height:8px;border-radius:50%;background:var(--steel);box-shadow:0 0 8px currentColor;color:var(--steel)}
+.cave .pod-row[data-state=green] .pod-status-dot{background:var(--green);color:var(--green)}
+.cave .pod-row[data-state=amber] .pod-status-dot{background:var(--amber);color:var(--amber)}
+.cave .pod-row[data-state=red] .pod-status-dot,.cave .pod-row[data-state=stale] .pod-status-dot{background:var(--alarm);color:var(--alarm)}
+.cave .pod-summary-content,.cave .pod-summary-top{display:block;min-width:0}
+.cave .pod-summary-top{display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 10px}
+.cave .pod-label{min-width:0;max-width:100%;font-family:var(--hud);font-size:.87rem;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.cave .pod-age{margin-left:auto;font-family:var(--mono);font-size:.67rem;color:var(--muted);overflow-wrap:anywhere}
+.cave .pod-row[data-state=stale] .pod-age{color:var(--alarm)}
+.cave .pod-headline{display:block;margin-top:3px;font-size:.77rem;line-height:1.45;color:var(--muted);overflow-wrap:anywhere}
+.cave .pod-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;padding:12px 14px 15px 34px;border-top:1px solid var(--line);background:rgba(3,10,14,.45)}
+.cave .pod-row:not([open]) .pod-detail{display:none}
+.cave .pod-detail-group{min-width:0}
+.cave .pod-detail-group h3{font-family:var(--mono);font-size:.68rem;font-weight:500;letter-spacing:0;color:var(--cyan)}
+.cave .pod-detail-group p,.cave .pod-detail-group li,.cave .pod-next-read{font-size:.76rem;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.cave .pod-detail-group p{margin-top:5px}
+.cave .pod-detail-group ul{margin:5px 0 0;padding-left:17px}
+.cave .pod-detail-group li+li{margin-top:4px}
+.cave .pod-next-read{grid-column:1/-1;padding-top:10px;border-top:1px solid var(--line)}
+.cave .pod-next-read strong{color:var(--text);font-weight:600}
+@media(max-width:520px){.cave .pod-detail{grid-template-columns:minmax(0,1fr)}}

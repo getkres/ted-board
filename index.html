@@ -41,10 +41,11 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <script>
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
+const POD_PULSE_ERROR='Pod updates could not load. Refresh to try again.';
 const PROJECTS=['Fictora','Bookish','Kres + clients','Lunair + art','Ted ops'];
 const SECTIONS=[['needs_you','Needs you'],['ted_doing',"Ted’s doing"],['up_next','Up next'],['done','Done']];
 const $=id=>document.getElementById(id);
-const state={cards:[],jobs:[],approvals:[],jobsLoaded:false,jobsLoading:false,project:'All',loaded:false,loading:false,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
+const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],jobsLoaded:false,jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
 const memory=new Map();let storageUnavailable=false;
 const storage={get(k){try{return localStorage.getItem(k)??memory.get(k)??null}catch{storageUnavailable=true;return memory.get(k)??null}},set(k,v){memory.set(k,v);try{localStorage.setItem(k,v);return true}catch{storageUnavailable=true;return false}},remove(k){memory.delete(k);try{localStorage.removeItem(k)}catch{storageUnavailable=true}}};
 let key=storage.get('ted-board-key')||'';
@@ -67,13 +68,91 @@ function renderFresh(){
 $('fresh-ted').addEventListener('click',async()=>{
  if(freshSending||['pending','running'].includes(freshState?.status))return;
  if(!confirm('start a fresh ted?'))return;
- freshSending=true;renderFresh();
- try{freshState=await api('POST',{action:'fresh_request'});announce('Fresh Ted requested. I’ll handle the handoff.')}catch(e){announce(e.message,true)}finally{freshSending=false;renderFresh()}
+ freshSending=true;const requestId=++state.freshRequestId,requestKey=key;renderFresh();
+ try{const result=await api('POST',{action:'fresh_request'});if(requestId!==state.freshRequestId||requestKey!==key)return;freshState=result;announce('Fresh Ted requested. I’ll handle the handoff.')}
+ catch(e){if(requestId===state.freshRequestId&&requestKey===key)announce(e.message,true)}
+ finally{if(requestId===state.freshRequestId&&requestKey===key){freshSending=false;renderFresh()}}
 });
-window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);freshState=null;updateTedChat();mockups.reset();controlCenter.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&state.project==='Control')controlCenter.load()});
+window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);resetForKeyChange();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&state.project==='Control')controlCenter.load()});
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.type='button';b.addEventListener('click',fn);return b}
 function safeURL(raw){try{const u=new URL(raw);return ['https:','http:'].includes(u.protocol)?u.href:null}catch{return null}}
+function localToday(){
+ const now=new Date(Date.now());
+ return [now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+}
+function validPodDate(raw){
+ if(typeof raw!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(raw))return false;
+ const stamp=Date.parse(raw+'T00:00:00Z');
+ return Number.isFinite(stamp)&&new Date(stamp).toISOString().slice(0,10)===raw;
+}
+function podNextReadLabel(raw){
+ return validPodDate(raw)&&raw<localToday()?'Read overdue: ':'Next read: ';
+}
+function podShippedLabel(raw){
+ if(!validPodDate(raw))return 'Shipped in snapshot';
+ return 'Shipped on '+raw;
+}
+function podAge(raw){
+ const parsed=typeof raw==='string'&&raw.trim()?Date.parse(raw):NaN;
+ const stamp=Number.isFinite(parsed)?parsed:null;
+ if(stamp===null)return {stale:true,stamp:null,text:'stale since date unknown'};
+ if(Date.now()-stamp>26*60*60*1000)return {stale:true,stamp,text:'stale since '+new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}).format(stamp)};
+ const minutes=Math.max(0,Math.floor((Date.now()-stamp)/60000));
+ return {stale:false,stamp,text:minutes<1?'just now':minutes<60?minutes+'m ago':minutes<1440?Math.floor(minutes/60)+'h ago':Math.floor(minutes/1440)+'d ago'};
+}
+function updatePodRowAge(row,pod){
+ const age=podAge(pod.last_update_at);
+ const health=['green','amber','red'].includes(pod.health)?pod.health:'unknown';
+ row.dataset.state=age.stale?'stale':health;
+ const time=row.querySelector('time');time.textContent=health==='unknown'&&!age.stale?'status unknown, '+age.text:age.text;
+ if(age.stamp===null)time.removeAttribute('datetime');else time.dateTime=pod.last_update_at;
+ row.querySelector('.pod-status-label').textContent=age.stale?'Stale status':health==='unknown'?'Status unknown':health+' status';
+ const nextLabel=row.querySelector('.pod-next-read strong');if(nextLabel)nextLabel.textContent=podNextReadLabel(pod.next_read);
+ row.querySelector('.pod-shipped-heading').textContent=podShippedLabel(pod.snapshot_date);
+}
+function updatePodPulseAges(){
+ document.querySelectorAll('.pod-row').forEach(row=>{const pod=state.podPulse.find(item=>item&&item.project===state.project&&item.pod_id===row.dataset.podId);if(pod)updatePodRowAge(row,pod)});
+}
+function renderPodPulse(){
+ const pods=state.podPulse.filter(pod=>pod&&pod.project===state.project&&typeof pod.pod_id==='string'&&pod.pod_id&&typeof pod.label==='string');
+ if(!pods.length)return null;
+ const strip=el('section','pod-pulse');strip.setAttribute('aria-labelledby','pod-pulse-heading');
+ const heading=el('div','pod-pulse-heading');const title=el('h2',null,'Pods');title.id='pod-pulse-heading';heading.append(title,el('span','pod-pulse-count',String(pods.length)));strip.append(heading);
+ pods.forEach(pod=>{
+  const row=el('details','pod-row');row.dataset.podId=pod.pod_id;row.open=state.openPods.has(pod.pod_id);
+  row.addEventListener('toggle',()=>{if(!row.isConnected)return;if(row.open)state.openPods.add(pod.pod_id);else state.openPods.delete(pod.pod_id)});
+  const summary=el('summary','pod-summary');const dot=el('span','pod-status-dot');dot.setAttribute('aria-hidden','true');
+  const content=el('span','pod-summary-content');const top=el('span','pod-summary-top');const label=el('strong','pod-label',pod.label);
+  const status=el('span','sr-only pod-status-label');const time=el('time','pod-age');top.append(label,time,status);
+  content.append(top,el('span','pod-headline',typeof pod.headline==='string'?pod.headline:''));summary.append(dot,content);row.append(summary);
+  const detail=el('div','pod-detail');
+  for(const [label,items,empty] of [[podShippedLabel(pod.snapshot_date),pod.shipped_today,'Nothing logged in this snapshot.'],['Testing',pod.testing,'Nothing in test.']]){
+   const group=el('div','pod-detail-group');group.append(el('h3',label==='Testing'?null:'pod-shipped-heading',label));
+   const list=Array.isArray(items)?items.filter(item=>typeof item==='string'&&item.trim()):[];
+   if(list.length){const ul=el('ul');list.forEach(item=>ul.append(el('li',null,item)));group.append(ul)}else group.append(el('p',null,empty));
+   detail.append(group);
+  }
+  if(typeof pod.next_read==='string'&&pod.next_read.trim()){const next=el('p','pod-next-read');next.append(el('strong',null,'Next read: '),document.createTextNode(pod.next_read));detail.append(next)}
+  row.append(detail);strip.append(row);updatePodRowAge(row,pod);
+ });
+ return strip;
+}
+function syncPodPulse(){if(state.project==='Control')return;const current=$('main').querySelector('.pod-pulse'),fresh=renderPodPulse();if(current){if(fresh)current.replaceWith(fresh);else current.remove()}else if(fresh)$('main').insertBefore(fresh,$('main').querySelector('.board'))}
+function applyPodPulse(data){
+ if(data.pod_pulse_error===true){state.podPulseError=true;return}
+ state.podPulseError=false;
+ state.podPulse=Array.isArray(data.pod_pulse)?data.pod_pulse:[];
+}
+function resetForKeyChange(){
+ state.loadRequestId++;
+ state.loading=false;state.loaded=false;state.cards=[];
+ state.podPulse=[];state.podPulseError=false;state.openPods.clear();
+ state.jobsRequestId++;state.jobsLoading=false;state.jobsLoaded=false;state.jobs=[];state.approvals=[];
+ state.freshRequestId++;freshSending=false;freshState=null;
+ updateTedChat();
+ controlCenter.reset();
+}
 function announce(text,error=false){$('notice').textContent=text;$('notice').className='status'+(error?' error':'')}
 function options(card){return (Array.isArray(card.options)?card.options:[]).slice(0,4).map(o=>typeof o==='string'?{label:o,value:o}:o).filter(o=>o&&typeof o.label==='string'&&typeof o.value==='string')}
 function steps(card){return (Array.isArray(card.steps)?card.steps:[]).filter(s=>s&&typeof s.text==='string')}
@@ -161,6 +240,7 @@ function render(){
  if(state.project==='Control'){controlCenter.render(main);return}
  const cards=projectCards();const n=cards.filter(c=>c.section==='needs_you').length;
  const intro=el('div','board-intro');const introText=el('div');introText.append(el('h2',null,state.project==='All'?'what i need from you':state.project));const sub=el('p',null,state.project==='All'?(n===1?'just one thing.':n?n+' things, quick ones mostly.':'nothing on you right now. go live a little.'):'your calls, what i\'m on, and what\'s next.');sub.style.marginTop='8px';introText.append(sub);intro.append(introText);if(n){const controls=el('div','board-control-actions');controls.append(button('Start a sprint','',()=>controlCenter.open('Sprint')),button('Open batches','',()=>controlCenter.open('Batches')));intro.append(controls)}main.append(intro);
+ const pulse=renderPodPulse();if(pulse)main.append(pulse);
  const board=el('div','board'+(state.project==='All'?' all':''));
  if(state.project==='All'&&!cards.length){const clear=el('div','state');clear.append(el('h2',null,'You’re all clear.'),el('p',null,'Ted can keep moving. Open a project to see what’s in progress, or come back when there’s a new decision.'));board.append(clear)}
  (state.project==='All'?[SECTIONS[0]]:SECTIONS).forEach(([id,label])=>{
@@ -174,7 +254,7 @@ function render(){
 }
 function renderAccess(){
  const main=$('main');main.replaceChildren();const box=el('section','state');box.append(el('h2',null,'Your board, one private link.'),el('p',null,'Open the personal link Ted gave you, or paste it below. Access is remembered on this device.'));
- const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;storage.set('ted-board-key',key);freshState=null;saveTab();state.loaded=false;state.cards=[];mockups.reset();mockups.load();load()});box.append(form);main.append(box);
+ const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;storage.set('ted-board-key',key);saveTab();resetForKeyChange();mockups.reset();mockups.load();load()});box.append(form);main.append(box);
 }
 async function api(method,body,resource=''){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
@@ -184,27 +264,34 @@ async function api(method,body,resource=''){
  }catch(e){if(e.name==='AbortError')throw new Error('The connection timed out. Refresh to check whether your answer arrived.');if(e instanceof TypeError)throw new Error('Could not connect. Check your connection and try again.');throw e}finally{clearTimeout(timeout)}
 }
 async function load(force=false){
- if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;const request={};state.loadRequest=request;const revision=state.revision;$('refresh').disabled=true;announce('');render();
- try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(revision!==state.revision)return;state.cards=data.cards;const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'')}
- catch(e){if(revision===state.revision){announce(e.message,true);render()}}finally{if(state.loadRequest===request){state.loading=false;$('refresh').disabled=false}}
+ if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;const requestId=++state.loadRequestId,requestKey=key,revision=state.revision;$('refresh').disabled=true;announce('');render();
+ try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.cards=data.cards;applyPodPulse(data);const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(state.podPulseError?POD_PULSE_ERROR:storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'',state.podPulseError)}
+ catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
 }
 async function pollCards(){
  if(!key||document.hidden||state.loading||state.polling||state.busy.size)return;
- state.polling=true;const revision=state.revision;
+ state.polling=true;const revision=state.revision,requestId=state.loadRequestId,requestKey=key;
  try{
-  const data=await api('GET');if(revision!==state.revision||!Array.isArray(data.cards))return;
-  state.cards=data.cards;
+  const data=await api('GET');if(revision!==state.revision||requestId!==state.loadRequestId||requestKey!==key||!Array.isArray(data.cards))return;
+  state.cards=data.cards;const pulseHadError=state.podPulseError;applyPodPulse(data);
   if(state.project==='Control'&&controlCenter.view==='Veto'&&!controlCenter.busy)controlCenter.load();
+  if(state.podPulseError)announce(POD_PULSE_ERROR,true);
+  else if(pulseHadError&&$('notice').textContent===POD_PULSE_ERROR)announce('');
+  document.querySelectorAll('.pod-row').forEach(row=>{if(row.open)state.openPods.add(row.dataset.podId);else state.openPods.delete(row.dataset.podId)});
   const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT','BUTTON'].includes(focused.tagName);
   if(!editing&&!state.guide&&state.project!=='Mockups'&&state.project!=='Jobs'){
-   const opened=[...document.querySelectorAll('details[open]')].map(e=>e.dataset.approvalId||e.className);
-   render();document.querySelectorAll('details').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true});
+   const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
+   const focusedPod=focused?.closest('.pod-row')?.dataset.podId;
+   render();document.querySelectorAll('details:not(.pod-row)').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true});
+   if(focusedPod)[...document.querySelectorAll('.pod-row')].find(e=>e.dataset.podId===focusedPod)?.querySelector('summary')?.focus({preventScroll:true});
   }else{
    document.querySelectorAll('.live-strip').forEach(strip=>{const card=state.cards.find(c=>c.id===strip.parentElement.dataset.cardId);if(card)strip.replaceWith(liveStrip(card))});
+   if(state.project!=='Mockups'&&state.project!=='Jobs')syncPodPulse();
   }
  }catch{}finally{state.polling=false}
 }
 setInterval(pollCards,20000);
+setInterval(updatePodPulseAges,60000);
 function setCardBusy(id,busy){if(busy)state.busy.add(id);else state.busy.delete(id);document.querySelectorAll('[data-card-id]').forEach(e=>{if(e.dataset.cardId===id)e.querySelectorAll('button,select,textarea').forEach(c=>c.disabled=busy)})}
 async function act(card,action,value='',note=''){
  if(state.busy.has(card.id))return false;setCardBusy(card.id,true);announce('Saving…');
@@ -220,13 +307,13 @@ function renderApprovals(card,article){
  }
 }
 async function loadJobs(){
- if(!key||state.jobsLoading)return;state.jobsLoading=true;
- try{const data=await api('GET',undefined,'jobs');freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
+ if(!key||state.jobsLoading)return;state.jobsLoading=true;const requestId=++state.jobsRequestId,requestKey=key;
+ try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('[data-approval-id][open]')].map(e=>e.dataset.approvalId);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
  if(!editing&&!state.busy.size){render();document.querySelectorAll('[data-approval-id]').forEach(e=>{if(opened.includes(e.dataset.approvalId))e.open=true})}
- }catch(e){if(state.project==='Jobs')announce(e.message,true)}finally{state.jobsLoading=false}
+ }catch(e){if(requestId===state.jobsRequestId&&requestKey===key&&state.project==='Jobs')announce(e.message,true)}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
 async function control(action,body){
  try{await api('POST',{action,...body});announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');if(action==='approval')await load(true);else await loadJobs()}catch(e){announce(e.message,true)}
