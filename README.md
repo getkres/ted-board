@@ -32,17 +32,26 @@ Timed sending is currently off. The Control tab and veto rows show **sending off
 
 The public page depends on private Edge Function and worker changes. See [APPLY.md](APPLY.md) before publishing this branch.
 
+## Local content review
+
+Local content workers require independent agent review before uploads, Needs
+you transitions, final replies, and approval staging. See [REVIEW-GATE.md](REVIEW-GATE.md)
+for the review record, private worker overlay, pod policies, verification, and
+Ted's separate deployment step.
+
 ## Deploying the static page
 
-This public repository contains `index.html`, `mockups.js`, `mockups.css`, `control-center.js`, `control-center.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, `FRONTDOOR.md`, and `APPLY.md`. There is no build step. GitHub Pages publishes the root of `main`.
+This public repository contains the static page, its scripts and styles, public documentation, the shared review gate and runner, the local deployment and test tools, synthetic review tests, and generic rollout tools. The client registry and private integration overlay remain in the local review bundle. There is no static build step. GitHub Pages publishes the root of `main`.
 
 ```sh
 git switch -c update-ted-board
-git add index.html mockups.js mockups.css control-center.js control-center.css cave.css README.md REPLIES.md MOCKUPS.md APPLY.md
+git add index.html mockups.js mockups.css control-center.js control-center.css cave.css README.md REPLIES.md MOCKUPS.md APPLY.md REVIEW-GATE.md review.py review_gate.py deploy_review_gate.py test_review_gate.py tests/review*
 git commit -m "Update Ted Board"
 git push -u origin update-ted-board
 gh pr create --base main --fill
-gh pr merge --squash
 ```
 
-The backend, card data, worker tools, screenshots, and keyed URL are local operational files. They are not part of this public repository. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
+Ted reviews the PR before any merge or deployment. Publishing the PR does not
+authorize deployment of the page or the local worker rollout.
+
+The complete private backend, card data, credential-dependent worker sources, screenshots, and keyed URL remain local operational files. The public review tools contain no credentials, client registry, or private worker patch. Ted reviews the private local bundle separately. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
