@@ -315,7 +315,9 @@ async function loadJobs(){
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('[data-approval-id][open]')].map(e=>e.dataset.approvalId);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
- if(!editing&&!state.busy.size){render();document.querySelectorAll('[data-approval-id]').forEach(e=>{if(opened.includes(e.dataset.approvalId))e.open=true})}
+ /* Mockups shows no jobs data, so a rebuild there only resets the swipe the viewer is in. */
+ if(state.project==='Mockups')renderFresh();
+ else if(!editing&&!state.busy.size){render();document.querySelectorAll('[data-approval-id]').forEach(e=>{if(opened.includes(e.dataset.approvalId))e.open=true})}
  }catch(e){if(requestId===state.jobsRequestId&&requestKey===key&&state.project==='Jobs')announce(e.message,true)}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
 async function control(action,body){
