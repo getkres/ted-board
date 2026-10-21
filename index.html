@@ -379,7 +379,7 @@ positionTedControls();
 $('refresh').addEventListener('click',()=>{if(ControlCenterV3.isMockups(state.project))mockups.load();else{load();if(state.project==='Control')controlCenter.load()}});
 $('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading||mockups.busy.size)return;announce('');renderAccess()});
 window.addEventListener('online',()=>{if(key&&!state.busy.size)load()});
-v3.setup();render();if(key){load();mockups.load();if(state.project==='Control')controlCenter.load()}
+v3.setup();render();if(key){load();mockups.load();controlCenter.load()}
 </script>
 </body>
 </html>
