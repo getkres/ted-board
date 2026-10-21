@@ -39,7 +39,7 @@
 - [x] Run the full suite with evidence under `qa/pr7/`, including both themes and viewport sizes.
 - [x] Obtain an independent review and fix material findings.
 - [x] Check the final diff, commit, push `cc-v3/07-kres`, and create the requested draft PR with screenshots.
-- [ ] Append the outcome, QA evidence, and PR link to the job's `REPORT.md`.
+- [x] Append the outcome, QA evidence, and PR link to the job's `REPORT.md`.
 
 ## Verification record
 
@@ -50,3 +50,4 @@
 - Parallel browser attempts on the temporary local server lost local script responses. Final full verification runs use the ordinary sequential suite, one theme at a time.
 - Visual review found inherited serif guided instructions. A regression check failed on `Fraunces, Georgia, serif` before the theme-only Archivo override.
 - Final full suite: light 14/14 and dark 14/14, with 78 screenshots each, and all reported console/visual checks zero.
+- Delivery: [draft PR 27](https://github.com/getkres/ted-board/pull/27), verified open and draft against `cc-v3/06-qa`; job `REPORT.md` updated.
