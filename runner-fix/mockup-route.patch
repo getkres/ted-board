@@ -1,0 +1,25 @@
+--- a/mockup_route.py
++++ b/mockup_route.py
+@@ -91 +91 @@
+-def build_card(project,batch,images,reset=False):
++def build_card(project,batch,images,reset=False,section='up_next'):
+@@ -110 +110 @@
+-    card=dict(id=build_card_id(project,batch),project=project,section='ted_doing',
++    card=dict(id=build_card_id(project,batch),project=project,section=section,
+@@ -115,2 +115,3 @@
+-def publish_approved_card(project,batch,images,reset=False):
+-    card=build_card(project,batch,images,reset)
++def publish_approved_card(project,batch,images,reset=False,section='up_next'):
++    # Publishing approved art does not enqueue a session. Keep new work Up next.
++    card=build_card(project,batch,images,reset,section)
+@@ -130 +131 @@
+-    card_id=publish_approved_card(project,batch,images)
++    card_id=publish_approved_card(project,batch,images,section='ted_doing')
+@@ -150 +151,2 @@
+-        return publish_approved_card(project,batch,images,reset)
++        section='ted_doing' if existing and existing.get('section')=='ted_doing' and not reset else 'up_next'
++        return publish_approved_card(project,batch,images,reset,section=section)
+@@ -162 +164,2 @@
+-        publish_approved_card(m['project'],m['batch'],images,reset)
++        section='ted_doing' if existing and existing.get('section')=='ted_doing' and not reset else 'up_next'
++        publish_approved_card(m['project'],m['batch'],images,reset,section=section)

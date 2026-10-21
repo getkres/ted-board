@@ -14,4 +14,12 @@ const jobs = [
 assert.deepEqual(doingCounts(cards, jobs, true, now), {running: 1, queued: 1, stale: 2});
 assert.equal(doingCounts(cards, jobs, false, now), null);
 assert.deepEqual(doingCounts([{id: 'missing', section: 'ted_doing'}], [{card_id: 'missing', status: 'running', pid: null, heartbeat_at: fresh}], true, now), {running: 0, queued: 0, stale: 1});
+
+assert.deepEqual(doingCounts([{id: 'duplicate', section: 'ted_doing'}], [
+  {card_id: 'duplicate', status: 'done', heartbeat_at: 'invalid'},
+  {card_id: 'duplicate', status: 'running', pid: 123, heartbeat_at: fresh},
+], true, now), {running: 1, queued: 0, stale: 0});
+assert.deepEqual(doingCounts([{id: 'future', section: 'ted_doing'}], [
+  {card_id: 'future', status: 'running', pid: 123, heartbeat_at: new Date(now + 600000).toISOString()},
+], true, now), {running: 0, queued: 0, stale: 1});
 console.log('PASS board status counts');

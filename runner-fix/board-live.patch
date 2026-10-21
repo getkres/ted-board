@@ -1,0 +1,15 @@
+--- a/board_live.py
++++ b/board_live.py
+@@ -124 +124,3 @@
+-   if age>=SIX_HOURS:state,line='blocked','no worker on this, ted needs to pick it up'
++   if age>=SIX_HOURS:
++    state,line,section='blocked','no worker on this, ted needs to pick it up','needs_you'
++    ask_anyway_reason='No worker or queued turn exists for this card. Sebastian must review it before work can resume.'
+@@ -159,2 +161,5 @@
+-     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you'}.get(state)
+-    elif job.get('pid') or job.get('status') in ('done','failed','finished') or age>=SIX_HOURS:state,line='blocked','worker stopped without a current report, ted needs to check'
++     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'needs_you'}.get(state)
++     if section=='needs_you':ask_anyway_reason='The worker report has unfinished work that Sebastian must review before this card can continue.'
++    elif job.get('pid') or job.get('status') in ('done','failed','finished') or age>=SIX_HOURS:
++     state,line,section='blocked','worker stopped without a current report, review and restart the card','needs_you'
++     ask_anyway_reason='The worker stopped without a current report. Sebastian must review the card before work can resume.'
