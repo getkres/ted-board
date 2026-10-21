@@ -1,7 +1,7 @@
 'use strict';
 class ControlCenterV3 {
- static order=['fictora','bookish','luvo','wcd','skyauto','bld','kres','dgc','personal','ted'];
- static names={fictora:'Fictora',bookish:'Bookish',luvo:'Luvo',wcd:'WCD',skyauto:'Sky Auto',bld:'BLD and Thomas Yang',kres:'Kres',dgc:"Dad's Golf Club",personal:'Personal',ted:'Ted'};
+ static order=[];
+ static names={};
  static isMockups(value){return value==='Mockups'||String(value).startsWith('mockups:')}
  static route(value){
   const v=String(value||'').trim(), l=v.toLowerCase();
@@ -9,11 +9,56 @@ class ControlCenterV3 {
   if(l==='mockups')return 'Mockups';
   if(['spaces','roadmap'].includes(l)||/^(space|pod|agent|roadmap|mockups):[^\s]+$/i.test(v))return l;
   if(['control','jobs'].includes(l))return l==='control'?'Control':'Jobs';
-  return ['Fictora','Bookish','Kres + clients','Lunair + art','Ted ops'].find(p=>p.toLowerCase()===l)||'inbox';
+  return 'inbox';
  }
  constructor(deps){Object.assign(this,deps);this.reset();}
- reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
- accept(data){this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();}
+ reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.linesFallback=false;this.lineCards=[];this.lineSnapshots=[];this.lineDirectory=null;ControlCenterV3.order=[];ControlCenterV3.names={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
+ accept(data){this.acceptLines(data);this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();}
+ // The authenticated feed owns line identity, order, and display names.
+ acceptLines(data){
+  const C=ControlCenterV3;
+  if(Array.isArray(data.cards))this.lineCards=data.cards;
+  if(Array.isArray(data.snapshots))this.lineSnapshots=data.snapshots;
+  const directories=(Array.isArray(data.snapshots)?data.snapshots:[]).filter(s=>s?.kind==='lines');
+  if(Array.isArray(data.lines))this.lineDirectory=data.lines;
+  else if(directories.length)this.lineDirectory=directories.flatMap(s=>{
+   const payload=s.payload;
+   return Array.isArray(payload)?payload:Array.isArray(payload?.items)?payload.items:Array.isArray(payload?.lines)?payload.lines:[];
+  });
+  this.linesFallback=false;
+  C.order=[];C.names=Object.create(null);
+  const add=(id,name)=>{
+   if(typeof id!=='string'||typeof name!=='string')return;
+   id=id.toLowerCase().trim();name=name.trim();
+   if(!/^[a-z0-9_-]+$/.test(id)||!name)return;
+   if(!C.order.includes(id))C.order.push(id);
+   C.names[id]=name;
+  };
+  if(this.lineDirectory!==null){
+   for(const row of this.lineDirectory)if(row&&typeof row==='object')add(row.id||row.key,row.name||row.label);
+   return;
+  }
+  // Rebuild inferred metadata from current cards and snapshots. Keep the cards
+  // when a separate snapshots-only response updates the other source.
+  for(const row of this.lineCards)if(row&&typeof row==='object')add(row.line,row.line_name||row.project);
+  for(const snapshot of this.lineSnapshots){
+   if(!snapshot||!['pods','roadmap'].includes(snapshot.kind))continue;
+   const row=snapshot.payload||{};add(row.line||snapshot.key,row.line_name||row.project);
+  }
+ }
+ authFailed(){this.linesFallback=true;ControlCenterV3.order=Array.from({length:10},(_,i)=>'line'+(i+1));ControlCenterV3.names=Object.fromEntries(ControlCenterV3.order.map((id,i)=>[id,'Line '+(i+1)]));}
+ unreadCount(card){return unread(card)?1:0;}
+ pendingApprovals(card){return this.getState().approvals.filter(a=>a.status==='pending'&&(!card||a.card_id===card.id));}
+ attentionBadges(parent,unreadCount,approvalCount,cls='v3-attention-count'){
+  for(const [count,label]of [[unreadCount,'unread'],[approvalCount,'approvals']])if(count)parent.append(this.el('span',cls,count+' '+label));
+ }
+ attentionList(parent){
+  const state=this.getState(),cards=state.cards.filter(c=>this.unreadCount(c)||this.pendingApprovals(c).length),orphans=this.pendingApprovals().filter(a=>!state.cards.some(c=>c.id===a.card_id));
+  if(!cards.length&&!orphans.length)return;
+  const list=this.el('section','v3-attention');list.append(this.el('h2',null,'Ted replied / approvals waiting'));
+  for(const card of cards){const row=this.el('article','v3-row'),open=this.button(card.title,'sp-text-link',()=>{this.item=card.id;this.split='yours';this.redraw();document.querySelector('.v3-detail')?.scrollIntoView({block:'nearest'});});open.dataset.attentionCard=card.id;row.append(open);this.attentionBadges(row,this.unreadCount(card),this.pendingApprovals(card).length);list.append(row);}
+  for(const approval of orphans.filter((a,i)=>orphans.findIndex(b=>b.card_id===a.card_id)===i)){const row=this.el('article','v3-row');row.append(this.el('h3',null,approval.summary||'Approval waiting'));renderApprovals({id:approval.card_id},row);list.append(row);}parent.append(list);
+ }
  setup(){
   const mast=document.querySelector('.masthead');mast.classList.add('v3-top');
   const controls=this.el('div','ted-controls');controls.append(document.getElementById('talk-ted'),document.getElementById('fresh-ted'));mast.append(controls);
@@ -31,8 +76,8 @@ class ControlCenterV3 {
   const tabs=document.getElementById('tabs'),state=this.getState();tabs.replaceChildren();
   const active=ControlCenterV3.isMockups(state.project)?'Mockups':state.project.split(':')[0];
   const open=new Set(this.mockups.mockups.filter(m=>m.status!=='archived'&&!['approved','scrapped'].includes(m.verdict)).map(m=>JSON.stringify([m.project,m.batch]))).size;
-  const list=[['inbox','Inbox',state.cards.filter(c=>c.section==='needs_you').length],['spaces','Spaces',10],['roadmap','Roadmap',this.feed('roadmap').length],['Mockups','Mockups',open]];
-  list.forEach(([route,label,count],i)=>{const b=this.button(label,'tab',()=>this.select(route));b.id='v3-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(active===route||active==='space'&&route==='spaces'||active==='pod'&&route==='spaces'||active==='agent'&&route==='spaces'));b.setAttribute('aria-controls','main');b.append(this.el('span','tab-count',String(count)));b.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const n=e.key==='Home'?0:e.key==='End'?3:(i+(e.key==='ArrowRight'?1:3))%4;this.select(list[n][0]);tabs.children[n].focus()}});tabs.append(b)});
+  const list=[['inbox','Inbox',state.cards.filter(c=>c.section==='needs_you').length],['spaces','Spaces',ControlCenterV3.order.length],['roadmap','Roadmap',this.feed('roadmap').length],['Mockups','Mockups',open]];
+  list.forEach(([route,label,count],i)=>{const b=this.button(label,'tab',()=>this.select(route));b.id='v3-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(active===route||active==='space'&&route==='spaces'||active==='pod'&&route==='spaces'||active==='agent'&&route==='spaces'));b.setAttribute('aria-controls','main');b.append(this.el('span','tab-count',state.loaded?String(count):'…'));if(route==='inbox'&&state.loaded)this.attentionBadges(b,state.cards.filter(c=>this.unreadCount(c)).length,this.pendingApprovals().length);b.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const n=e.key==='Home'?0:e.key==='End'?3:(i+(e.key==='ArrowRight'?1:3))%4;this.select(list[n][0]);tabs.children[n].focus()}});tabs.append(b)});
   document.getElementById('main').setAttribute('aria-labelledby',tabs.querySelector('[aria-selected=true]')?.id||'v3-tab-0');
  }
  feed(kind){return this.snapshots.filter(s=>s.kind===kind).flatMap(s=>{const p=s.payload;return Array.isArray(p)?p:Array.isArray(p?.items)?p.items:Array.isArray(p?.[kind])&&['decisions','routines'].includes(kind)?p[kind]:p?[{...p,key:s.key,generated_at:s.generated_at}]:[]});}
@@ -45,7 +90,7 @@ class ControlCenterV3 {
  tools(parent){const details=this.el('details','v3-tools'),summary=this.el('summary',null,'Rules, sprint, batches, and jobs');details.append(summary);const row=this.el('div','v3-actions');for(const name of ['Veto','Rules','Sprint','Batches'])row.append(this.button(name,'',()=>controlCenter.open(name)));row.append(this.button('Jobs','',()=>this.select('Jobs')));details.append(row);const all=this.el('details','v3-all-cards');all.append(this.el('summary',null,'All project cards'));const list=this.el('div','v3-card-directory');for(const card of this.getState().cards){const open=this.button(card.project+' / '+card.title,'',()=>{this.item=card.id;this.split='yours';this.select('inbox');});list.append(open);}all.append(list);details.append(all);parent.append(details);}
  needs(){return this.getState().cards.filter(c=>c.section==='needs_you');}
  kind(card){return ({money_out:'money out',your_words:'your words',your_login:'your login',legal:'legal',database_write:'database write'})[TedDecisionKinds.normalize(card.decision_kind||card.kind)]||'your call';}
- lineOf(card){const raw=String(card.line||card.project||'').toLowerCase();return ControlCenterV3.order.find(id=>id===raw||ControlCenterV3.names[id].toLowerCase()===raw)||(/ted/.test(raw)?'ted':/lunair/.test(raw)?'fictora':null);}
+ lineOf(card){const raw=String(card.line||card.project||'').toLowerCase();return ControlCenterV3.order.find(id=>id===raw||String(ControlCenterV3.names[id]||'').toLowerCase()===raw)||null;}
  payloads(kind){return this.snapshots.filter(s=>s.kind===kind).map(s=>s.payload||{});}
  decisions(){
   const cards=this.getState().cards;
@@ -57,11 +102,12 @@ class ControlCenterV3 {
  async loadSnapshots(){
   if(!this.capabilities.snapshots||this.snapshotLoading)return;
   this.snapshotLoading=true;const generation=this.generation;
-  try{const data=await this.api('GET',undefined,'snapshots');if(generation!==this.generation)return;if(Array.isArray(data.snapshots)){this.snapshots=data.snapshots;this.redraw();}}
+  try{const data=await this.api('GET',undefined,'snapshots');if(generation!==this.generation)return;if(Array.isArray(data.snapshots)){this.snapshots=data.snapshots;this.acceptLines(data);this.redraw();}}
   catch{if(generation===this.generation)this.notice('Snapshot updates are unavailable. Existing cards and mockups still work.',true);}
   finally{if(generation===this.generation)this.snapshotLoading=false;}
  }
  inbox(main){
+  const state=this.getState();if(!state.loaded){main.append(this.el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return;}
   const n=this.needs().length,calls=this.decisions();
   const hero=this.heading(main,'NEED YOU',new Intl.DateTimeFormat('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'}).format(new Date())+' Pacific','stamp',this.needs()[0]?.ted_line||'Your calls, then I can keep moving.');
   const eye=this.el('div','v3-counter');eye.innerHTML=TedTheme.eye(n);hero.querySelector('.v3-hero-copy').prepend(eye);hero.querySelector('.v3-hero-copy').append(this.el('p','v3-scrawl','TED HANDLED '+calls.filter(c=>c.status==='done').length));
@@ -79,12 +125,12 @@ class ControlCenterV3 {
    grid.append(list);
    const selected=this.getState().cards.find(c=>c.id===this.item);if(selected)grid.append(this.itemDetail(selected,cards));else {const side=this.el('aside','v3-stream');side.append(this.el('h2',null,'Ted decided'),this.decisionList(calls));grid.append(side);}paper.append(grid);
   }
-  this.tools(paper);
+  this.attentionList(paper);this.tools(paper);
   if(this.split==='yours'&&this.spTiles){const spaces=this.el('section','v3-home-spaces');spaces.append(this.el('h2',null,'Spaces'));this.spTiles(spaces);main.append(spaces);}
  }
  ticket(card,i){
   const row=this.el('article','v3-ticket'+(i===0?' v3-ticket-hero':''));row.dataset.cardId=card.id;row.dataset.ticket=card.id;row.tabIndex=0;row.addEventListener('focusin',()=>this.focusIndex=i);
-  const meta=this.el('div','v3-meta');meta.append(this.el('span','v3-tag',this.kind(card)),this.el('strong',null,card.line||card.project));row.append(meta);
+  const meta=this.el('div','v3-meta');meta.append(this.el('span','v3-tag',this.kind(card)),this.el('strong',null,ControlCenterV3.names[this.lineOf(card)]||card.line||card.project));if(this.unreadCount(card))meta.append(replyDot());this.attentionBadges(meta,this.unreadCount(card),this.pendingApprovals(card).length);row.append(meta);
   const open=this.button(card.title,'v3-ticket-title',()=>{this.item=card.id;this.redraw();document.querySelector('.v3-detail')?.scrollIntoView({block:'nearest'});});open.dataset.openCard=card.id;row.append(open,this.el('p','v3-why',card.why||String(card.body||'').split('\n')[0]||'Open this card to read the details.'));
   const actions=this.el('div','v3-actions');for(const o of options(card))actions.append(this.button(o.label,'primary',()=>this.answerCard(card,o)));
   if(this.kind(card)==='database write')actions.append(this.button('Read the SQL','',()=>{this.item=card.id;this.redraw();document.querySelector('.v3-detail')?.scrollIntoView({block:'nearest'});}));
@@ -92,7 +138,7 @@ class ControlCenterV3 {
   row.append(actions);return row;
  }
  async answerCard(card,option){const ok=await act(card,'choice',option.value);if(ok){this.lastAnswer={id:card.id};this.item=null;this.redraw();}}
- quick(card,index){const option=options(card)[index];if(option)return this.answerCard(card,option);this.notice('Open the card and choose one of its recorded actions.');}
+ quick(card,index){const option=options(card)[index];if(option){if([card.decision_kind,card.kind].some(TedDecisionKinds.isReserved)&&!confirm(option.label+': '+card.title+'?'))return;return this.answerCard(card,option);}this.notice('Open the card and choose one of its recorded actions.');}
  swipe(node,right,left){let start=null;node.style.touchAction='pan-y';node.addEventListener('pointerdown',e=>{if(e.target.closest('button,a,input,textarea,select')||e.pointerType==='mouse')return;start={x:e.clientX,y:e.clientY};});node.addEventListener('pointercancel',()=>start=null);node.addEventListener('pointerup',e=>{if(!start)return;const dx=e.clientX-start.x,dy=e.clientY-start.y;start=null;if(Math.abs(dx)>90&&Math.abs(dx)>Math.abs(dy)*1.5)(dx>0?right:left)();});}
  itemDetail(card,cards){
   const detail=this.el('aside','v3-detail');detail.append(this.button((cards.includes(card)?'Inbox / Yours / '+(cards.indexOf(card)+1)+' of '+cards.length:'Inbox / '+card.project+' / '+({ted_doing:'In progress',up_next:'Up next',done:'Done',killed:'Killed'}[card.section]||'Card')),'v3-crumb',()=>{this.item=null;this.redraw()}),this.el('span','v3-tag',this.kind(card)),this.el('h2','v3-detail-title',card.title));

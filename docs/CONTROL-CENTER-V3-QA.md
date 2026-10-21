@@ -57,3 +57,13 @@ Existing authored-title assertions use `textContent` for unchanged source titles
 Final Kres verification passed all 14 groups in each mode, including nine snapshot unit tests per run. There are 78 screenshots per mode, 156 total, at 390 by 844 and 1440 by 960, with every screenshot result reporting zero console errors, clipped text, horizontal overflow, gradients, and em dashes. Evidence is under `qa/pr7/light/` and `qa/pr7/dark/`, including each `suite.json` and the per-view result files. The guided instruction font regression also passes.
 
 Parallel attempts against the temporary local server lost some JavaScript/CSS responses and failed before initialization. The final complete runs above were sequential, with no application logic changes or increased test timeouts for that transport issue.
+
+## Review gate fixes
+
+Branch `cc-v3/08-fixes` targets `cc-v3/07-kres`. Run `node qa/run.cjs` with the static server on localhost:8763. All backend requests remain intercepted. New review regressions run at 390 and 1440, and cover render-local gestures, refreshed mixed-case batch routes, removed batches, loading and error copy, nested disclosure restoration, unread replies across every card section, orphan and linked approvals, sensitive shortcut confirmations, authenticated line metadata, key resets, and stale status copy.
+
+QA source fixtures now use synthetic line identities and names. Generated PNGs and JSON reports live outside this public checkout in `../qa-evidence/`; prior evidence has been moved there as well. The runner defaults to `../qa-evidence/pr8`, and `QA_OUT` can select another external directory. Historical evidence locations above refer to earlier branch states.
+
+The independent review found stale legacy line labels and ignored empty authoritative directories. The fix rebuilds inferred metadata from the current card and snapshot sources, preserves card-derived names across snapshots-only responses, and honors explicitly empty directories. All 22 review regression cases pass after that correction. No Critical or Minor findings were returned.
+
+Final verification passed all 15 groups in both light and dark, including 22 review regressions and nine snapshot unit tests per run. Each run produced 84 screenshots at 390 by 844 and 1440 by 960, with zero console errors, clipped text, horizontal overflow, gradients, or em dashes. Final evidence is in `../qa-evidence/pr8/` and `../qa-evidence/pr8-dark/`, and both `suite.json` files report zero failed groups. Visual inspection included the new attention list and badges on phone and desktop. The branch deletes 320 tracked QA PNGs and 29 generated JSON reports; it does not rewrite ancestor commits or inherited operational documentation.

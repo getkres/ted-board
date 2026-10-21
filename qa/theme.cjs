@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {chromium, fixture, clip} = require('./browser.cjs');
 
-const out = process.env.QA_OUT || 'qa/pr7/theme';
+const out = process.env.QA_OUT || '../qa-evidence/pr8/theme';
 const cases = [
   {name: 'system-light', system: 'light', override: null, mode: 'light'},
   {name: 'system-dark', system: 'dark', override: null, mode: 'dark'},

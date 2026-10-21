@@ -55,7 +55,6 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
 const POD_PULSE_ERROR='Pod updates could not load. Refresh to try again.';
-const PROJECTS=['Fictora','Bookish','Kres + clients','Lunair + art','Ted ops'];
 const SECTIONS=[['needs_you','Needs you'],['ted_doing',"Ted’s doing"],['up_next','Up next'],['done','Done']];
 const $=id=>document.getElementById(id);
 const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],jobsLoaded:false,jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
@@ -205,7 +204,7 @@ function liveStrip(card){
  const strip=el('div','live-strip');const parsed=Date.parse(card.live_status_at);const age=Number.isFinite(parsed)?Math.max(0,Date.now()-parsed):null;
  const stale=card.live_state==='running'&&(age===null||age>7200000);
  const state=stale?'blocked':(['running','blocked','waiting_on_you','done'].includes(card.live_state)?card.live_state:'blocked');strip.dataset.state=state;
- const line=stale?"stale, ted's checking":(card.live_status||'waiting for a live update');
+ const line=stale?'Live update is stale':(card.live_status||'waiting for a live update');
  const copy=el('span',null,line);copy.setAttribute('aria-label',({running:'running',blocked:'blocked',waiting_on_you:'waiting on you',done:'done'})[state]+': '+line);
  const time=el('time');if(age!==null){time.dateTime=card.live_status_at;const minutes=Math.floor(age/60000);time.textContent='updated '+(minutes<1?'just now':minutes<60?minutes+'m ago':minutes<1440?Math.floor(minutes/60)+'h ago':Math.floor(minutes/1440)+'d ago')}else time.textContent='no update yet';
  strip.append(copy,time);return strip;
@@ -264,21 +263,21 @@ function renderAccess(){
 async function api(method,body,resource=''){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
  try{const r=await fetch(ENDPOINT+(method==='GET'?'?key='+encodeURIComponent(key)+(resource?'&resource='+encodeURIComponent(resource):''):''),{method,headers:method==='GET'?{}:{'Content-Type':'text/plain'},body:body?JSON.stringify({key,...body}):undefined,cache:'no-store',referrerPolicy:'no-referrer',signal:controller.signal});let data;try{data=await r.json()}catch{throw new Error('The service returned an unreadable response. Try again.')}
- if(!r.ok){if(r.status===403)throw new Error('Access key not accepted. Tap Access to open your private link again.');throw new Error(data.error||'Could not save. Try again.')}
+ if(!r.ok){if([401,403].includes(r.status)){const error=new Error('Access key not accepted. Tap Access to open your private link again.');error.authFailed=true;throw error;}throw new Error(data.error||'Could not save. Try again.')}
  return data;
  }catch(e){if(e.name==='AbortError')throw new Error('The connection timed out. Refresh to check whether your answer arrived.');if(e instanceof TypeError)throw new Error('Could not connect. Check your connection and try again.');throw e}finally{clearTimeout(timeout)}
 }
 async function load(force=false){
  if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;const requestId=++state.loadRequestId,requestKey=key,revision=state.revision;$('refresh').disabled=true;announce('');render();
  try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.cards=data.cards;applyPodPulse(data);v3.accept(data);const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(state.podPulseError?POD_PULSE_ERROR:storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'',state.podPulseError)}
- catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
+ catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.loading=false;if(e.authFailed)v3.authFailed();announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
 }
 async function pollCards(){
  if(!key||document.hidden||state.loading||state.polling||state.busy.size)return;
  state.polling=true;const revision=state.revision,requestId=state.loadRequestId,requestKey=key;
  try{
   const data=await api('GET');if(revision!==state.revision||requestId!==state.loadRequestId||requestKey!==key||!Array.isArray(data.cards))return;
-  state.cards=data.cards;v3.accept(data);const pulseHadError=state.podPulseError;applyPodPulse(data);
+  state.cards=data.cards;v3.accept(data);renderTabs();const pulseHadError=state.podPulseError;applyPodPulse(data);
   if(state.project==='Control'&&controlCenter.view==='Veto'&&!controlCenter.busy)controlCenter.load();
   if(state.podPulseError)announce(POD_PULSE_ERROR,true);
   else if(pulseHadError&&$('notice').textContent===POD_PULSE_ERROR)announce('');
@@ -313,13 +312,13 @@ function renderApprovals(card,article){
 }
 async function loadJobs(){
  if(!key||state.jobsLoading)return;state.jobsLoading=true;const requestId=++state.jobsRequestId,requestKey=key;
- try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
+ try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
  // Preserve the open artifact views and drafts during polling.
- const opened=[...document.querySelectorAll('[data-approval-id][open]')].map(e=>e.dataset.approvalId);
+ const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
  /* Mockups shows no jobs data, so a rebuild there only resets the swipe the viewer is in. */
  if(ControlCenterV3.isMockups(state.project))renderFresh();
- else if(!editing&&!state.busy.size){render();document.querySelectorAll('[data-approval-id]').forEach(e=>{if(opened.includes(e.dataset.approvalId))e.open=true})}
+ else if(!editing&&!state.busy.size){render();document.querySelectorAll('details:not(.pod-row)').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true})}
  }catch(e){if(requestId===state.jobsRequestId&&requestKey===key&&state.project==='Jobs')announce(e.message,true)}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
 async function control(action,body){

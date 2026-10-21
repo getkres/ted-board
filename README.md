@@ -1,10 +1,10 @@
 # Ted Board, Control Center v3
 
-A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this seven-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
+A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this eight-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
 
-The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the ten-line order into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
+The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the authenticated line directory into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
 
-Private access stays in `#k=` and is remembered on the device. Deep routes use `#tab=inbox`, `spaces`, `space:luvo`, `pod:luvo/media`, `agent:luvo/meta-media-buyer`, `roadmap`, `roadmap:fictora`, `mockups`, or `mockups:<encoded batch key>`. Browser Back and Forward work. Never publish a keyed URL.
+Private access stays in `#k=` and is remembered on the device. Deep routes use `#tab=inbox`, `spaces`, `space:line3`, `pod:line3/media`, `agent:line3/meta-media-buyer`, `roadmap`, `roadmap:line1`, `mockups`, or `mockups:<encoded batch key>`. Browser Back and Forward work. Never publish a keyed URL.
 
 Use the desktop command field to find a view, space, or card. On phone, Inbox's “Rules, sprint, batches, and jobs” disclosure also contains All project cards, so active, queued, completed, and killed cards retain their conversations and guided steps. Talk to Ted, Fresh Ted, and the Access footer retain their existing behavior.
 

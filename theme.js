@@ -1,20 +1,15 @@
 "use strict";
 (()=>{
+// Static copy describes controls only. Operational status belongs to authenticated data.
 const LINES = {
- home: "Do the Luvo money one first. I'd say wait, but it's your damn money.",
- item: "I'd wait. Paying for a test we can't read is lighting cash on fire.",
- decided: "Seven calls. Veto anything that smells off. I won't sulk. Much.",
- routines: "Three broke. I'm on E2E first. The bookmarks are the fun part.",
- space: "Luvo's fine-ish. Data's broken, so nobody's reading a damn thing till it's fixed.",
- pod: "Media's sitting on its hands till Data unbreaks. Not its fault.",
- agent: "It did its job. The ingest didn't. Don't yell at the buyer.",
- roadmap: "DGC sits on your WAIT, so I'm not touching it. The rest I'm on.",
- roadbiz: "The null-age bug is the one I'd lose sleep over, if bears slept.",
- mk: "Pick the lander look first. Half the queue hangs off it.",
- round: "My three picks stay hidden till you choose. Yours is the one that counts.",
- cmp: "Seven versions of one forehead. Swipe it and tell me v8 is the one.",
- mkup: "Circle it and I'll fix it. A bare 'needs work' makes me guess, and I guess wrong.",
- triage: "Right if it's good, left if it's not, up if it's trash. Go.",
+ decided: "Review the recorded calls, and veto a proposal from its controls.",
+ routines: "Open a routine to read its recorded status and output.",
+ roadmap: "Now, next, later, and shipped, as recorded in the roadmap.",
+ mk: "Open a batch to review its frames.",
+ round: "Choose a direction, and record why it works.",
+ cmp: "Compare the versions, then review the selected frame.",
+ mkup: "Draw or pin the change you want to explain.",
+ triage: "Right for good, left for needs work, or up to scrap.",
 };
 const bearBase = function(size=120, opts={}){
  const fur=opts.fur||'#7a4e2d', belly=opts.belly||'#e9c49a', lamp=opts.lamp!==false;

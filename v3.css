@@ -10,3 +10,5 @@
 @media(max-width:800px){.masthead .tab-wrap{order:10;flex:0 0 100%;width:100%;min-width:0;border-top:2px dashed var(--v3-faint);padding-top:10px!important}.masthead .tabs{padding-bottom:4px}.masthead.v3-top{gap:12px}.v3-card-directory{grid-template-columns:1fr}}
 .talk-ted{padding:9px 12px;min-width:70px;justify-content:center;text-decoration:none;font-weight:700}.masthead .v3-command{width:365px;font-size:14px}
 @media(max-width:1200px) and (min-width:801px){.masthead .v3-command{width:270px}}
+
+.v3-attention{margin:24px 0;border-top:2px solid;padding-top:16px}.v3-attention-count{display:inline-block;font:11px/1.5 var(--v3-mono);margin:3px 6px 0 0;white-space:normal}.tab .v3-attention-count{display:block;margin:2px 0 0;font-size:10px;line-height:1.25}.tab{white-space:normal}

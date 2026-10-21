@@ -7,8 +7,13 @@ class MockupsV3 extends MockupsView {
  batches(){const map=new Map();for(const m of this.mockups.filter(m=>m.status!=='archived')){const key=this.batchKey(m.project,m.batch);if(!map.has(key))map.set(key,{key,project:m.project,title:m.batch,images:[],at:m.created_at,kind:m.kind||'set',blocking:0});const b=map.get(key);b.images.push(m);b.blocking=Math.max(b.blocking,Number(m.blocks_count)||0);if(m.created_at>b.at)b.at=m.created_at;}return [...map.values()].map(b=>({...b,open:b.images.filter(m=>!['approved','scrapped'].includes(this.verdict(m))).length}));}
  render(root){
   root.classList.add('v3');const ui=this.v3;if(!ui){super.render(root);return;}
-  const route=ui.getState().project;if(route.startsWith('mockups:')){let title='';try{title=decodeURIComponent(route.slice(8));}catch{}const batch=this.batches().find(b=>b.key.toLowerCase()===title||b.title.toLowerCase()===title);if(batch){if(this.reviewBatch?.key!==batch.key){this.reviewBatch=batch;this.reviewView=batch.kind==='round'?'round':batch.kind==='stack'?'compare':'batch';this.reviewIndex=0;}else this.reviewBatch=batch;}}
-  else if(this.reviewView!=='triage'){this.reviewView='home';this.reviewBatch=null;}
+  const route=ui.getState().project;
+  if(route.startsWith('mockups:')){
+   let title='';try{title=decodeURIComponent(route.slice(8)).toLowerCase();}catch{}
+   const batch=this.batches().find(b=>b.key.toLowerCase()===title||b.title.toLowerCase()===title);
+   if(batch){if(this.reviewBatch?.key!==batch.key){this.reviewView=batch.kind==='round'?'round':batch.kind==='stack'?'compare':'batch';this.reviewIndex=0;}this.reviewBatch=batch;this.reviewIndex=Math.min(this.reviewIndex,Math.max(0,batch.images.length-1));}
+   else{this.reviewBatch=null;this.reviewView='home';this.currentCompareId=null;}
+  }else if(this.reviewView!=='triage'){this.reviewView='home';this.reviewBatch=null;}
   if(this.reviewView==='round'&&this.reviewBatch){this.renderRound(root,this.reviewBatch);return;}
   if(this.reviewView==='compare'&&this.reviewBatch){this.renderCompare(root,this.reviewBatch);return;}
   if(this.reviewView==='triage'){this.renderTriage(root);return;}

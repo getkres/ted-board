@@ -13,7 +13,7 @@
  window.RoadmapV3Data={normalize};
  window.installRoadmapV3=function(C){Object.assign(C.prototype,{
   roadData(which){return normalize(which,this.snapshots)},
-  roadEmpty(data,lane,which){return text(data.empty_copy[lane],which==='dgc'&&lane==='shipped'&&data.explicitlyEmpty?'Nothing shipped. No PO, no confirmed drop.':data.explicit[lane]?'No items logged.':'Not logged.')},
+  roadEmpty(data,lane,which){return text(data.empty_copy[lane],data.explicit[lane]?'No items logged.':'Not logged.')},
   roadHealth(which,data){return data.health!=='not logged'?data.health:this.spData?.(which).health||'not logged'},
   roadChip(value){return this.spChip?this.spChip(value):this.el('span','v3-status',text(value))},
   roadCrumbs(main,which){if(this.spCrumbs)this.spCrumbs(main,[['Roadmap','roadmap'],[C.names[which]||which]]);else main.append(this.button('Roadmap / '+(C.names[which]||which),'v3-crumb',()=>this.select('roadmap')))},

@@ -30,7 +30,7 @@ test('review choices require an idempotency UUID and an exact allowed choice', (
   assert.throws(()=>validateReviewChoice({...choice,operation_id:'retry'}));
 });
 test('accepts the frontend items contract for line-keyed feeds', () => {
-  const snapshots=['routines','pods','roadmap','decisions'].map(kind=>({...row,kind,key:'luvo',payload:{items:[]}}));
+  const snapshots=['routines','pods','roadmap','decisions'].map(kind=>({...row,kind,key:'line3',payload:{items:[]}}));
   assert.equal(validateSnapshotPush({snapshots},now).length,4);
 });
 test('resource snapshots exposes capabilities without accepting a body-supplied role', async () => {

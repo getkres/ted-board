@@ -3,7 +3,7 @@
  const list=value=>Array.isArray(value)?value.filter(x=>x&&typeof x==='object'):[];
  const text=(value,fallback='not logged')=>typeof value==='string'&&value.trim()?value:typeof value==='number'?String(value):fallback;
  const id=value=>text(value,'');
- function line(raw,C){const value=String(raw||'').toLowerCase().replace(/[^a-z0-9]/g,'');return C.order.find(k=>k===value||String(C.names[k]||'').toLowerCase().replace(/[^a-z0-9]/g,'')===value)||({tedops:'ted',lunairart:'fictora',kresclients:'kres'})[value]||null}
+ function line(raw,C){const value=String(raw||'').toLowerCase().replace(/[^a-z0-9]/g,'');return C.order.find(k=>k.replace(/[^a-z0-9]/g,'')===value||String(C.names[k]||'').toLowerCase().replace(/[^a-z0-9]/g,'')===value)||null}
  function normalize(which,snapshots,pulse,C){
   const matching=list(snapshots).filter(s=>s.kind==='pods'&&line(s.payload?.line||s.key,C)===which),meta=matching.at(-1)?.payload||{};
   const pods=[],seen=new Set();
@@ -52,10 +52,11 @@
     const bears=this.el('div','sp-pod-bears');for(const pod of data.pods){const b=this.button('','sp-pod-bear',()=>this.select('pod:'+which+'/'+encodeURIComponent(pod.id)));b.setAttribute('aria-label',pod.name+', '+pod.state);b.append(this.spCub(pod.state));bears.append(b)}tile.append(bears,this.el('p','sp-now',data.now));grid.append(tile)}parent.append(grid);parent.append(this.el('p','sp-shelf','On the shelf: not logged.'));return grid;
   },
   spaces(main){
-   this.heading(main,'TEN LINES. ONE BOARD.','Your calls, what Ted is on, and what comes next.');this.spTiles(this.paper(main));
+   this.heading(main,'YOUR SPACES.','Your calls, what Ted is on, and what comes next.');this.spTiles(this.paper(main));
   },
   space(main,which){
    if(!C.order.includes(which)){this.heading(main,'SPACE NOT LOGGED');const p=this.paper(main);p.append(this.button('Back to Spaces','',()=>this.select('spaces')));return}
+   const surface=this.el('section','sp-space-surface');main.append(surface);main=surface;
    const data=this.spData(which);this.spSwitch(main,which);this.heading(main,C.names[which],data.now,'glass',text(data.ted_line,'No note logged for this line.'));
    const paper=this.paper(main);paper.append(this.spChip(data.health),this.el('p','v3-keys','[ / ] next space · P pods · R roadmap · Esc inbox'));
    const layout=this.el('div','sp-layout'),body=this.el('div','sp-main'),side=this.el('aside','sp-side');
