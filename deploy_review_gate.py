@@ -102,14 +102,14 @@ def pod_changes(biz_root, company_root,registry=None):
         if config_path.exists(): config = gate.load_json(config_path)
         elif entry.get('scaffold') is True:
             config = {'id': business, 'name': entry.get('name',business.title()), 'status': 'draft',
-                      'status_note':'Unscheduled, read-only scaffold.','kind':'internal','mrr_usd':None,
-                      'business':'Private administration and drafts only.','platforms':[],
-                      'kpi':'Verified completion of authorized personal tasks.',
+                      'status_note':'Unscheduled, read-only scaffold.','kind':'needs Ted','mrr_usd':None,
+                      'business':'needs Ted','platforms':[],
+                      'kpi':'needs Ted',
                       'authority': 'Read-only and drafts only. No sends, spending, or scheduled routines.',
                       'approval': 'Existing approval rules apply. No new execution authority.',
                       'slack':'No outgoing messages.','cadence': {}, 'pool': [],
-                      'fatigue_trigger':'Not applicable.','creative':{'cycle_days':None,'cap_per_cycle':0,'compliance':'CANON.md and existing hard rules.','competitors':[],'pipeline':'Drafts and review only.'},
-                      'report_to':'Ted Board through the mandatory review gate.','extra_rules':[],
+                      'fatigue_trigger':'needs Ted','creative':{'cycle_days':None,'cap_per_cycle':0,'compliance':'needs Ted','competitors':[],'pipeline':'needs Ted'},
+                      'report_to':'needs Ted','extra_rules':['Business facts and platform scope need Ted. No new execution authority.'],
                       'files':{'knowledge':str(pod/'KNOWLEDGE.md'),'playbook':str(pod/'LEAD.md'),
                                'ledger_dir':str(pod/'ledger'),'status_file':str(pod/'status.json'),'needs_file':str(pod/'needs.jsonl')}}
         else: raise gate.blocked()
@@ -118,10 +118,10 @@ def pod_changes(biz_root, company_root,registry=None):
         if entry.get('scaffold') is True:
             scaffold={
                 'KNOWLEDGE.md':'# Desk knowledge\n\nRead ../CANON.md, ../DECISIONS.md, and existing owner instructions. No new execution authority.\n',
-                'PANEL.md':'# Desk audience\n\nReview for the intended operator, Ted. No customer personas or external audience evidence are established. Never present simulated reactions as research.\n',
+                'PANEL.md':'# Desk audience\n\nDraft operator check only. Customer personas, audience evidence, and business rules need Ted. Never present simulated reactions as research.\n',
                 'CANON.md':'# Canon pointer\n\nRead ../CANON.md and its current cited sources.\n',
                 'needs.jsonl':'',
-                'status.json':json.dumps({'name':entry.get('name',business.title()),'health':'amber','health_note':'Unscheduled, read-only scaffold. No run has shipped.','shipped':[],'testing':[]},indent=2)+'\n',
+                'status.json':json.dumps({'name':entry.get('name',business.title()),'health':'amber','health_note':'Draft scaffold. Business state needs Ted.','shipped':[],'testing':[]},indent=2)+'\n',
                 'ledger/README.md':'# Desk ledger\n\nStore dated, reviewed output here. This scaffold registers no routine.\n',
             }
             for name,text in scaffold.items():
