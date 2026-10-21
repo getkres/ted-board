@@ -1,0 +1,72 @@
+[
+  {
+    "name": "snapshot unit tests",
+    "status": 0,
+    "output": "✔ accepts bounded snapshots and strips unknown envelope fields (1.608375ms)\n✔ rejects unknown kinds, duplicate keys, secrets, malformed rows, and oversized payloads (0.230166ms)\n✔ prevents money, sends, and database writes from appearing as automatic decisions (0.119ms)\n✔ review choices require an idempotency UUID and an exact allowed choice (0.446167ms)\n✔ accepts the frontend items contract for line-keyed feeds (0.088084ms)\n✔ resource snapshots exposes capabilities without accepting a body-supplied role (0.097834ms)\n✔ page keys cannot push snapshots and workers cannot submit page review choices (0.052459ms)\n✔ missing schema degrades to an empty feed, but operational database errors stay visible (0.100042ms)\n✔ existing and alias reserved decision kinds cannot enter automatic feeds (0.210708ms)\nℹ tests 9\nℹ suites 0\nℹ pass 9\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 53.009542"
+  },
+  {
+    "name": "Inbox actions",
+    "status": 0,
+    "output": "Inbox actions, SQL swipe exclusion, veto, review receipts, and missing snapshots: pass"
+  },
+  {
+    "name": "Inbox isolation",
+    "status": 0,
+    "output": "Inbox split safety, retained cards, and status-only routines: pass"
+  },
+  {
+    "name": "snapshot polling",
+    "status": 0,
+    "output": "Snapshot and capability refresh through normal guarded polling: pass"
+  },
+  {
+    "name": "in-flight key isolation",
+    "status": 0,
+    "output": "Snapshot and card in-flight key-reset isolation: pass"
+  },
+  {
+    "name": "Spaces",
+    "status": 0,
+    "output": "Spaces normalization: 9 assertions passed.\nSpaces browser checks passed: 8 screenshots, keyboard, swipe, links, missing data, and long names."
+  },
+  {
+    "name": "Roadmap",
+    "status": 0,
+    "output": "Roadmap normalization: 8 assertions passed.\nRoadmap browser checks passed: 4 screenshots, approval links, missing data, explicit empty boards, and long names."
+  },
+  {
+    "name": "main view matrix",
+    "status": 0,
+    "output": "{\"stage\":6,\"screens\":24,\"clipped\":0,\"consoleErrors\":0}"
+  },
+  {
+    "name": "mockup view matrix",
+    "status": 0,
+    "output": "Mockup workflows: 18 screenshots, 0 clips, 0 console errors."
+  },
+  {
+    "name": "mockup safety",
+    "status": 0,
+    "output": "Mockup keyboard targets, round why, and key-reset isolation: pass"
+  },
+  {
+    "name": "triage and Undo",
+    "status": 0,
+    "output": "Triage advances on confirmed feedback and preserves Undo: pass"
+  },
+  {
+    "name": "markup gestures and crops",
+    "status": 0,
+    "output": "Markup normalization and path safety checks passed.\nMarkup browser checks passed at both widths, including Undo, capability gating, rejection retention, and acknowledged saves."
+  },
+  {
+    "name": "retained workflows",
+    "status": 0,
+    "output": "Retained controls, guide, jobs, and access: 14 screenshots pass"
+  },
+  {
+    "name": "Kres theme",
+    "status": 0,
+    "output": "Kres theme: 8 screenshots, system modes, explicit overrides, local fonts, and live counts pass."
+  }
+]

@@ -1,6 +1,6 @@
 # Control Center v3 QA and handoff
 
-All six changes are draft PRs in an ordered stack. No SQL, deployment, main push, or merge was performed. Testing serves the static folder on localhost:8763, with every backend request intercepted by synthetic fixtures. No live page key or private operational data is in screenshots.
+The original six changes are draft PRs in an ordered stack. The Kres theme change targets the final QA branch in a seventh draft PR. No SQL, deployment, main push, or merge was performed. Testing serves the static folder on localhost:8763, with every backend request intercepted by synthetic fixtures. No live page key or private operational data is in screenshots.
 
 ## Verification
 
@@ -10,7 +10,7 @@ Run `node qa/run.cjs` after starting the static server. It covers backend valida
 
 Clip checks inspect rendered text ranges against the viewport and clipping ancestors. They also check document horizontal overflow, console errors, em dashes, and computed gradient backgrounds. Gesture and action tests supplement screenshots. These checks do not certify accessibility conformance, the private backend, or live data freshness.
 
-The theme uses Archivo condensed bold caps, supplied Lair WebP textures of 69,412 and 255,162 bytes, and reusable bear SVGs. The unused cave stylesheet and old primary Control/project tab generator were removed. Reused workflows remain reachable through the Inbox disclosure. Phone has all four primary tabs on one row, while desktop includes the command field.
+The selected take A Kres theme uses locally bundled Archivo condensed bold caps, Courier Prime metadata, reusable black/white/red bear SVGs, a flat red counter, and a live `TED HANDLED N` stamp. It uses white or near-black grounds, the same `#e2402a` red in both modes, and hard structural rules. System color preference and explicit root `data-theme` overrides are supported. The unused take B textures and external font requests are removed. The unused cave stylesheet and old primary Control/project tab generator were removed. Reused workflows remain reachable through the Inbox disclosure. Phone has all four primary tabs on one row, while desktop includes the command field.
 
 ## Independent review resolutions
 
@@ -40,3 +40,20 @@ Snapshot decisions support display and existing control veto. Snapshot-only Undo
 Good, one fix, atomic direction picking with why and optional scrap-rest, and persistent normalized strokes/crops require their reviewed backend transactions. The UI gates each capability separately. Pixel differences require images whose host permits canvas reads; the UI reports an unavailable diff when the host prevents it. Signed-in live end-to-end validation remains outstanding.
 
 Spec-specific operational speech, reviewer claims, routines, and roadmap items come from live payloads when available. Missing information uses truthful fallback copy. The implementation does not certify pixel-for-pixel parity with every supplied frame, and the final live-data completion scenario has not been demonstrated without the private integration.
+
+## Kres theme verification
+
+Run the complete fixture suite for each mode, with the static server on port 8763:
+
+```sh
+QA_THEME=light QA_OUT=qa/pr7/light node qa/run.cjs
+QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
+```
+
+The added theme group verifies system light and dark, explicit root overrides, loaded local Archivo and Courier Prime fonts, the exact red, the flat counter, and a stamp that updates with completed decisions. It also checks selected tab count visibility. Explicit theme changes use reduced motion in the test to sample the final palette instead of an intermediate button color transition.
+
+Existing authored-title assertions use `textContent` for unchanged source titles, while screenshot and clipping checks continue to inspect rendered uppercase text. All layout stylesheets and action handlers remain unchanged. An independent reviewer identified a white-on-white selected tab count in dark mode; a failing regression check reproduced it before the theme fix.
+
+Final Kres verification passed all 14 groups in each mode, including nine snapshot unit tests per run. There are 78 screenshots per mode, 156 total, at 390 by 844 and 1440 by 960, with every screenshot result reporting zero console errors, clipped text, horizontal overflow, gradients, and em dashes. Evidence is under `qa/pr7/light/` and `qa/pr7/dark/`, including each `suite.json` and the per-view result files. The guided instruction font regression also passes.
+
+Parallel attempts against the temporary local server lost some JavaScript/CSS responses and failed before initialization. The final complete runs above were sequential, with no application logic changes or increased test timeouts for that transport issue.

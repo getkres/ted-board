@@ -42,7 +42,7 @@ const bearBase = function(size=120, opts={}){
   ${prop}
  </svg>`;
 };
-const cubBase = (st, size=30, letter='') => { const c=({moving:'#c9c4dc',waiting:'#f4b8c8',stuck:'#e2402a'})[st]||'#c9c4dc'; return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" style="flex:none;overflow:visible" aria-hidden="true">
+const cubBase = (st, size=30, letter='') => { const c=({moving:'#ffffff',waiting:'#9a9a9a',stuck:'#e2402a'})[st]||'#ffffff'; return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" style="flex:none;overflow:visible" aria-hidden="true">
  <circle cx="10" cy="12" r="6" fill="#7a4e2d"/><circle cx="30" cy="12" r="6" fill="#7a4e2d"/><circle cx="10" cy="12" r="2.6" fill="#e9c49a"/><circle cx="30" cy="12" r="2.6" fill="#e9c49a"/>
  <circle cx="20" cy="22" r="15" fill="#7a4e2d"/>
  <path d="M6.5 15 Q20 2 33.5 15 Z" fill="${c}" stroke="#2b2b3a" stroke-width="1.6"/><circle cx="20" cy="10.5" r="3" fill="#fff3a8" stroke="#2b2b3a" stroke-width="1.4"/>
@@ -59,11 +59,17 @@ const PROPS = {
  marker: `<g transform="translate(148 -4) rotate(28)"><rect x="0" y="0" width="14" height="52" rx="3" fill="#e2402a" stroke="#111" stroke-width="3"/><path d="M2 52 L7 66 L12 52 Z" fill="#111"/><rect x="0" y="0" width="14" height="12" fill="#111"/></g>`,
 };
 
-const recolor = svg => svg.replaceAll('#7a4e2d','#1a0b0f').replaceAll('#e9c49a','#f6c9d4').replaceAll('#fff3a8','#e2402a').replaceAll('#ff8fa3','#e2402a');
+// The take A art uses the same black, white, and red as the poster.
+const recolor = svg => svg.replaceAll('#7a4e2d','#111111').replaceAll('#e9c49a','#ffffff').replaceAll('#fff3a8','#e2402a').replaceAll('#ff8fa3','#e2402a').replaceAll('#2b1a10','#111111').replaceAll('#2b2b3a','#111111').replaceAll('rgba(0,0,0,.12)','none');
 window.TedTheme = {
  lines: LINES,
  bear(size=120,{prop='stamp'}={}) { const art=prop.startsWith('sign:')?PROPS.sign(prop.slice(5)):PROPS[prop]||''; return recolor(bearBase(size,{pose:'wave',prop:art})); },
  cub(state,size=36) {return recolor(cubBase(state,size));},
- eye(n) {return `<svg class="v3-eye" viewBox="0 0 100 100" role="img" aria-label="${Number(n)} needs you">${['#201418','#e63b2e','#f28c28','#f6c431','#5bb35b','#3b7fc4','#6a4aa5','#201418'].map((c,i)=>`<circle cx="50" cy="50" r="${50-i*5.6}" fill="${c}"/>`).join('')}<text x="50" y="66" text-anchor="middle" fill="#fff4e6" stroke="#201418" stroke-width="1" font-size="48" font-family="Archivo" font-weight="900">${Number(n)}</text></svg>`; }
+ eye(n) {
+  const count=Number.isFinite(Number(n))?Math.max(0,Math.trunc(Number(n))):0;
+  const digits=String(count).length, size=digits>2?54:digits>1?78:110;
+  return `<svg class="v3-eye" viewBox="0 0 130 130" role="img" aria-label="${count} needs you"><rect width="130" height="130" fill="#e2402a"/><text x="65" y="106" text-anchor="middle" fill="#fff" font-size="${size}" font-family="Archivo" font-stretch="62%" font-weight="900">${count}</text></svg>`;
+ }
+
 };
 })();

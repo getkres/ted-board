@@ -1,6 +1,6 @@
 # Ted Board, Control Center v3
 
-A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this six-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
+A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this seven-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
 
 The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the ten-line order into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
 
@@ -10,7 +10,7 @@ Use the desktop command field to find a view, space, or card. On phone, Inbox's 
 
 ## Theme and layout
 
-Take B uses the supplied Lair velvet and paper textures, plus Archivo condensed bold caps. It uses no cut-out lettering or gradients. `theme.css`, `theme.js`, and `assets/` contain the theme. `v3.css`, `spaces-v3.css`, `roadmap-v3.css`, `mockups-v3.css`, and `markup-v3.css` contain layout and interaction styling. Alternate themes can replace tokens and artwork without changing view markup.
+Take A uses Kres poster typography: locally bundled Archivo condensed bold caps, red `#e2402a`, white, near-black, hard 2px structural rules, and a live `TED HANDLED N` stamp. System light and dark preferences are supported, with optional `data-theme="light"` or `data-theme="dark"` overrides on the root element. Both modes retain the same red. There are no textures, cut-out letters, or gradients. `theme.css`, `theme.js`, and `assets/` contain the theme. `v3.css`, `spaces-v3.css`, `roadmap-v3.css`, `mockups-v3.css`, and `markup-v3.css` contain layout and interaction styling. Alternate themes can replace tokens and artwork without changing view markup.
 
 ## Data and actions
 
@@ -27,21 +27,11 @@ Serve the folder, then run the offline fixture tests. They never use live creden
 ```sh
 python3 -m http.server 8763
 # In a second terminal, with Playwright available:
-PLAYWRIGHT_MODULE=/path/to/playwright STAGE=6 node qa/browser.cjs
-node --test backend-integration/snapshots.test.ts
-node qa/inbox.cjs
-node qa/inbox-safety.cjs
-node qa/polling.cjs
-node qa/spaces.cjs --browser
-node qa/roadmap.cjs --browser
-node qa/mockups.cjs
-node qa/mockup-safety.cjs
-node qa/triage.cjs
-node qa/markup.cjs --browser
-node qa/retained.cjs
+QA_THEME=light QA_OUT=qa/pr7/light node qa/run.cjs
+QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
 ```
 
-`PLAYWRIGHT_MODULE` may name an installed Playwright module. Set it in the environment for every browser command when the machine's default fixture path is unavailable. Screenshots and JSON reports are under `qa/pr1/` through `qa/pr6/`. They contain synthetic data only. Live authorization, private handler integration, server-side receipts, watchers, and database migrations require separate staging verification by Ted.
+`PLAYWRIGHT_MODULE` may name an installed Playwright module. Set it in the environment for every browser command when the machine's default fixture path is unavailable. Screenshots and JSON reports are under `qa/pr1/` through `qa/pr7/`. Run the theme suites sequentially. `QA_THEME` controls browser color preference, and `QA_OUT` preserves earlier evidence. The Kres theme group also checks explicit overrides, locally loaded fonts, and live stamp counts. Reports contain synthetic data only. Live authorization, private handler integration, server-side receipts, watchers, and database migrations require separate staging verification by Ted.
 
 Additional existing action contracts remain documented in [MOCKUPS.md](MOCKUPS.md), [FRONTDOOR.md](FRONTDOOR.md), [REPLIES.md](REPLIES.md), and [APPLY.md](APPLY.md).
 

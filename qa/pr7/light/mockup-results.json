@@ -1,0 +1,164 @@
+[
+  {
+    "name": "mk-home",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-round",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-side-by-side",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-slider",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-onion-skin",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-differences",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-batch",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-triage",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-markup",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-home",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-round",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-side-by-side",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-slider",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-onion-skin",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-compare-differences",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-batch",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-triage",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "mk-markup",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  }
+]

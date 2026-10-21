@@ -15,7 +15,6 @@ class ControlCenterV3 {
  reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
  accept(data){this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();}
  setup(){
-  document.documentElement.dataset.theme='zine';
   const mast=document.querySelector('.masthead');mast.classList.add('v3-top');
   const controls=this.el('div','ted-controls');controls.append(document.getElementById('talk-ted'),document.getElementById('fresh-ted'));mast.append(controls);
   const brand=mast.querySelector('.brand');brand.replaceChildren(this.el('strong','v3-logo','TED.'));
@@ -65,7 +64,7 @@ class ControlCenterV3 {
  inbox(main){
   const n=this.needs().length,calls=this.decisions();
   const hero=this.heading(main,'NEED YOU',new Intl.DateTimeFormat('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/Los_Angeles'}).format(new Date())+' Pacific','stamp',this.needs()[0]?.ted_line||'Your calls, then I can keep moving.');
-  const eye=this.el('div','v3-counter');eye.innerHTML=TedTheme.eye(n);hero.querySelector('.v3-hero-copy').prepend(eye);hero.querySelector('.v3-hero-copy').append(this.el('p','v3-scrawl','and I handled '+calls.filter(c=>c.status==='done').length+' more'));
+  const eye=this.el('div','v3-counter');eye.innerHTML=TedTheme.eye(n);hero.querySelector('.v3-hero-copy').prepend(eye);hero.querySelector('.v3-hero-copy').append(this.el('p','v3-scrawl','TED HANDLED '+calls.filter(c=>c.status==='done').length));
   const paper=this.paper(main),splits=this.el('nav','v3-splits');splits.setAttribute('aria-label','Inbox splits');
   const routines=this.feed('routines'),woke=this.payloads('decisions').flatMap(p=>Array.isArray(p.woke)?p.woke:[]);
   for(const [id,label,count] of [['yours','Yours',n],['decided','Ted decided',calls.length],['routines','Routines',routines.filter(r=>!['fine','ok'].includes(r.state||r.status||r.ok)).length],['woke','Woke',woke.length]]){const b=this.button(label,'',()=>{this.split=id;this.item=null;this.redraw()});b.dataset.split=id;b.setAttribute('aria-pressed',String(this.split===id));b.append(this.el('span','v3-count',count));splits.append(b);}paper.append(splits);
