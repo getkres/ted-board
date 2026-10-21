@@ -509,7 +509,7 @@ class MockupsView {
   }
   verdictControls(m) {
     const {el, button} = this, box = el("div", "mockup-verdicts"), value = this.verdict(m),
-      labels = {approved:"GOOD TO GO", needs_work:"NEEDS WORK", scrapped:"SCRAPPED"};
+      labels = {approved:"GOOD TO GO", good_with_fix:"GOOD, ONE FIX", needs_work:"NEEDS WORK", scrapped:"SCRAPPED"};
     box.dataset.verdictId = m.id;
     if (labels[value]) box.append(el("span", "mockup-verdict-badge verdict-" + value, labels[value]));
     const actions = el("div", "mockup-verdict-actions");
@@ -560,9 +560,9 @@ class MockupsView {
     }
     return box;
   }
-  async saveVerdict(m, value, token = null) {
+  async saveVerdict(m, value, token = null, text = "") {
     if (!this.verdictsEnabled || this.busy.has(m.id)) return;
-    if (!token && this.verdict(m) === value) {
+    if (!token && this.verdict(m) === value && !text.trim()) {
       if (value === "needs_work") this.verdictNotes.add(m.id);
       this.drawVerdicts(); this.onChange(); return;
     }
@@ -572,7 +572,7 @@ class MockupsView {
     try {
       const data = await this.api("POST", token
         ? {action:"undo_verdict", mockup_id:m.id, token}
-        : {action:"verdict", mockup_id:m.id, verdict:value, text:""});
+        : {action:"verdict", mockup_id:m.id, verdict:value, text});
       if (!data.ok || !data.mockup) throw Error("Verdict was not confirmed. Refresh to check it.");
       if (owner !== this.getKey()) return;
       this.revision++;
@@ -592,8 +592,10 @@ class MockupsView {
       }
       this.scheduleVerdict(updated);
       this.notify(token ? "Verdict undone." : "Verdict saved. Undo is available for 5 seconds.");
+      return true;
     } catch (e) {
       if (owner === this.getKey()) this.notify(e.message, true);
+      return false;
     } finally {
       this.busy.delete(m.id);
       this.drawVerdicts();
@@ -746,6 +748,7 @@ class MockupsView {
     this.resizeViewer.observe(this.viewport);
     this.onChange();
     const currentCanvas = this.canvas;
+    img.addEventListener('load',()=>{if(this.active&&this.canvas===currentCanvas)this.layoutViewer();});
     img.addEventListener("error", () => {
       if (!this.active || this.canvas !== currentCanvas) return;
       this.dialogStatus.textContent =
@@ -765,7 +768,8 @@ class MockupsView {
   layoutViewer() {
     if (!this.active) return;
     const v = this.viewport, m = this.active;
-    const width = m.full_width || m.width, height = m.full_height || m.height;
+    const image=this.canvas.querySelector('img');
+    const width = m.full_width || m.width || image?.naturalWidth || 1, height = m.full_height || m.height || image?.naturalHeight || 1;
     const oldW = this.baseWidth, oldH = this.baseHeight;
     const cx = oldW ? (this.lastWidth / 2 - this.panX) / (oldW * this.zoom) : .5;
     const cy = oldH ? (this.lastHeight / 2 - this.panY) / (oldH * this.zoom) : .5;

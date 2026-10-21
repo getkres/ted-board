@@ -20,6 +20,8 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 .masthead{padding-right:80px}.tab-wrap{padding-right:84px}.fresh-ted{position:fixed;top:max(18px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));z-index:15;width:68px;height:68px;min-width:68px;border-radius:50%;padding:8px;border:2px solid #b44b48;background:#681f20;color:#fff2e9;box-shadow:inset 0 2px 3px #ffffff18,0 3px 0 #381314;font-size:.78rem;font-weight:650;line-height:1.2}.fresh-ted:hover:not(:disabled){background:#8b292b}.fresh-ted.due{background:#c72d36;border-color:#ff9d94;box-shadow:0 0 0 5px #e5464826,0 0 24px #f0444873;animation:fresh-pulse 1.8s ease-in-out infinite}.fresh-ted:disabled{cursor:wait;opacity:.8}.fresh-status{font-size:.8rem;line-height:1.5;color:var(--muted);margin:12px 0}.fresh-status:empty{display:none}.tab-icon{width:18px;height:18px;vertical-align:-3px;margin-right:6px}@keyframes fresh-pulse{50%{box-shadow:0 0 0 9px #e5464810,0 0 34px #f04448a0}}@media(prefers-reduced-motion:reduce){.fresh-ted.due{animation:none;background:#d9343e;box-shadow:0 0 0 5px #e5464826,0 0 24px #f0444873}}
 </style>
 <link rel="stylesheet" href="mockups.css">
+<link rel="stylesheet" href="mockups-v3.css">
+<link rel="stylesheet" href="markup-v3.css">
 <link rel="stylesheet" href="cave.css">
 <link rel="stylesheet" href="control-center.css">
 <link rel="stylesheet" href="v3.css">
@@ -42,6 +44,9 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <dialog id="guide" aria-labelledby="guide-heading"><div class="guide-shell"><div class="guide-header"><span class="guide-project" id="guide-project"></span><button class="icon-button" id="guide-close" aria-label="Close guided mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><h2 class="guide-title" id="guide-heading"></h2><div class="progress-track" id="guide-progress" aria-hidden="true"></div><div class="guide-content"><p class="step-count" id="step-count"></p><p class="step-text" id="step-text" tabindex="-1"></p><div id="guide-link"></div><div class="guide-note"><label for="step-note">stuck? tell me why (optional)</label><textarea id="step-note" maxlength="1900" placeholder="what's in the way?"></textarea></div><p class="status guide-status" id="guide-status" role="status" aria-live="polite"></p></div><div class="guide-actions"><button id="guide-back">Back</button><button class="primary" id="guide-next">Done, next</button></div><button class="quiet stuck" id="guide-stuck">Stuck</button><p class="paused" id="guide-save-status">close anytime, i'll keep your spot.</p></div></dialog>
 <noscript><div class="shell state"><h2>JavaScript is needed</h2><p>Open this link in Safari or Chrome to use your board.</p></div></noscript>
 <script src="mockups.js"></script>
+<script src="mockups-v3.js"></script>
+<script src="markup-v3.js"></script>
+<script>installMarkupV3(MockupsV3);</script>
 <script src="control-center.js"></script>
 <script src="theme.js"></script>
 <script src="spaces-v3.js"></script>
@@ -184,7 +189,7 @@ function renderThread(card){
  if(list.length>3){const toggle=button(expanded?'show less':'show all ('+list.length+')','quiet thread-toggle',()=>{if(expanded)state.threads.delete(card.id);else{state.threads.add(card.id);state.readCards.add(card.id);storage.set('ted-board-read:'+card.id,replyMarker(card))}render()});toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-controls',items.id);thread.append(toggle)}
  return thread;
 }
-const mockups=new MockupsView({el,button,storage,getKey:()=>key,onChange:()=>{if(ControlCenterV3.isMockups(state.project))render();else renderTabs()},notify:announce,isSelected:()=>ControlCenterV3.isMockups(state.project)});
+const mockups=new MockupsV3({el,button,storage,getKey:()=>key,onChange:()=>{if(ControlCenterV3.isMockups(state.project))render();else renderTabs()},notify:announce,isSelected:()=>ControlCenterV3.isMockups(state.project)});
 function renderTabs(){return v3.tabs();}
 function renderLegacyTabs(){
  const tabs=$('tabs');tabs.replaceChildren();
@@ -374,6 +379,7 @@ async function guideSend(action){
  if(ok)$('guide-status').textContent='Ted has your note. You can keep going or close this for now.';drawGuide();
 }
 const v3=new ControlCenterV3({el,button,api,getState:()=>state,getKey:()=>key,mockups,renderCard,select:selectProject,redraw:render,notice:announce,storage});
+mockups.v3=v3;
 const controlCenter=new ControlCenter({api,getCards:()=>state.cards,answer:act,reloadCards:load,redraw:render,notice:announce,select:()=>{state.project='Control';saveTab();render()}});
 function positionTedControls(){const nav=document.querySelector('.tab-wrap');nav.classList.toggle('under-controls',nav.getBoundingClientRect().top<=0)}
 window.addEventListener('scroll',positionTedControls,{passive:true});
