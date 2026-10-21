@@ -152,6 +152,10 @@ SQL, email, and spend approval staging, approval snapshots, and approved
 execution all require the current passing review. Timed proposal staging
 binds veto-request.json. The dedicated veto worker and server send scope are
 unchanged. Review grants no send, spend, database, or publishing authority.
+Failed or uncertain timed outcomes remain visible as blocked operational
+status, with the existing reconciliation instruction, when review prevents a
+Needs you transition. No Needs you exception is added. Confirmed sends state
+that the worker recorded the receipt rather than pointing to an unposted reply.
 
 Pod instructions and templates require canon_check and review. Copy the exact
 status to JOB/pod-status.json before review, then add review_job_dir to the live
