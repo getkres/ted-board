@@ -44,11 +44,16 @@ Only one database approval can be pending or undergoing review at a time. Other 
 All source, local job state, operational tests, and credentials remain private on the Mac mini. This public repository publishes only the static board and usage documentation.
 
 - `co.ted.board-jobs`: runs `jobs_heartbeat.py` every 30 seconds, consumes controls, dispatches workers, retries replies, and publishes snapshots.
+- `co.ted.job-watchdog`: monitors card sessions every five minutes on the mini. It is installed in dry-run mode while the private recovery bundle awaits review. It checks event files and process activity on both hosts, and logs decisions to `~/ted-ops/logs/job-watchdog.log`.
 - `co.ted.board-handoff`: runs `handoff.py` at 06:00 in the mini's local timezone, and at load. It writes `~/ted-ops/ted-state/HANDOFF-TODAY.md`, under 80 lines, with Needs you cards, running work, yesterday's completed cards, and pending approvals.
 - `co.ted.decisions`: existing watcher routes board receipts to the same session queues. Mockup routing is unchanged.
 - `co.ted.telegram`: existing owner-only bot, with `#CARD_ID` routing.
 
 Use the mini's launchd definitions in `~/Library/LaunchAgents`. Do not install these routines on a MacBook. Logs and source deployment instructions live in the private operational directory. Keys stay in the existing secrets file and never appear in commands, Git, or public documentation.
+
+The staged watchdog uses a twenty-minute silence threshold, checks process identity before stopping a worker, and queues at most one fresh retry with the last safe tool description prepended to its brief. A second stall holds follow-ups and marks the card blocked. Approval execution, cleared veto sends, uncertain host ownership, and unowned jobs require manual review. Recovery activation is pending. Telegram alerts remain exact approval drafts under the worker's no-Telegram instruction.
+
+The private source, tests, and deployment instructions for card `c-ec9fc8ca0d` are in `~/ted-ops/ted-board/jobs/card-c-ec9fc8ca0d/job-watchdog-private.tar.gz` on the mini. SHA-256: `5b245bdac74f0dbaaf3a1565c8ba48a1a2a0850c79a8084adef1a58f7a581479`. Review that bundle before enabling recovery; merging this documentation does not activate it. The watchdog and installer passed 37 tests, and the existing offline Python suite passed 69 tests. A dry-run reached both machines, found three active workers, and proposed no recovery action.
 
 ## Fresh Ted
 
