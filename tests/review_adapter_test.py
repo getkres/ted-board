@@ -58,5 +58,18 @@ class AdapterTests(unittest.TestCase):
                                    'requires_review': True, 'job_dir': str(Path(tmp) / 'missing')}]
             with patch.object(sessions, 'deliver') as send: store.flush(); send.assert_not_called()
 
+    def test_reaper_keeps_a_review_hold_blocked_even_when_the_report_says_done(self):
+        import board_live
+        with tempfile.TemporaryDirectory() as tmp:
+            store=sessions.Store(tmp);store.enqueue({'id':'x','title':'Test'},'work','r')
+            with store.locked() as data:
+                session=data['sessions']['x'];session.update(status='review_blocked',queue=[])
+                (Path(session['cwd'])/'REPORT.md').write_text('# Done\nShipped the content.\n')
+            with patch.object(board_live,'update') as send:
+                board_live.reap([{'id':'x','section':'ted_doing'}],tmp,now=30000)
+                self.assertEqual(send.call_args.args[1],'blocked')
+                self.assertEqual(send.call_args.args[2],'content review missing, failed, or stale')
+                self.assertIsNone(send.call_args.kwargs['section'])
+
 
 if __name__ == '__main__': unittest.main()
