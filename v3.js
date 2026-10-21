@@ -127,6 +127,7 @@ class ControlCenterV3 {
   main.classList.add('v3');
   if(route==='inbox'){this.inbox(main);return true;}
   if(route==='spaces'){this.spaces(main);return true;}
+  if(route==='roadmap'||route.startsWith('roadmap:')){this.roadmap(main,route.split(':')[1]);return true;}
   if(/^(space|pod|agent):/.test(route)){const [kind,rest]=route.split(':');const [line,raw]=rest.split('/');let id=raw;try{id=decodeURIComponent(raw||'');}catch{}this[kind](main,line,id);return true;}
   if(ControlCenterV3.isMockups(route)){this.mockups.render(main);return true;}
   this.heading(main,route==='inbox'?'NEED YOU':route==='spaces'?'TEN LINES. ONE BOARD.':route.toUpperCase(),'Your calls, what Ted is on, and what comes next.','stamp','The board is open. Your calls stay yours.');
@@ -135,3 +136,4 @@ class ControlCenterV3 {
 }
 
 if(window.installSpacesV3)installSpacesV3(ControlCenterV3);
+if(window.installRoadmapV3)installRoadmapV3(ControlCenterV3);
