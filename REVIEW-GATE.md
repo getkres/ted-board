@@ -12,6 +12,16 @@ invalidate existing reviews.
 
 ## Proposed quorum for Ted to review
 
+The current card requires the full review chain. The shared design file's
+newer "Review chain, cut down" section instead calls for one creative pass
+plus scripts on app mockups, removes app whimsy and audience checks, uses a
+different panel engine for public content, and limits fix rounds. This proposal
+implements the direct card instruction. Ted must resolve that named policy
+conflict before deployment. The current fixed quorum, single-model schema,
+and unlimited reruns do not express the cut-down workflow. Choosing that
+workflow would require validator, schema, routing, and scripted-check changes.
+This PR does not authorize overriding the shared file or deploying either policy.
+
 The proposed default requires canon-checker, creative-director, audience-panel,
 and compliance for every output, including internal reports. Whimsy businesses
 add a score and reviewer. This is deliberately stricter than the brief's
