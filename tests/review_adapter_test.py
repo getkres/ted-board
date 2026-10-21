@@ -71,5 +71,34 @@ class AdapterTests(unittest.TestCase):
                 self.assertEqual(send.call_args.args[2],'content review missing, failed, or stale')
                 self.assertIsNone(send.call_args.kwargs['section'])
 
+    def test_timed_failure_and_uncertainty_stay_visible_without_unreviewed_needs_you(self):
+        import board_live
+        for outcome in ('failed','uncertain'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                store=sessions.Store(tmp);store.enqueue({'id':'x','title':'Test'},'work','r')
+                with store.locked() as data:
+                    data['sessions']['x'].update(status='review_blocked',queue=[],veto_outcome={'status':outcome,'revision':7})
+                def publish(card_id,state,line,**kwargs):
+                    if state=='waiting_on_you':raise ReviewBlocked('review required')
+                    return {'id':card_id}
+                with patch.object(board_live,'update',side_effect=publish) as send:
+                    result=board_live.reap([{'id':'x','section':'ted_doing','revision':7,'updated_at':'1970-01-01T00:00:01Z'}],tmp,now=30000)
+                    self.assertEqual(result,(1,0))
+                    self.assertEqual(send.call_args.args[1],'blocked')
+                    self.assertIsNone(send.call_args.kwargs.get('section'))
+                    self.assertIn('review' if outcome=='failed' else 'Gmail Sent',send.call_args.args[2])
+
+    def test_confirmed_timed_send_does_not_point_to_an_undelivered_reply(self):
+        import board_live
+        with tempfile.TemporaryDirectory() as tmp:
+            store=sessions.Store(tmp);store.enqueue({'id':'x','title':'Test'},'work','r')
+            with store.locked() as data:
+                data['sessions']['x'].update(status='review_blocked',queue=[],veto_outcome={'status':'sent','revision':7})
+            with patch.object(board_live,'update') as send:
+                board_live.reap([{'id':'x','section':'ted_doing','revision':7,'updated_at':'1970-01-01T00:00:01Z'}],tmp,now=30000)
+                self.assertEqual(send.call_args.args[1],'done')
+                self.assertIn('receipt recorded by the worker',send.call_args.args[2])
+                self.assertNotIn('card reply',send.call_args.args[2])
+
 
 if __name__ == '__main__': unittest.main()
