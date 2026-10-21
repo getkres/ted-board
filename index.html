@@ -38,6 +38,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <noscript><div class="shell state"><h2>JavaScript is needed</h2><p>Open this link in Safari or Chrome to use your board.</p></div></noscript>
 <script src="mockups.js"></script>
 <script src="control-center.js"></script>
+<script src="board-status.js"></script>
 <script>
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
@@ -249,7 +250,7 @@ function render(){
  (state.project==='All'?[SECTIONS[0]]:SECTIONS).forEach(([id,label])=>{
   const matching=cards.filter(c=>c.section===id&&(id!=='done'||recent(c)||unread(c)||state.readCards.has(c.id)));
   if(state.project==='All'&&!matching.length)return;
-  const section=el('section','section');section.dataset.section=id;const heading=el('div','section-heading');heading.append(el('h2',null,label),el('span','count',matching.length));if(id==='done')heading.append(el('span','count','last 7 days + unread'));section.append(heading);
+  const section=el('section','section');section.dataset.section=id;const heading=el('div','section-heading');heading.append(el('h2',null,label),el('span','count',matching.length));if(id==='ted_doing'){const counts=BoardStatus.doingCounts(matching,state.jobs,state.jobsLoaded);heading.append(el('span','work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale':'checking workers'))}if(id==='done')heading.append(el('span','count','last 7 days + unread'));section.append(heading);
   if(matching.length)matching.forEach(c=>section.append(renderCard(c)));else section.append(el('p','empty-section',({needs_you:'nothing on you here.',ted_doing:'nothing running here right now.',up_next:'nothing queued yet.',done:'nothing shipped this week yet.'})[id]));board.append(section);
  });
  if(state.project!=='All'){const killed=cards.filter(c=>c.section==='killed');const d=el('details','killed');const sum=el('summary');sum.append(el('span',null,'Killed'),el('span','count',killed.length));if(killed.some(unread))sum.append(replyDot());d.append(sum);if(killed.length)killed.forEach(c=>d.append(renderCard(c)));else d.append(el('p','empty-section','nothing killed.'));board.append(d)}
