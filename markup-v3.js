@@ -20,6 +20,13 @@
   while(cursor<tokens.length){const command=tokens[cursor++];if(command==='Z')continue;if(!['M','L'].includes(command))return false;for(let i=0;i<2;i++){const token=tokens[cursor++];if(!/^(?:0(?:\.\d{1,6})?|1(?:\.0{1,6})?)$/.test(token||''))return false;const number=Number(token);if(!Number.isFinite(number)||number<0||number>1)return false}points++}return points>0;
  }
  const command=(name,p)=>name+' '+p.x+' '+p.y;
+ function textLayout(anchor,content){
+  if(typeof content!=='string'||!content.trim()||content.length>1200)throw Error('Enter text before placing it');
+  const characters=Array.from(content.trim()),lines=[];for(let i=0;i<characters.length;i+=22)lines.push(characters.slice(i,i+22).join(''));
+  const font=Math.min(.035,.85/(lines.length*1.25+.15)),width=Math.max(...lines.map(line=>Array.from(line).length))*font*.72,height=font*(1.4+(lines.length-1)*1.25);
+  const x=clamp(Math.min(clamp(anchor.x),1-width-.02)),y=clamp(Math.min(clamp(anchor.y),1-height-.02));
+  return {x,y,width,height,font,lines,baseline:font,lineHeight:font*1.25};
+ }
  function stroke(tool,points,color=COLORS[0],content=''){
   if(!['Draw','Arrow','Box','Text'].includes(tool)||!COLORS.includes(color)||!Array.isArray(points)||!points.length||points.length>1000)throw Error('Invalid stroke');
   const p=points.map(p=>({x:clamp(p.x),y:clamp(p.y)})),a=p[0],b=p.at(-1);let path;
@@ -28,10 +35,13 @@
   else path=p.map((p,i)=>command(i?'L':'M',p)).join(' ');
   const crop={x:clamp(Math.min(...p.map(p=>p.x))-.025),y:clamp(Math.min(...p.map(p=>p.y))-.025)},right=clamp(Math.max(...p.map(p=>p.x))+.025),bottom=clamp(Math.max(...p.map(p=>p.y))+.025);
   crop.width=round(right-crop.x);crop.height=round(bottom-crop.y);
-  if(tool==='Text'){if(typeof content!=='string'||!content.trim()||content.length>1200)throw Error('Enter text before placing it');crop.width=round(Math.min(1-crop.x,Math.max(crop.width,.035*Math.min(25,content.length))));crop.height=round(Math.min(1-crop.y,Math.max(.07,crop.height)))}
+  if(tool==='Text'){
+   const layout=textLayout(a,content),left=Math.max(0,Math.min(crop.x,layout.x-.025)),top=Math.max(0,Math.min(crop.y,layout.y-.025)),right=Math.min(1,Math.max(crop.x+crop.width,layout.x+layout.width+.025)),bottom=Math.min(1,Math.max(crop.y+crop.height,layout.y+layout.height+.025));
+   crop.x=Math.floor(left*1e6)/1e6;crop.y=Math.floor(top*1e6)/1e6;crop.width=round(Math.ceil(right*1e6)/1e6-crop.x);crop.height=round(Math.ceil(bottom*1e6)/1e6-crop.y);
+  }
   if(!validPath(path))throw Error('Invalid path');return {tool:tool.toLowerCase(),path,color,crop,...(tool==='Text'?{text_content:content.trim()}:{})};
  }
- window.MarkupV3Data={point,stroke,validPath};
+ window.MarkupV3Data={point,stroke,validPath,textLayout};
  window.installMarkupV3=function(C){
   if(C.prototype.markupInstalled)return;const original={};for(const method of ['open','close','reset','installPointers','drawPins','applyTransform'])original[method]=C.prototype[method];
   const svg=(name,attrs={})=>{const node=document.createElementNS(NS,name);for(const [key,value]of Object.entries(attrs))node.setAttribute(key,String(value));return node};
@@ -81,7 +91,7 @@
    paintMarkup(){
     if(!this.active||!this.canvas)return;this.canvas.querySelector('.mkup-overlay')?.remove();const overlay=svg('svg',{class:'mkup-overlay',viewBox:'0 0 1 1',preserveAspectRatio:'none','aria-hidden':'true'});
     const known=[...(Array.isArray(this.active.strokes)?this.active.strokes:[]),...(this.markupSaved?.get(this.markupFrame())||[])],drafts=this.markupCurrentDrafts(),rows=[...known,...drafts,...(this.markupPreview?[this.markupPreview]:[])];
-    for(const row of rows){const path=row.path||row.svg_path;if(!validPath(path)||!COLORS.includes(row.color))continue;const attrs={d:path,fill:'none',stroke:row.color,'stroke-width':2.5,'vector-effect':'non-scaling-stroke','stroke-linecap':'round','stroke-linejoin':'round'};if(drafts.includes(row))attrs['stroke-dasharray']='6 3';overlay.append(svg('path',attrs));if(row.tool==='text'&&typeof row.text_content==='string'){const numbers=path.match(/\d+(?:\.\d+)?/g),content=row.text_content.slice(0,1200),lines=content.match(/[\s\S]{1,22}/g)||[''],font=Math.min(.035,.9/(lines.length*1.25)),x=clamp(Math.min(Number(numbers[0]),1-22*font*.65-.015)),y=clamp(Math.min(Number(numbers[1]),1-lines.length*font*1.25-.015)),label=svg('text',{fill:row.color,'font-size':font,'font-family':'Archivo, sans-serif','font-weight':700});lines.forEach((line,i)=>{const part=svg('tspan',{x,y:y+font*(1+i*1.25)});part.textContent=line;label.append(part)});overlay.append(label)}}
+    for(const row of rows){const path=row.path||row.svg_path;if(!validPath(path)||!COLORS.includes(row.color))continue;const attrs={d:path,fill:'none',stroke:row.color,'stroke-width':2.5,'vector-effect':'non-scaling-stroke','stroke-linecap':'round','stroke-linejoin':'round'};if(drafts.includes(row))attrs['stroke-dasharray']='6 3';overlay.append(svg('path',attrs));if(row.tool==='text'&&typeof row.text_content==='string'){const numbers=path.match(/\d+(?:\.\d+)?/g),layout=textLayout({x:Number(numbers[0]),y:Number(numbers[1])},row.text_content.slice(0,1200)),label=svg('text',{fill:row.color,'font-size':layout.font,'font-family':'Archivo, sans-serif','font-weight':700});layout.lines.forEach((line,i)=>{const part=svg('tspan',{x:layout.x,y:layout.y+layout.baseline+i*layout.lineHeight,textLength:Array.from(line).length*layout.font*.72,lengthAdjust:'spacingAndGlyphs'});part.textContent=line;label.append(part)});overlay.append(label)}}
     const rect=this.canvas.getBoundingClientRect(),pins=[...this.imagePins(this.active.id),...(this.pending?[this.pending]:[])],buttons=this.canvas.querySelectorAll('.mockup-pin');
     pins.forEach((pin,i)=>{const button=buttons[i],x=Number(pin.x??pin.x_pct/100),y=Number(pin.y??pin.y_pct/100);if(!button||!Number.isFinite(x)||!Number.isFinite(y)||!rect.width||!rect.height)return;const dx=x>.7?-30:30,dy=y<.15?30:-30,px=clamp(x+dx/rect.width),py=clamp(y+dy/rect.height);button.style.left=px*100+'%';button.style.top=py*100+'%';overlay.append(svg('line',{x1:x,y1:y,x2:px,y2:py,stroke:'#181818','stroke-width':1.5,'vector-effect':'non-scaling-stroke'}),svg('circle',{cx:x,cy:y,r:.004,fill:'#c52b35'}))});
     this.canvas.append(overlay);
@@ -97,7 +107,7 @@
      if(points.size>=2){cancelLong();this.markupGesture=null;this.markupPreview=null;multi=true;this.paintMarkup();for(const [pointerId,p]of points){if(pointerId!==e.pointerId&&!this.pointers.has(pointerId)){replay=true;viewport.dispatchEvent(new PointerEvent('pointerdown',{pointerId,clientX:p.x,clientY:p.y,pointerType:p.pointerType,bubbles:true,button:0}));replay=false}}return}
      multi=false;const tool=this.markupTool||'Pan';
      if(['Draw','Arrow','Box','Text'].includes(tool)&&inside(e)){e.preventDefault();e.stopImmediatePropagation();this.markupGesture={pointerId:e.pointerId,tool,points:[normalized(e)]};try{viewport.setPointerCapture(e.pointerId)}catch{}preview();return}
-     if(tool==='Pin'&&e.pointerType!=='mouse'&&inside(e)){const start={x:e.clientX,y:e.clientY},owner=this.getKey(),frame=this.markupFrame();this.markupLongPress=setTimeout(()=>{if(points.size!==1||!points.has(e.pointerId)||owner!==this.getKey()||frame!==this.markupFrame())return;const current=points.get(e.pointerId);if(Math.hypot(current.x-start.x,current.y-start.y)>8)return;if(this.gesture)this.gesture.moved=true;clearTimeout(this.tapTimer);const p=normalized({clientX:start.x,clientY:start.y});this.newPin(p.x,p.y)},550)}
+     if(['Pan','Pin'].includes(tool)&&e.pointerType==='touch'&&inside(e)){const start={x:e.clientX,y:e.clientY},target=normalized(e),owner=this.getKey(),frame=this.markupFrame();this.markupLongPress=setTimeout(()=>{if(points.size!==1||!points.has(e.pointerId)||owner!==this.getKey()||frame!==this.markupFrame())return;const current=points.get(e.pointerId);if(this.gesture?.moved||Math.hypot(current.x-start.x,current.y-start.y)>8)return;if(this.gesture)this.gesture.moved=true;clearTimeout(this.tapTimer);this.newPin(target.x,target.y)},550)}
     },true);
     viewport.addEventListener('pointermove',e=>{
      if(!points.has(e.pointerId))return;const previous=points.get(e.pointerId);if(Math.hypot(e.clientX-previous.x,e.clientY-previous.y)>8)cancelLong();points.set(e.pointerId,{x:e.clientX,y:e.clientY,pointerType:e.pointerType});const g=this.markupGesture;

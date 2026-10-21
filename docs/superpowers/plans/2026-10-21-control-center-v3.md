@@ -22,34 +22,34 @@
 - Mockup feedback must retain a reason or stroke, preserve undo tokens, and avoid losing drafts during polling.
 
 ### Task 1: Theme and shell
-- [ ] Add theme.css, v3.css, v3.js, compressed texture assets, and reusable bear art derived from supplied mock source.
-- [ ] Update index.html navigation and history while preserving legacy controllers.
-- [ ] Add browser fixture harness; prove four tabs, auth, navigation history, command search, and responsive clipping.
-- [ ] Capture shell screenshots, commit, push branch cc-v3/01-shell, and open draft PR against main.
+- [x] Add theme.css, v3.css, v3.js, compressed texture assets, and reusable bear art derived from supplied mock source.
+- [x] Update index.html navigation and history while preserving legacy controllers.
+- [x] Add browser fixture harness; prove four tabs, auth, navigation history, command search, and responsive clipping.
+- [x] Capture shell screenshots, commit, push branch cc-v3/01-shell, and open draft PR against main.
 
 ### Task 2: Inbox and snapshots
-- [ ] Add Yours, item detail, Decided, Routines, and Woke from live cards, control vetoes, and optional snapshots.
-- [ ] Wire card options, control tools, keyboard paths, safe swipe behavior, and review choices only when supported.
-- [ ] Add snapshot integration module, contracts, and migration plus job-dir apply.sql with backup and rollback. Do not execute SQL.
-- [ ] Test missing feeds, actions, and all Inbox splits at both widths; open cc-v3/02-inbox draft against PR 1 branch.
+- [x] Add Yours, item detail, Decided, Routines, and Woke from live cards, control vetoes, and optional snapshots.
+- [x] Wire card options, control tools, keyboard paths, safe swipe behavior, and review choices only when supported.
+- [x] Add snapshot integration module, contracts, and migration plus job-dir apply.sql with backup and rollback. Do not execute SQL.
+- [x] Test missing feeds, actions, and all Inbox splits at both widths; open cc-v3/02-inbox draft against PR 1 branch.
 
 ### Task 3: Spaces
-- [ ] Add ten ordered spaces, space, pod, and agent drill-downs using pod pulse plus optional pods snapshots.
-- [ ] Show absent data as not logged; expose review ledger, outputs, runs, and related card actions.
-- [ ] Test deep links, sibling navigation, keyboard paths, and long agent names at both widths; open cc-v3/03-spaces draft against PR 2 branch.
+- [x] Add ten ordered spaces, space, pod, and agent drill-downs using pod pulse plus optional pods snapshots.
+- [x] Show absent data as not logged; expose review ledger, outputs, runs, and related card actions.
+- [x] Test deep links, sibling navigation, keyboard paths, and long agent names at both widths; open cc-v3/03-spaces draft against PR 2 branch.
 
 ### Task 4: Roadmap
-- [ ] Render wall and line board from roadmap snapshots with status, dates, and linked Yours cards.
-- [ ] Test all ten lines, absent data, and responsive table or stacked cards; open cc-v3/04-roadmap draft against PR 3 branch.
+- [x] Render wall and line board from roadmap snapshots with status, dates, and linked Yours cards.
+- [x] Test all ten lines, absent data, and responsive table or stacked cards; open cc-v3/04-roadmap draft against PR 3 branch.
 
 ### Task 5: Mockups
-- [ ] Extend MockupsBoard with wall, filters, decision log, direction rounds, lineage compare modes, triage, and normalized markup.
-- [ ] Retain existing API behavior and feature-gate schema-dependent good_with_fix, strokes, and round metadata.
-- [ ] Add D5 migration and integration contracts to apply.sql, with backup and rollback.
-- [ ] Test verdict validation, pins, batch undo, compare, markup, triage, and both widths; open cc-v3/05-mockups draft against PR 4 branch.
+- [x] Extend MockupsBoard with wall, filters, decision log, direction rounds, lineage compare modes, triage, and normalized markup.
+- [x] Retain existing API behavior and feature-gate schema-dependent good_with_fix, strokes, and round metadata.
+- [x] Add D5 migration and integration contracts to apply.sql, with backup and rollback.
+- [x] Test verdict validation, pins, batch undo, compare, markup, triage, and both widths; open cc-v3/05-mockups draft against PR 4 branch.
 
 ### Task 6: Cleanup and QA
-- [ ] Remove obsolete tab entries, keep reused control tools and all existing behaviors reachable.
-- [ ] Run full browser matrix, keyboard, history, private-key reset, clip, console, copy, and gradient checks.
-- [ ] Fresh reviewer checks against spec and reference frames. Resolve material issues, document remaining limitations honestly.
-- [ ] Open cc-v3/06-qa draft against PR 5 branch. Write job-dir REPORT.md with all links, SQL requirements, and gaps.
+- [x] Remove obsolete tab entries, keep reused control tools and all existing behaviors reachable.
+- [x] Run full browser matrix, keyboard, history, private-key reset, clip, console, copy, and gradient checks.
+- [x] Fresh reviewer checks against spec and reference frames. Resolve material issues, document remaining limitations honestly.
+- [x] Open cc-v3/06-qa draft against PR 5 branch. Write job-dir REPORT.md with all links, SQL requirements, and gaps.

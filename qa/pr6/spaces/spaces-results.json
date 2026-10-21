@@ -1,0 +1,66 @@
+[
+  {
+    "route": "spaces",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "space:luvo",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "pod:luvo/media",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "agent:luvo/meta-media-buyer",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "spaces",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "space:luvo",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "pod:luvo/media",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  },
+  {
+    "route": "agent:luvo/meta-media-buyer",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": []
+  }
+]

@@ -1,0 +1,128 @@
+[
+  {
+    "name": "control-veto",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-rules",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-sprint",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-batches",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "guided",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "jobs",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "access",
+    "width": 390,
+    "scrollWidth": 390,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-veto",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-rules",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-sprint",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "control-batches",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "guided",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "jobs",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  },
+  {
+    "name": "access",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "clips": [],
+    "emDash": false,
+    "gradients": [],
+    "errors": []
+  }
+]

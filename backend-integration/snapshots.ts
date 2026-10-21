@@ -1,3 +1,5 @@
+import '../decision-kinds.js';
+const decisionKinds=(globalThis as unknown as {TedDecisionKinds:{isReserved:(value:unknown)=>boolean}}).TedDecisionKinds;
 /** Server-only integration seam. Authenticate in the existing handler first. */
 export type SnapshotKind = 'decisions' | 'routines' | 'pods' | 'roadmap';
 export type Json = null | boolean | number | string | Json[] | {[key:string]:Json};
@@ -63,8 +65,7 @@ export function validateSnapshotPush(input:unknown,now=Date.now()):Snapshot[] {
       for(const decision of decisions) {
         text(decision.id);
         if(!['done','proposed','approve'].includes(String(decision.status)))throw Error('Invalid decision status');
-        const risk=String(decision.decision_kind||'').toLowerCase().replace(/[\s-]+/g,'_');
-        if(['money_out','spend','send','sends','your_words','database_write','legal','your_login'].includes(risk)&&decision.status!=='approve')throw Error('Reserved decision requires approval');
+        if((decisionKinds.isReserved(decision.decision_kind)||decisionKinds.isReserved(decision.kind))&&decision.status!=='approve')throw Error('Reserved decision requires approval');
         if(decision.veto_hours!==undefined&&(!Number.isFinite(decision.veto_hours)||Number(decision.veto_hours)<0||Number(decision.veto_hours)>168))throw Error('Invalid veto hours');
       }
     } else if(kind==='routines') {rows(payload,'items' in payload?'items':'routines',true);for(const item of rows(payload,'review_items'))text(item.id)}

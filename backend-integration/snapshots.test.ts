@@ -60,3 +60,9 @@ test('missing schema degrades to an empty feed, but operational database errors 
   assert.equal(failure.status,503);
   assert.equal(JSON.stringify(failure).includes('private connection'),false);
 });
+
+test('existing and alias reserved decision kinds cannot enter automatic feeds',()=>{
+ for(const field of ['decision_kind','kind'])for(const kind of ['spend_money','send_email','money out','your_words','your_login','database_write','db_write','legal','signature','auth']){
+  assert.throws(()=>validateSnapshotPush({snapshots:[{kind:'decisions',key:'daily',generated_at:new Date().toISOString(),payload:{items:[{id:'held',status:'proposed',[field]:kind}]}}]}),kind+' in '+field);
+ }
+});
