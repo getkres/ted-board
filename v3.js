@@ -81,6 +81,7 @@ class ControlCenterV3 {
    const selected=cards.find(c=>c.id===this.item);if(selected)grid.append(this.itemDetail(selected,cards));else {const side=this.el('aside','v3-stream');side.append(this.el('h2',null,'Ted decided'),this.decisionList(calls));grid.append(side);}paper.append(grid);
   }
   this.tools(paper);
+  if(this.split==='yours'&&this.spTiles){const spaces=this.el('section','v3-home-spaces');spaces.append(this.el('h2',null,'Spaces'));this.spTiles(spaces);main.append(spaces);}
  }
  ticket(card,i){
   const row=this.el('article','v3-ticket'+(i===0?' v3-ticket-hero':''));row.dataset.cardId=card.id;row.dataset.ticket=card.id;row.tabIndex=0;
@@ -119,14 +120,18 @@ class ControlCenterV3 {
   for(const r of rows){const row=this.el('article','v3-routine'),state=r.state||({ok:'fine',warn:'look',fail:'broke'})[r.ok]||'not logged';row.append(this.el('span','v3-status',state),this.el('h3',null,r.name||r.n),this.el('p',null,r.last_output||r.out||'Output not logged.'),this.el('small',null,'Last run: '+(r.last_run||r.last||'not logged')+' · '+(r.schedule||r.sched||'Schedule not logged')));(['fine','ok'].includes(state)?fine:list).append(row);}list.append(fine);grid.append(reviews,list);parent.append(grid,this.say(TedTheme.lines.routines,'glass'));
  }
  async reviewChoice(item,choice){if(!this.capabilities.review_choice)return;this.reviewBusy||=new Set();if(this.reviewBusy.has(item.id))return;this.reviewBusy.add(item.id);const generation=this.generation;this.redraw();try{const result=await this.api('POST',{action:'review_choice',item_id:item.id,choice,operation_id:crypto.randomUUID()});if(generation!==this.generation)return;if(!result.ok)throw Error('Review choice was not confirmed.');for(const p of this.payloads('routines'))if(Array.isArray(p.review_items))p.review_items=p.review_items.filter(i=>i.id!==item.id);this.notice(choice==='card'?'Card requested.':'Review choice saved.');}catch(e){if(generation===this.generation)this.notice(e.message,true);}finally{if(generation===this.generation){this.reviewBusy.delete(item.id);this.redraw();}}}
- keydown(e){if(this.getState().project!=='inbox')return;const cards=this.needs();if(['j','k'].includes(e.key.toLowerCase())){e.preventDefault();this.focusIndex=Math.max(0,Math.min(cards.length-1,this.focusIndex+(e.key.toLowerCase()==='j'?1:-1)));document.querySelectorAll('[data-ticket]')[this.focusIndex]?.focus();return;}const card=cards.find(c=>c.id===this.item)||cards[this.focusIndex];if(card&&['1','2'].includes(e.key)){e.preventDefault();this.quick(card,Number(e.key)-1);}if(card&&e.key.toLowerCase()==='h'){e.preventDefault();act(card,'move','up_next');}if(e.key.toLowerCase()==='u'){this.notice('Use the recorded Undo action in Ted decided or Mockups.');}if(e.key==='Tab'&&['BODY','MAIN'].includes(e.target.tagName)){e.preventDefault();const splits=['yours','decided','routines','woke'];this.split=splits[(splits.indexOf(this.split)+1)%4];this.redraw();}}
+ keydown(e){if(this.spacesKeydown?.(e))return;if(this.getState().project!=='inbox')return;const cards=this.needs();if(['j','k'].includes(e.key.toLowerCase())){e.preventDefault();this.focusIndex=Math.max(0,Math.min(cards.length-1,this.focusIndex+(e.key.toLowerCase()==='j'?1:-1)));document.querySelectorAll('[data-ticket]')[this.focusIndex]?.focus();return;}const card=cards.find(c=>c.id===this.item)||cards[this.focusIndex];if(card&&['1','2'].includes(e.key)){e.preventDefault();this.quick(card,Number(e.key)-1);}if(card&&e.key.toLowerCase()==='h'){e.preventDefault();act(card,'move','up_next');}if(e.key.toLowerCase()==='u'){this.notice('Use the recorded Undo action in Ted decided or Mockups.');}if(e.key==='Tab'&&['BODY','MAIN'].includes(e.target.tagName)){e.preventDefault();const splits=['yours','decided','routines','woke'];this.split=splits[(splits.indexOf(this.split)+1)%4];this.redraw();}}
 
  render(main,route){
   if(!['inbox','spaces','roadmap'].includes(route)&&!route.includes(':'))return false;
   main.classList.add('v3');
   if(route==='inbox'){this.inbox(main);return true;}
+  if(route==='spaces'){this.spaces(main);return true;}
+  if(/^(space|pod|agent):/.test(route)){const [kind,rest]=route.split(':');const [line,raw]=rest.split('/');let id=raw;try{id=decodeURIComponent(raw||'');}catch{}this[kind](main,line,id);return true;}
   if(ControlCenterV3.isMockups(route)){this.mockups.render(main);return true;}
   this.heading(main,route==='inbox'?'NEED YOU':route==='spaces'?'TEN LINES. ONE BOARD.':route.toUpperCase(),'Your calls, what Ted is on, and what comes next.','stamp','The board is open. Your calls stay yours.');
   const p=this.paper(main);if(route==='inbox'){const cards=this.getState().cards.filter(c=>c.section==='needs_you');if(!cards.length)this.empty(p,'Nothing on you right now.');cards.forEach(c=>p.append(this.renderCard(c)));this.tools(p);}else this.empty(p,'Not logged. This view is waiting for its live feed.');return true;
  }
 }
+
+if(window.installSpacesV3)installSpacesV3(ControlCenterV3);
