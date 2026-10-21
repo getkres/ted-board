@@ -46,3 +46,20 @@ gh pr merge --squash
 ```
 
 The backend, card data, worker tools, screenshots, and keyed URL are local operational files. They are not part of this public repository. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
+
+
+## Proposed heartbeat I/O reduction, October 21
+
+Card `c-e530a0c623` has a private review bundle at
+`jobs/card-c-e530a0c623/heartbeat-private-handoff.tar.gz`.
+Its SHA-256 is `3070dbd758a3f2e2da61221603eddb6aa07a869c348306329e911534f89cecc8`.
+The bundle contains the Python patch, offline cadence tests, exact SQL,
+backup, rollback, and cron-history retention proposal. Keep control polling
+at 30 seconds, publish unchanged heartbeats once per minute, and update
+session rows only when changed or due for refresh. Missing sessions age
+out of the read surface after two minutes. Retain seven days of completed
+cron history, with an exact backup of the initially pruned rows.
+
+This is pending Ted's database review and mini rollout. No SQL, migration,
+or operational heartbeat change has been applied. Private worker source
+and database artifacts remain outside this public repository.
