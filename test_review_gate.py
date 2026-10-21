@@ -33,7 +33,9 @@ def main(argv=None):
         for name in NEW_TESTS: shutil.copy2(ROOT / 'tests' / name, staged / 'tests' / name)
         # Force any accidentally unmocked Python HTTP request to fail locally.
         command = [sys.executable, '-c',
-                   'import unittest; from unittest.mock import patch; '
+                   'import unittest; from unittest.mock import patch; from pathlib import Path; '
+                   'import board_live; '
+                   'assert Path(board_live.__file__).resolve().parent==Path.cwd().resolve(), "reaper must use the reconstructed overlay"; '
                    'suite=unittest.defaultTestLoader.discover("tests",pattern="*_test.py"); '
                    'block=patch("urllib.request.urlopen",side_effect=RuntimeError("network disabled during tests")); '
                    'block.start(); result=unittest.TextTestRunner(verbosity=1).run(suite); '
