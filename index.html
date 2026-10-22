@@ -36,6 +36,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <nav class="tab-wrap" aria-label="Projects"><div class="tabs" role="tablist" aria-label="Projects" id="tabs"></div></nav>
 <div id="notice" class="status" role="status" aria-live="polite"></div>
 <p id="fresh-status" class="fresh-status" role="status" aria-live="polite"></p>
+<p id="ted-health" class="fresh-status" role="alert" hidden></p>
 <main id="main" role="tabpanel" tabindex="-1"><p class="loading">Opening your board…</p></main>
 <footer><span><span class="footer-mark" aria-hidden="true">●</span> you pick, i do the rest.</span><button id="change-key" class="quiet access-button">Access</button></footer>
 </div>
@@ -74,8 +75,13 @@ function updateTedChat(raw){
  $('talk-ted').href=url;
 }
 function renderFresh(){
+ const health=state.jobs.find(j=>j.id==='fresh-ted-health');
+ const stale=health&&(!health.heartbeat_at||!Number.isFinite(Date.parse(health.heartbeat_at))||Date.now()-Date.parse(health.heartbeat_at)>120000);
+ const warning=stale?'Live Ted health is stale. Check the mini.':health?.status==='failed'?(health.last_line||'Live Ted is offline. Start fresh Ted.'):'';
+ const alert=$('ted-health');alert.hidden=!warning;if(alert.textContent!==warning)alert.textContent=warning;
+ alert.style.color='var(--red, #b42318)';
  const b=$('fresh-ted');const pending=freshSending||['pending','running'].includes(freshState?.status);b.disabled=!key||!freshState||pending;b.classList.toggle('due',freshState?.due===true);b.setAttribute('aria-busy',String(pending));
- $('fresh-status').textContent=freshState?.status==='failed'?(freshState.error||'Fresh Ted could not start. Tap the red button to retry.'):pending?(freshState?.stage||'Requesting fresh Ted…'):freshState?.status==='done'?'Fresh Ted is up. Open the new Ted chat.':'';
+ $('fresh-status').textContent=freshState?.status==='failed'?(freshState.error||'Fresh Ted could not start. Tap the red button to retry.'):pending?(freshState?.stage||'Requesting fresh Ted…'):freshState?.status==='done'&&!warning?'Fresh Ted is up. Open the new Ted chat.':'';
 }
 $('fresh-ted').addEventListener('click',async()=>{
  if(freshSending||['pending','running'].includes(freshState?.status))return;
@@ -312,7 +318,7 @@ function renderApprovals(card,article){
 }
 async function loadJobs(){
  if(!key||state.jobsLoading)return;state.jobsLoading=true;const requestId=++state.jobsRequestId,requestKey=key;
- try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
+ try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);state.jobs=Array.isArray(data.jobs)?data.jobs:[];renderFresh();state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
@@ -326,7 +332,7 @@ async function control(action,body){
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);
- const list=el('div','job-list');const active=state.jobs.filter(j=>['running','queued','waiting_approval','untracked'].includes(j.status));
+ const list=el('div','job-list');const active=state.jobs.filter(j=>j.id!=='fresh-ted-health'&&['running','queued','waiting_approval','untracked'].includes(j.status));
  if(!state.jobsLoaded)list.append(el('p','status','Loading jobs…'));else if(!active.length)list.append(el('p','status','No active jobs.'));
  for(const j of active){const box=el('article','card');box.dataset.status=j.status;box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',j.engine+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
   const stale=!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000;if(stale)box.append(el('p','job-warning','Mini heartbeat is stale. Controls will wait for it to reconnect.'));
