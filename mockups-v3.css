@@ -2,3 +2,92 @@
 @media(max-width:1050px){.mk3-layout{grid-template-columns:minmax(0,1fr) 250px}.mk3-wall{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:800px){.mk3-layout,.mk3-triage-layout{grid-template-columns:1fr}.mk3-wall,.mk3-frame-grid{grid-template-columns:1fr}.mk3-rail{border-left:0;border-top:2px solid;padding:20px 0 0}.mk3-cover-art{height:270px}.mk3-cover-strip{display:none}.mk3-slots{gap:10px}.mk3-slot h2{font-size:22px;padding:8px}.mk3-slot h3{font-size:17px;padding:8px}.mk3-slot-image img{height:280px}.mk3-empty-select{padding:12px;font-size:14px}.mk3-slot button{font-size:13px;padding:7px}.mk3-film{grid-template-columns:repeat(5,minmax(0,1fr))}.mk3-film img{height:72px}.mk3-modes button{font-size:12px;padding:7px}.mk3-compare-view{height:400px}.mk3-triage-frame img{max-height:540px}.mk3-segments button{font-size:13px;padding:8px}.mk3-feedback{padding:16px}.mk3-versions button{font-size:22px;max-width:100%}.mk3-versions small{font-size:10px}.mk3-feedback p{font-size:14px;line-height:1.5}}
 .mk3-lineages{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:18px}.mk3-lineages article{border:2px solid;padding:14px}.mk3-lineages h2{font-size:23px;margin-bottom:10px}
+
+/* The image owns the viewport beneath one compact review bar. */
+.mockup-dialog[open] { animation: none; }
+.mockup-dialog .mockup-dialog-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.mockup-dialog-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mockup-dialog .mockup-dialog-title h2 {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mockup-dialog .mockup-position { flex: none; margin: 0; white-space: nowrap; }
+.mockup-dialog-actions { display: flex; align-items: center; justify-self: end; gap: 6px; }
+.mockup-dialog-head button { min-height: 44px; padding: 7px 10px; font-size: 13px; white-space: nowrap; }
+.mockup-dialog .mockup-tools { flex-wrap: nowrap; padding: 0; gap: 4px; }
+.mockup-dialog .mockup-dialog-verdicts { padding: 0; max-height: none; overflow: visible; }
+.mockup-dialog-verdicts .mockup-verdicts,
+.mockup-dialog-verdicts .mockup-verdict-actions { flex-wrap: nowrap; width: auto; gap: 4px; }
+.mockup-dialog-verdicts .mockup-verdict-button { position: relative; white-space: nowrap; }
+.mockup-dialog-verdicts .mockup-verdict-badge {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.mockup-dialog-verdicts .mockup-verdict-note {
+  position: fixed;
+  z-index: 5;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 16px));
+  padding: 8px;
+  border: 1px solid var(--v3-ink);
+  background: var(--v3-paper);
+}
+.mockup-verdict-symbol { display: none; }
+.mockup-dialog .mockup-viewport { min-height: 0; }
+.mkup-toggle[aria-expanded=true] { background: var(--v3-ink); color: var(--v3-paper); }
+@media (max-width: 1100px) {
+  .mockup-dialog .mockup-dialog-head {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-rows: 44px 44px;
+    height: 100px;
+    gap: 2px 4px;
+    padding: 4px 8px 5px;
+  }
+  .mockup-dialog-title { grid-area: 1 / 1; gap: 8px; }
+  .mockup-dialog .mockup-dialog-title h2 { font-size: 14px; }
+  .mockup-dialog-actions { display: contents; }
+  .mockup-dialog-head .mkup-toggle { grid-area: 1 / 2; }
+  .mockup-dialog-head .mockup-close { grid-area: 1 / 3; }
+  .mockup-dialog .mockup-dialog-verdicts { grid-area: 2 / 1; justify-self: start; }
+  .mockup-dialog-verdicts .mockup-verdict-note { top: 108px; }
+  .mockup-dialog .mockup-tools { grid-area: 2 / 2 / 3 / 4; justify-self: end; gap: 2px; }
+  .mockup-dialog .mockup-tools button { min-width: 32px; padding: 4px 6px; }
+  .mockup-dialog .mockup-tools .mockup-scale { min-width: 54px; }
+  .mockup-dialog-verdicts .mockup-verdict-actions { gap: 2px; }
+  .mockup-dialog-verdicts .mockup-verdict-button { min-width: 32px; width: 32px; padding: 4px; }
+  .mockup-verdict-symbol { display: inline; font-size: 18px; font-weight: 800; }
+  .mockup-dialog-verdicts .mockup-verdict-label { display: none; }
+  .mockup-dialog-verdicts .show-label .mockup-verdict-label,
+  .mockup-dialog-verdicts .mockup-verdict-button:focus-visible .mockup-verdict-label {
+    display: block;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 6;
+    padding: 7px 10px;
+    border: 1px solid var(--v3-ink);
+    background: var(--v3-paper);
+    color: var(--v3-ink);
+    font-size: 13px;
+  }
+}
+@media (max-width: 359px) {
+  .mockup-dialog .mockup-tools .mockup-scale { display: none; }
+}

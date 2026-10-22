@@ -1,3 +1,82 @@
-.mkup-dialog{color:var(--v3-ink);background:var(--v3-paper)}.mkup-tools{padding:0 16px 12px;flex:none;border-bottom:1px solid var(--v3-rule)}.mkup-tool-buttons,.mkup-controls{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:7px}.mkup-tool-buttons button,.mkup-controls button{border:1.5px solid var(--v3-ink);min-height:44px;padding:7px 10px;font-size:13px;font-weight:800}.mkup-tool-buttons [aria-pressed=true]{background:var(--v3-ink);color:var(--v3-paper)}.mkup-controls .mkup-color{width:44px;padding:10px;background:var(--markup-color);border:4px solid var(--v3-paper);outline:1px solid var(--v3-ink)}.mkup-controls .mkup-color[aria-pressed=true]{outline:3px solid var(--v3-ink);outline-offset:1px}.mkup-controls .mkup-color:hover{background:var(--markup-color)}.mkup-status{font:12px/1.5 var(--v3-mono);margin-top:9px}.mkup-text-label{font-size:13px;margin-top:9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mkup-text-label[hidden]{display:none}.mkup-text-input{min-height:44px;max-width:100%;padding:8px;background:var(--v3-cream);color:var(--v3-ink);border:1.5px solid var(--v3-ink);flex:1}.mockup-canvas>svg.mkup-overlay{position:absolute;inset:0;width:100%;height:100%;max-width:none;overflow:visible;pointer-events:none;fill:initial;stroke:none}.mockup-viewport[data-markup-tool=draw],.mockup-viewport[data-markup-tool=arrow],.mockup-viewport[data-markup-tool=box]{cursor:crosshair}.mockup-viewport[data-markup-tool=text]{cursor:text}.mkup-dialog .mockup-tools{flex-wrap:wrap}.mkup-dialog .mockup-dialog-verdicts{max-height:23dvh}.mkup-dialog .mockup-pin{z-index:3}.mkup-dialog .mockup-pin span{min-width:26px}
-@media(min-width:700px){.mkup-tools{padding-left:24px;padding-right:24px}}
-@media(max-width:800px){.mkup-tools{padding:0 12px 10px}.mkup-tool-buttons,.mkup-controls{gap:5px}.mkup-tool-buttons button{padding:5px 8px;font-size:12px}.mkup-status{font-size:11px;line-height:1.4}.mkup-dialog .mockup-hint{display:none}.mkup-dialog .mockup-dialog-verdicts{max-height:20dvh}.mkup-dialog .mockup-dialog-head h2{font-size:14px}.mkup-dialog .mockup-tools button{padding:5px 9px}.mkup-dialog .mockup-viewport{min-height:130px}}
+.mkup-dialog { color: var(--v3-ink); background: var(--v3-paper); }
+.mkup-tools {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 6px;
+  border: 1px solid var(--v3-ink);
+  background: var(--v3-paper);
+  cursor: default;
+}
+.mkup-tools[hidden], .mkup-text-label[hidden], .mkup-tools [hidden] { display: none; }
+.mkup-tool-buttons, .mkup-controls { display: flex; flex: none; align-items: center; gap: 4px; }
+.mkup-tools button, .mkup-tools select {
+  flex: none;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 1px solid var(--v3-ink);
+  color: var(--v3-ink);
+  background: var(--v3-paper);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.mkup-tool-buttons [aria-pressed=true] { background: var(--v3-ink); color: var(--v3-paper); }
+.mkup-controls .mkup-color {
+  width: 32px;
+  padding: 0;
+  background: var(--markup-color);
+  border: 4px solid var(--v3-paper);
+  outline: 1px solid var(--v3-ink);
+  outline-offset: -1px;
+}
+.mkup-controls .mkup-color[aria-pressed=true] { outline-width: 3px; }
+.mkup-controls .mkup-color:hover { background: var(--markup-color); }
+.mkup-text-label { display: flex; min-width: 0; }
+.mkup-text-input {
+  width: 180px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  background: var(--v3-cream);
+  color: var(--v3-ink);
+  border: 1px solid var(--v3-ink);
+  font: 16px var(--v3-body);
+}
+.mkup-tools .mkup-tool-select, .mkup-tools .mkup-color-select,
+.mkup-add-symbol, .mkup-save-short { display: none; }
+.mockup-canvas > svg.mkup-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  overflow: visible;
+  pointer-events: none;
+  fill: initial;
+  stroke: none;
+}
+.mockup-viewport[data-markup-tool=draw], .mockup-viewport[data-markup-tool=arrow],
+.mockup-viewport[data-markup-tool=box] { cursor: crosshair; }
+.mockup-viewport[data-markup-tool=text] { cursor: text; }
+.mkup-dialog .mockup-pin { z-index: 3; }
+.mkup-dialog .mockup-pin span { min-width: 26px; }
+@media (max-width: 1100px) {
+  .mkup-tools { gap: 4px; padding: 5px; }
+  .mkup-tools .mkup-tool-select, .mkup-tools .mkup-color-select { display: block; padding: 4px; font-size: 12px; }
+  .mkup-tool-select { width: 68px; }
+  .mkup-color-select { width: 56px; }
+  .mkup-tool-buttons, .mkup-controls .mkup-color, .mkup-add-label, .mkup-save-label { display: none; }
+  .mkup-add-symbol, .mkup-save-short { display: inline; }
+  .mkup-tools button { padding: 4px 8px; font-size: 12px; }
+  .mkup-tools .mockup-add { width: 36px; }
+  .mkup-text-label { flex: 1; }
+  .mkup-text-input { width: 100px; }
+  .mkup-controls { gap: 3px; }
+}
