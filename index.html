@@ -1,15 +1,13 @@
 <!doctype html>
-<html lang="en" class="cave">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#04070a">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
 <meta name="referrer" content="no-referrer">
 <meta name="description" content="A quiet place to move things forward with Ted.">
 <title>Ted Board</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{color-scheme:dark;--bg:#15110e;--card:#221b16;--raised:#30251c;--text:#f7e9d7;--muted:#c3ad96;--accent:#f2a541;--line:#49382a;--green:#b5cba2;--red:#ffbcaa;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:16px;background:var(--bg);color:var(--text)}
 *{box-sizing:border-box}body{margin:0;min-width:280px}button,input,textarea,select{font:inherit}button,a,select,summary{-webkit-tap-highlight-color:transparent;touch-action:manipulation}button,select,summary{min-height:44px;min-width:44px}button,select{border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--text)}button{cursor:pointer;padding:10px 14px;line-height:1.3;font-size:.875rem;font-weight:550}button:hover:not(:disabled){background:var(--raised)}button:disabled,select:disabled{opacity:.5;cursor:wait}button.primary{background:var(--accent);color:#211609;border-color:var(--accent)}button.primary:hover:not(:disabled){background:#ffc06d}button.quiet{border-color:transparent;color:var(--muted)}:focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:var(--accent)}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:Fraunces,Georgia,serif;font-weight:500}h1{font-size:2rem;letter-spacing:-.06em;line-height:1.1}h2{font-size:1.6rem;letter-spacing:-.035em}h3{font-size:1.35rem;line-height:1.2;letter-spacing:-.025em}small{font-size:.78rem}.shell{max-width:1480px;margin:auto;padding:0 20px}.masthead{display:flex;align-items:center;justify-content:space-between;padding-top:max(30px,env(safe-area-inset-top));padding-bottom:26px;gap:12px}.brand{display:flex;gap:12px;align-items:center}.brand-mark{width:24px;height:24px;border:1px solid #b57930;border-radius:50%;display:grid;place-items:center;flex-shrink:0}.brand-mark:after{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent)}.masthead p{font-size:.78rem;color:var(--muted);margin-top:6px}.icon-button{display:flex;align-items:center;justify-content:center;width:44px;padding:10px;border-radius:50%}svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.6;fill:none}.tab-wrap{position:sticky;top:0;background:var(--bg);z-index:5;border-bottom:1px solid var(--line)}.tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:4px 0 13px;overscroll-behavior-x:contain}.tabs::-webkit-scrollbar{display:none}.tab{flex-shrink:0;white-space:nowrap;border-radius:24px;color:var(--muted);border-color:transparent;padding:11px 16px;font-weight:500}.tab[aria-selected=true]{color:var(--text);background:var(--raised);border-color:#6b4e31}.tab-count{color:var(--accent);font-size:.75rem;margin-left:7px}.board-intro{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:26px 0 22px}.board-intro p{color:var(--muted);font-size:.85rem;line-height:1.5}.updated{font-size:.75rem;color:var(--muted);white-space:nowrap}.board{display:grid;gap:30px;padding-bottom:24px}.section{min-width:0}.section-heading{display:flex;align-items:center;gap:9px;margin-bottom:16px}.section-heading h2{font-size:1.1rem}.section-heading:before{content:"";width:6px;height:6px;border-radius:50%;background:#8e7b69}.section[data-section=needs_you] .section-heading:before{background:var(--accent)}.count{color:var(--muted);font-size:.75rem}.card{position:relative;min-width:0;background:var(--card);border:1px solid #3c2e23;border-radius:15px;padding:18px;margin-bottom:14px;overflow-wrap:anywhere}.card:last-child{margin-bottom:0}.card-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.chip{display:inline-block;border:1px solid #57402c;background:#2d2218;border-radius:6px;color:#e5bf8c;font-size:.7rem;font-weight:550;padding:4px 8px;line-height:1.25}.move-wrap{display:flex;align-items:center;color:var(--muted);position:relative;height:44px;margin:-9px -8px -9px 0}.move-wrap svg{width:15px;pointer-events:none;position:absolute;right:9px}.move-wrap select{appearance:none;width:76px;min-height:44px;padding:8px 24px 8px 10px;font-size:.75rem;color:var(--muted);border-color:transparent;cursor:pointer}.move-wrap select:hover{background:var(--raised)}.card-body{font-size:.875rem;line-height:1.55;color:var(--muted);margin-top:10px;white-space:pre-line}.thumb{display:block;width:100%;max-height:160px;object-fit:cover;border-radius:8px;margin:14px 0;background:var(--raised)}.options{display:flex;flex-wrap:wrap;gap:8px;margin-top:17px}.option{border-color:#805b30;color:#ffd49b;background:#302317;flex-grow:1}.option:hover:not(:disabled){background:#44301c}.note-form{display:flex;gap:8px;align-items:stretch;margin-top:14px}.note-form textarea{flex:1;resize:vertical;min-width:0;min-height:44px;height:44px;max-height:160px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#1b1511;color:var(--text);font-size:.8125rem;line-height:1.4}.note-form textarea::placeholder{color:#af967e}.note-form button{font-size:.8rem;padding:10px 12px}.card-footer{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px}.delegate{font-size:.78rem;padding:10px 4px!important;min-height:44px}.play{display:flex;align-items:center;gap:6px;font-size:.75rem;border-color:#65503b;padding:10px 12px}.play svg{width:12px;height:12px;fill:var(--accent);stroke:none}.answer{border-top:1px solid var(--line);margin-top:16px;padding-top:12px;font-size:.8rem;line-height:1.5;display:flex;gap:10px;align-items:baseline;justify-content:space-between}.answer p{color:var(--text);white-space:pre-line}.sent{white-space:nowrap;color:var(--green);font-size:.7rem}.empty-section{color:var(--muted);font-size:.8rem;padding:6px 0 12px;line-height:1.5}.killed{border-top:1px solid var(--line);padding-top:12px}.killed summary{cursor:pointer;display:flex;align-items:center;gap:8px;font-size:.875rem;color:var(--muted);list-style:none}.killed summary::-webkit-details-marker{display:none}.killed summary:after{content:"+";margin-left:auto;font-size:1.3rem}.killed[open] summary:after{content:"−"}.killed .card{margin-top:14px}.status{font-size:.85rem;line-height:1.5;color:var(--muted)}#notice:empty{display:none}#notice{padding:12px 14px;background:var(--raised);border:1px solid var(--line);border-radius:10px;margin:18px 0}.status.error{color:var(--red)}.state{padding:32px 4px;max-width:500px}.state h2{margin-bottom:12px}.state p{color:var(--muted);line-height:1.6;font-size:.9rem}.state button{margin-top:20px}.loading{padding:50px 0;color:var(--muted);font-size:.9rem}.key-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.key-form input{flex:1;min-width:150px;min-height:48px;background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:12px}.key-form button{margin:0}footer{padding:20px 0 max(28px,env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:.72rem}.footer-mark{color:var(--accent)}.access-button{font-size:.72rem;padding:8px 0;border:0}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
@@ -20,8 +18,15 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 .masthead{padding-right:80px}.tab-wrap{padding-right:84px}.fresh-ted{position:fixed;top:max(18px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));z-index:15;width:68px;height:68px;min-width:68px;border-radius:50%;padding:8px;border:2px solid #b44b48;background:#681f20;color:#fff2e9;box-shadow:inset 0 2px 3px #ffffff18,0 3px 0 #381314;font-size:.78rem;font-weight:650;line-height:1.2}.fresh-ted:hover:not(:disabled){background:#8b292b}.fresh-ted.due{background:#c72d36;border-color:#ff9d94;box-shadow:0 0 0 5px #e5464826,0 0 24px #f0444873;animation:fresh-pulse 1.8s ease-in-out infinite}.fresh-ted:disabled{cursor:wait;opacity:.8}.fresh-status{font-size:.8rem;line-height:1.5;color:var(--muted);margin:12px 0}.fresh-status:empty{display:none}.tab-icon{width:18px;height:18px;vertical-align:-3px;margin-right:6px}@keyframes fresh-pulse{50%{box-shadow:0 0 0 9px #e5464810,0 0 34px #f04448a0}}@media(prefers-reduced-motion:reduce){.fresh-ted.due{animation:none;background:#d9343e;box-shadow:0 0 0 5px #e5464826,0 0 24px #f0444873}}
 </style>
 <link rel="stylesheet" href="mockups.css">
-<link rel="stylesheet" href="cave.css">
+<link rel="stylesheet" href="mockups-v3.css">
+<link rel="stylesheet" href="markup-v3.css">
+
 <link rel="stylesheet" href="control-center.css">
+<link rel="stylesheet" href="v3.css">
+<link rel="stylesheet" href="spaces-v3.css">
+<link rel="stylesheet" href="roadmap-v3.css">
+<link rel="stylesheet" href="theme.css">
+<link rel="icon" href="assets/ted.svg" type="image/svg+xml">
 </head>
 <body>
 <a id="talk-ted" class="talk-ted" href="https://claude.ai/code" target="_blank" rel="noopener noreferrer" aria-label="talk to Ted">talk to<br>Ted</a>
@@ -36,13 +41,20 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 </div>
 <dialog id="guide" aria-labelledby="guide-heading"><div class="guide-shell"><div class="guide-header"><span class="guide-project" id="guide-project"></span><button class="icon-button" id="guide-close" aria-label="Close guided mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><h2 class="guide-title" id="guide-heading"></h2><div class="progress-track" id="guide-progress" aria-hidden="true"></div><div class="guide-content"><p class="step-count" id="step-count"></p><p class="step-text" id="step-text" tabindex="-1"></p><div id="guide-link"></div><div class="guide-note"><label for="step-note">stuck? tell me why (optional)</label><textarea id="step-note" maxlength="1900" placeholder="what's in the way?"></textarea></div><p class="status guide-status" id="guide-status" role="status" aria-live="polite"></p></div><div class="guide-actions"><button id="guide-back">Back</button><button class="primary" id="guide-next">Done, next</button></div><button class="quiet stuck" id="guide-stuck">Stuck</button><p class="paused" id="guide-save-status">close anytime, i'll keep your spot.</p></div></dialog>
 <noscript><div class="shell state"><h2>JavaScript is needed</h2><p>Open this link in Safari or Chrome to use your board.</p></div></noscript>
+<script src="decision-kinds.js"></script>
 <script src="mockups.js"></script>
+<script src="mockups-v3.js"></script>
+<script src="markup-v3.js"></script>
+<script>installMarkupV3(MockupsV3);</script>
 <script src="control-center.js"></script>
+<script src="theme.js"></script>
+<script src="spaces-v3.js"></script>
+<script src="roadmap-v3.js"></script>
+<script src="v3.js"></script>
 <script>
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
 const POD_PULSE_ERROR='Pod updates could not load. Refresh to try again.';
-const PROJECTS=['Fictora','Bookish','Kres + clients','Lunair + art','Ted ops'];
 const SECTIONS=[['needs_you','Needs you'],['ted_doing',"Ted’s doing"],['up_next','Up next'],['done','Done']];
 const $=id=>document.getElementById(id);
 const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],jobsLoaded:false,jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
@@ -52,9 +64,9 @@ let key=storage.get('ted-board-key')||'';
 const fragment=new URLSearchParams(location.hash.slice(1));
 const fragmentKey=fragment.get('k');
 if(fragmentKey){key=fragmentKey;storage.set('ted-board-key',key)}
-function deepTab(value){return ['All','Mockups','Control','Jobs',...PROJECTS,...state.cards.map(c=>c.project)].find(p=>p.toLowerCase()===String(value||'').toLowerCase())||'All'}
+function deepTab(value){return ControlCenterV3.route(value)}
 state.project=deepTab(fragment.get('tab'));
-function saveTab(){const params=new URLSearchParams();if(key)params.set('k',key);params.set('tab',state.project);history.replaceState(null,'',location.pathname+location.search+'#'+params.toString())}
+function saveTab(){const params=new URLSearchParams();if(key)params.set('k',key);params.set('tab',state.project);history.pushState(null,'',location.pathname+location.search+'#'+params.toString())}
 let freshState=null,freshSending=false;
 function updateTedChat(raw){
  let url='https://claude.ai/code';
@@ -73,7 +85,7 @@ $('fresh-ted').addEventListener('click',async()=>{
  catch(e){if(requestId===state.freshRequestId&&requestKey===key)announce(e.message,true)}
  finally{if(requestId===state.freshRequestId&&requestKey===key){freshSending=false;renderFresh()}}
 });
-window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);resetForKeyChange();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&state.project==='Control')controlCenter.load()});
+window.addEventListener('hashchange',()=>{const params=new URLSearchParams(location.hash.slice(1));const next=params.get('k');if(next&&next!==key){key=next;storage.set('ted-board-key',key);resetForKeyChange();mockups.reset();load();mockups.load()}state.project=deepTab(params.get('tab'));render();if(key)loadJobs();if(key&&['inbox','Control'].includes(state.project))controlCenter.load()});
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.type='button';b.addEventListener('click',fn);return b}
 function safeURL(raw){try{const u=new URL(raw);return ['https:','http:'].includes(u.protocol)?u.href:null}catch{return null}}
@@ -145,6 +157,8 @@ function applyPodPulse(data){
  state.podPulse=Array.isArray(data.pod_pulse)?data.pod_pulse:[];
 }
 function resetForKeyChange(){
+ v3.reset();
+ state.busy.clear();state.drafts=Object.create(null);state.threads.clear();state.readCards.clear();state.guide=null;$('guide').close();$('step-note').value='';
  state.loadRequestId++;
  state.loading=false;state.loaded=false;state.cards=[];
  state.podPulse=[];state.podPulseError=false;state.openPods.clear();
@@ -174,23 +188,9 @@ function renderThread(card){
  if(list.length>3){const toggle=button(expanded?'show less':'show all ('+list.length+')','quiet thread-toggle',()=>{if(expanded)state.threads.delete(card.id);else{state.threads.add(card.id);state.readCards.add(card.id);storage.set('ted-board-read:'+card.id,replyMarker(card))}render()});toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-controls',items.id);thread.append(toggle)}
  return thread;
 }
-const mockups=new MockupsView({el,button,storage,getKey:()=>key,onChange:()=>{if(state.project==='Mockups')render();else renderTabs()},notify:announce,isSelected:()=>state.project==='Mockups'});
-function renderTabs(){
- const tabs=$('tabs');tabs.replaceChildren();
- const projects=['All','Mockups','Control',...PROJECTS,...new Set(state.cards.map(c=>c.project).filter(p=>p&&!PROJECTS.includes(p)&&!['Jobs','Mockups','Control'].includes(p))),'Jobs'];
- projects.forEach((p,i)=>{
-  const b=button(p,'tab',()=>selectProject(p));if(p==='Mockups'){const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');icon.classList.add('tab-icon');const shape=document.createElementNS('http://www.w3.org/2000/svg','path');shape.setAttribute('d','M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M8 7h.01');icon.append(shape);b.prepend(icon)}b.setAttribute('role','tab');b.id='project-'+i;b.setAttribute('aria-controls','main');b.setAttribute('aria-selected',String(p===state.project));b.tabIndex=p===state.project?0:-1;
-  const n=p==='Mockups'?mockups.unreadCount():state.cards.filter(c=>c.section==='needs_you'&&(p==='All'||p===c.project)).length;
-  const hasUnread=p==='Mockups'?mockups.hasUnread():state.cards.some(c=>(p==='All'||p===c.project)&&unread(c));
-  if(n||hasUnread){const count=el('span','tab-count',n||'');if(hasUnread)count.append(replyDot());b.append(count)}
-  if(hasUnread)b.setAttribute('aria-description','Unread replies from Ted');
-  b.setAttribute('aria-label',p);
-  b.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const next=e.key==='Home'?0:e.key==='End'?projects.length-1:(i+(e.key==='ArrowRight'?1:-1)+projects.length)%projects.length;selectProject(projects[next]);$('tabs').children[next].focus()});
-  tabs.append(b);
- });
- $('main').setAttribute('aria-labelledby','project-'+projects.indexOf(state.project));
-}
-function selectProject(p){state.project=p;saveTab();render();if(p==='Jobs')loadJobs();if(p==='Control')controlCenter.load();if(p==='Mockups'&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
+const mockups=new MockupsV3({el,button,storage,getKey:()=>key,onChange:()=>{if(ControlCenterV3.isMockups(state.project))render();else renderTabs()},notify:announce,isSelected:()=>ControlCenterV3.isMockups(state.project)});
+function renderTabs(){return v3.tabs();}
+function selectProject(p){state.project=p;saveTab();render();if(p==='Jobs')loadJobs();if(p==='Control')controlCenter.load();if(ControlCenterV3.isMockups(p)&&!mockups.loaded&&!mockups.loading)mockups.load();$('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});}
 function answerText(card){
  const a=card.answer;if(!a)return '';
  if(a.action==='stuck'||a.choice==='stuck')return 'Help requested'+(Number.isInteger(a.step_index)?' on step '+(a.step_index+1):'');
@@ -204,7 +204,7 @@ function liveStrip(card){
  const strip=el('div','live-strip');const parsed=Date.parse(card.live_status_at);const age=Number.isFinite(parsed)?Math.max(0,Date.now()-parsed):null;
  const stale=card.live_state==='running'&&(age===null||age>7200000);
  const state=stale?'blocked':(['running','blocked','waiting_on_you','done'].includes(card.live_state)?card.live_state:'blocked');strip.dataset.state=state;
- const line=stale?"stale, ted's checking":(card.live_status||'waiting for a live update');
+ const line=stale?'Live update is stale':(card.live_status||'waiting for a live update');
  const copy=el('span',null,line);copy.setAttribute('aria-label',({running:'running',blocked:'blocked',waiting_on_you:'waiting on you',done:'done'})[state]+': '+line);
  const time=el('time');if(age!==null){time.dateTime=card.live_status_at;const minutes=Math.floor(age/60000);time.textContent='updated '+(minutes<1?'just now':minutes<60?minutes+'m ago':minutes<1440?Math.floor(minutes/60)+'h ago':Math.floor(minutes/1440)+'d ago')}else time.textContent='no update yet';
  strip.append(copy,time);return strip;
@@ -237,7 +237,8 @@ function render(){
  const rowScroll=new Map();main.querySelectorAll('.mockup-row[aria-label]').forEach(r=>rowScroll.set(r.getAttribute('aria-label'),r.scrollLeft));const pageY=window.scrollY;
  main.replaceChildren();
  if(!key){renderAccess();return}
- if(state.project==='Mockups'){mockups.render(main);if(rowScroll.size){main.querySelectorAll('.mockup-row[aria-label]').forEach(r=>{const x=rowScroll.get(r.getAttribute('aria-label'));if(x){r.style.scrollSnapType='none';r.scrollLeft=x;requestAnimationFrame(()=>{r.style.scrollSnapType=''})}});window.scrollTo(0,pageY)}return}
+ if(v3.render(main,state.project))return;
+ if(ControlCenterV3.isMockups(state.project)){mockups.render(main);if(rowScroll.size){main.querySelectorAll('.mockup-row[aria-label]').forEach(r=>{const x=rowScroll.get(r.getAttribute('aria-label'));if(x){r.style.scrollSnapType='none';r.scrollLeft=x;requestAnimationFrame(()=>{r.style.scrollSnapType=''})}});window.scrollTo(0,pageY)}return}
  if(!state.loaded){main.append(el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return}
  if(state.project==='Jobs'){renderJobs(main);return}
  if(state.project==='Control'){controlCenter.render(main);return}
@@ -262,34 +263,34 @@ function renderAccess(){
 async function api(method,body,resource=''){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
  try{const r=await fetch(ENDPOINT+(method==='GET'?'?key='+encodeURIComponent(key)+(resource?'&resource='+encodeURIComponent(resource):''):''),{method,headers:method==='GET'?{}:{'Content-Type':'text/plain'},body:body?JSON.stringify({key,...body}):undefined,cache:'no-store',referrerPolicy:'no-referrer',signal:controller.signal});let data;try{data=await r.json()}catch{throw new Error('The service returned an unreadable response. Try again.')}
- if(!r.ok){if(r.status===403)throw new Error('Access key not accepted. Tap Access to open your private link again.');throw new Error(data.error||'Could not save. Try again.')}
+ if(!r.ok){if([401,403].includes(r.status)){const error=new Error('Access key not accepted. Tap Access to open your private link again.');error.authFailed=true;throw error;}throw new Error(data.error||'Could not save. Try again.')}
  return data;
  }catch(e){if(e.name==='AbortError')throw new Error('The connection timed out. Refresh to check whether your answer arrived.');if(e instanceof TypeError)throw new Error('Could not connect. Check your connection and try again.');throw e}finally{clearTimeout(timeout)}
 }
 async function load(force=false){
  if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;const requestId=++state.loadRequestId,requestKey=key,revision=state.revision;$('refresh').disabled=true;announce('');render();
- try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.cards=data.cards;applyPodPulse(data);const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(state.podPulseError?POD_PULSE_ERROR:storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'',state.podPulseError)}
- catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
+ try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.cards=data.cards;applyPodPulse(data);v3.accept(data);const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(state.podPulseError?POD_PULSE_ERROR:storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'',state.podPulseError)}
+ catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.loading=false;if(e.authFailed)v3.authFailed();announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
 }
 async function pollCards(){
  if(!key||document.hidden||state.loading||state.polling||state.busy.size)return;
  state.polling=true;const revision=state.revision,requestId=state.loadRequestId,requestKey=key;
  try{
   const data=await api('GET');if(revision!==state.revision||requestId!==state.loadRequestId||requestKey!==key||!Array.isArray(data.cards))return;
-  state.cards=data.cards;const pulseHadError=state.podPulseError;applyPodPulse(data);
+  state.cards=data.cards;v3.accept(data);renderTabs();const pulseHadError=state.podPulseError;applyPodPulse(data);
   if(state.project==='Control'&&controlCenter.view==='Veto'&&!controlCenter.busy)controlCenter.load();
   if(state.podPulseError)announce(POD_PULSE_ERROR,true);
   else if(pulseHadError&&$('notice').textContent===POD_PULSE_ERROR)announce('');
   document.querySelectorAll('.pod-row').forEach(row=>{if(row.open)state.openPods.add(row.dataset.podId);else state.openPods.delete(row.dataset.podId)});
   const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT','BUTTON'].includes(focused.tagName);
-  if(!editing&&!state.guide&&state.project!=='Mockups'&&state.project!=='Jobs'){
+  if(!editing&&!state.guide&&!ControlCenterV3.isMockups(state.project)&&state.project!=='Jobs'){
    const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
    const focusedPod=focused?.closest('.pod-row')?.dataset.podId;
    render();document.querySelectorAll('details:not(.pod-row)').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true});
    if(focusedPod)[...document.querySelectorAll('.pod-row')].find(e=>e.dataset.podId===focusedPod)?.querySelector('summary')?.focus({preventScroll:true});
   }else{
    document.querySelectorAll('.live-strip').forEach(strip=>{const card=state.cards.find(c=>c.id===strip.parentElement.dataset.cardId);if(card)strip.replaceWith(liveStrip(card))});
-   if(state.project!=='Mockups'&&state.project!=='Jobs')syncPodPulse();
+   if(!ControlCenterV3.isMockups(state.project)&&state.project!=='Jobs')syncPodPulse();
   }
  }catch{}finally{state.polling=false}
 }
@@ -297,10 +298,10 @@ setInterval(pollCards,20000);
 setInterval(updatePodPulseAges,60000);
 function setCardBusy(id,busy){if(busy)state.busy.add(id);else state.busy.delete(id);document.querySelectorAll('[data-card-id]').forEach(e=>{if(e.dataset.cardId===id)e.querySelectorAll('button,select,textarea').forEach(c=>c.disabled=busy)})}
 async function act(card,action,value='',note=''){
- if(state.busy.has(card.id))return false;setCardBusy(card.id,true);announce('Saving…');
- try{const data=await api('POST',{card_id:card.id,action,value,note});if(!data.ok||!data.card)throw new Error('Save was not confirmed. Refresh to check your answer.');state.revision++;const i=state.cards.findIndex(c=>c.id===card.id);if(i>=0)state.cards[i]=data.card;if(action==='note')delete state.drafts[card.id];render();announce(action==='stuck'?'Ted has your note.':action==='steps_done'?'All steps finished. Sent to Ted.':'Sent to Ted.');return true}
- catch(e){announce(e.message,true);if(state.guide)$('guide-status').textContent=e.message;return false}
- finally{setCardBusy(card.id,false)}
+ if(state.busy.has(card.id))return false;const requestKey=key,generation=v3.generation;setCardBusy(card.id,true);announce('Saving…');
+ try{const data=await api('POST',{card_id:card.id,action,value,note});if(requestKey!==key||generation!==v3.generation)return false;if(!data.ok||!data.card)throw new Error('Save was not confirmed. Refresh to check your answer.');state.revision++;const i=state.cards.findIndex(c=>c.id===card.id);if(i>=0)state.cards[i]=data.card;if(action==='note')delete state.drafts[card.id];render();announce(action==='stuck'?'Ted has your note.':action==='steps_done'?'All steps finished. Sent to Ted.':'Sent to Ted.');return true}
+ catch(e){if(requestKey!==key||generation!==v3.generation)return false;announce(e.message,true);if(state.guide)$('guide-status').textContent=e.message;return false}
+ finally{if(requestKey===key&&generation===v3.generation)setCardBusy(card.id,false)}
 }
 function renderApprovals(card,article){
  for(const a of state.approvals.filter(a=>a.card_id===card.id)){
@@ -311,13 +312,13 @@ function renderApprovals(card,article){
 }
 async function loadJobs(){
  if(!key||state.jobsLoading)return;state.jobsLoading=true;const requestId=++state.jobsRequestId,requestKey=key;
- try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;
+ try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
  // Preserve the open artifact views and drafts during polling.
- const opened=[...document.querySelectorAll('[data-approval-id][open]')].map(e=>e.dataset.approvalId);
+ const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
  /* Mockups shows no jobs data, so a rebuild there only resets the swipe the viewer is in. */
- if(state.project==='Mockups')renderFresh();
- else if(!editing&&!state.busy.size){render();document.querySelectorAll('[data-approval-id]').forEach(e=>{if(opened.includes(e.dataset.approvalId))e.open=true})}
+ if(ControlCenterV3.isMockups(state.project))renderFresh();
+ else if(!editing&&!state.busy.size){render();document.querySelectorAll('details:not(.pod-row)').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true})}
  }catch(e){if(requestId===state.jobsRequestId&&requestKey===key&&state.project==='Jobs')announce(e.message,true)}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
 async function control(action,body){
@@ -361,16 +362,18 @@ async function guideSend(action){
  if(ok&&action==='steps_done'){storage.remove(progressKey(g.card));$('guide').close();state.guide=null;$('main').focus();return}
  if(ok)$('guide-status').textContent='Ted has your note. You can keep going or close this for now.';drawGuide();
 }
+const v3=new ControlCenterV3({el,button,api,getState:()=>state,getKey:()=>key,mockups,renderCard,select:selectProject,redraw:render,notice:announce,storage});
+mockups.v3=v3;
 const controlCenter=new ControlCenter({api,getCards:()=>state.cards,answer:act,reloadCards:load,redraw:render,notice:announce,select:()=>{state.project='Control';saveTab();render()}});
 function positionTedControls(){const nav=document.querySelector('.tab-wrap');nav.classList.toggle('under-controls',nav.getBoundingClientRect().top<=0)}
 window.addEventListener('scroll',positionTedControls,{passive:true});
 window.addEventListener('pageshow',positionTedControls);
 window.addEventListener('resize',positionTedControls);
 positionTedControls();
-$('refresh').addEventListener('click',()=>{if(state.project==='Mockups')mockups.load();else{load();if(state.project==='Control')controlCenter.load()}});
+$('refresh').addEventListener('click',()=>{if(ControlCenterV3.isMockups(state.project))mockups.load();else{load();if(state.project==='Control')controlCenter.load()}});
 $('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading||mockups.busy.size)return;announce('');renderAccess()});
 window.addEventListener('online',()=>{if(key&&!state.busy.size)load()});
-render();if(key){load();mockups.load();if(state.project==='Control')controlCenter.load()}
+v3.setup();render();if(key){load();mockups.load();controlCenter.load()}
 </script>
 </body>
 </html>
