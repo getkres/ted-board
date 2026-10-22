@@ -12,19 +12,22 @@ class ControlCenterV3 {
   return 'inbox';
  }
  constructor(deps){Object.assign(this,deps);this.reset();}
- reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.linesFallback=false;this.lineCards=[];this.lineSnapshots=[];this.lineDirectory=null;ControlCenterV3.order=[];ControlCenterV3.names={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
+ reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.linesFallback=false;this.lineCards=[];this.lineSnapshots=[];this.linePulse=[];this.lineDirectory=null;ControlCenterV3.order=[];ControlCenterV3.names={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
  accept(data){this.acceptLines(data);this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();}
  // The authenticated feed owns line identity, order, and display names.
  acceptLines(data){
   const C=ControlCenterV3;
   if(Array.isArray(data.cards))this.lineCards=data.cards;
   if(Array.isArray(data.snapshots))this.lineSnapshots=data.snapshots;
+  if(Array.isArray(data.pod_pulse))this.linePulse=data.pod_pulse;
+  else if(Array.isArray(data.cards)&&data.pod_pulse_error!==true)this.linePulse=[];
   const directories=(Array.isArray(data.snapshots)?data.snapshots:[]).filter(s=>s?.kind==='lines');
   if(Array.isArray(data.lines))this.lineDirectory=data.lines;
   else if(directories.length)this.lineDirectory=directories.flatMap(s=>{
    const payload=s.payload;
    return Array.isArray(payload)?payload:Array.isArray(payload?.items)?payload.items:Array.isArray(payload?.lines)?payload.lines:[];
   });
+  else if(Array.isArray(data.cards)&&!data.capabilities?.snapshots)this.lineDirectory=null;
   this.linesFallback=false;
   C.order=[];C.names=Object.create(null);
   const add=(id,name)=>{
@@ -38,13 +41,21 @@ class ControlCenterV3 {
    for(const row of this.lineDirectory)if(row&&typeof row==='object')add(row.id||row.key,row.name||row.label);
    return;
   }
-  // Rebuild inferred metadata from current cards and snapshots. Keep the cards
-  // when a separate snapshots-only response updates the other source.
-  for(const row of this.lineCards)if(row&&typeof row==='object')add(row.line,row.line_name||row.project);
+  // Preserve recorded identities on older cards and snapshots when available.
+  const inferred=this.lineCards.filter(row=>row&&typeof row==='object').map(row=>({id:row.line,name:row.line_name||row.project,project:row.project}));
   for(const snapshot of this.lineSnapshots){
    if(!snapshot||!['pods','roadmap'].includes(snapshot.kind))continue;
-   const row=snapshot.payload||{};add(row.line||snapshot.key,row.line_name||row.project);
+   const row=snapshot.payload||{};inferred.push({id:row.line||snapshot.key,name:row.line_name||row.project,project:row.project});
   }
+  // Legacy feeds identify projects only by label. Encode the label so routes
+  // stay distinct and stable for punctuation, Unicode, and reordered pods.
+  for(const row of this.linePulse){
+   const project=typeof row?.project==='string'?row.project.trim():'';
+   if(!project||Object.values(C.names).includes(project))continue;
+   const recorded=inferred.find(item=>[item.project,item.name].some(name=>typeof name==='string'&&name.trim()===project)&&typeof item.id==='string'&&/^[a-z0-9_-]+$/i.test(item.id.trim()));
+   add(recorded?.id||'project-'+Array.from(project,c=>c.codePointAt(0).toString(16)).join('-'),project);
+  }
+  for(const row of inferred)if(!C.order.includes(String(row.id||'').toLowerCase().trim())&&!Object.values(C.names).includes(String(row.name||'').trim()))add(row.id,row.name);
  }
  authFailed(){this.linesFallback=true;ControlCenterV3.order=Array.from({length:10},(_,i)=>'line'+(i+1));ControlCenterV3.names=Object.fromEntries(ControlCenterV3.order.map((id,i)=>[id,'Line '+(i+1)]));}
  unreadCount(card){return unread(card)?1:0;}
@@ -90,7 +101,7 @@ class ControlCenterV3 {
  tools(parent){const details=this.el('details','v3-tools'),summary=this.el('summary',null,'Rules, sprint, batches, and jobs');details.append(summary);const row=this.el('div','v3-actions');for(const name of ['Veto','Rules','Sprint','Batches'])row.append(this.button(name,'',()=>controlCenter.open(name)));row.append(this.button('Jobs','',()=>this.select('Jobs')));details.append(row);const all=this.el('details','v3-all-cards');all.append(this.el('summary',null,'All project cards'));const list=this.el('div','v3-card-directory');for(const card of this.getState().cards){const open=this.button(card.project+' / '+card.title,'',()=>{this.item=card.id;this.split='yours';this.select('inbox');});list.append(open);}all.append(list);details.append(all);parent.append(details);}
  needs(){return this.getState().cards.filter(c=>c.section==='needs_you');}
  kind(card){return ({money_out:'money out',your_words:'your words',your_login:'your login',legal:'legal',database_write:'database write'})[TedDecisionKinds.normalize(card.decision_kind||card.kind)]||'your call';}
- lineOf(card){const raw=String(card.line||card.project||'').toLowerCase();return ControlCenterV3.order.find(id=>id===raw||String(ControlCenterV3.names[id]||'').toLowerCase()===raw)||null;}
+ lineOf(card){const recorded=String(card.line||'').toLowerCase().trim();if(ControlCenterV3.order.includes(recorded))return recorded;const raw=String(card.project||card.line||'').trim(),lower=raw.toLowerCase();return ControlCenterV3.order.find(id=>ControlCenterV3.names[id]===raw)||ControlCenterV3.order.find(id=>id===lower||String(ControlCenterV3.names[id]||'').toLowerCase()===lower)||null;}
  payloads(kind){return this.snapshots.filter(s=>s.kind===kind).map(s=>s.payload||{});}
  decisions(){
   const cards=this.getState().cards;
@@ -138,7 +149,7 @@ class ControlCenterV3 {
   row.append(actions);return row;
  }
  async answerCard(card,option){const ok=await act(card,'choice',option.value);if(ok){this.lastAnswer={id:card.id};this.item=null;this.redraw();}}
- quick(card,index){const option=options(card)[index];if(option){if([card.decision_kind,card.kind].some(TedDecisionKinds.isReserved)&&!confirm(option.label+': '+card.title+'?'))return;return this.answerCard(card,option);}this.notice('Open the card and choose one of its recorded actions.');}
+ quick(card,index){const option=options(card)[index];if(option){const k=card.decision_kind||card.kind;if((!k||TedDecisionKinds.isReserved(k))&&!confirm(option.label+': '+card.title+'?'))return;return this.answerCard(card,option);}this.notice('Open the card and choose one of its recorded actions.');}
  swipe(node,right,left){let start=null;node.style.touchAction='pan-y';node.addEventListener('pointerdown',e=>{if(e.target.closest('button,a,input,textarea,select')||e.pointerType==='mouse')return;start={x:e.clientX,y:e.clientY};});node.addEventListener('pointercancel',()=>start=null);node.addEventListener('pointerup',e=>{if(!start)return;const dx=e.clientX-start.x,dy=e.clientY-start.y;start=null;if(Math.abs(dx)>90&&Math.abs(dx)>Math.abs(dy)*1.5)(dx>0?right:left)();});}
  itemDetail(card,cards){
   const detail=this.el('aside','v3-detail');detail.append(this.button((cards.includes(card)?'Inbox / Yours / '+(cards.indexOf(card)+1)+' of '+cards.length:'Inbox / '+card.project+' / '+({ted_doing:'In progress',up_next:'Up next',done:'Done',killed:'Killed'}[card.section]||'Card')),'v3-crumb',()=>{this.item=null;this.redraw()}),this.el('span','v3-tag',this.kind(card)),this.el('h2','v3-detail-title',card.title));

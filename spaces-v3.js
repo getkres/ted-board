@@ -3,7 +3,11 @@
  const list=value=>Array.isArray(value)?value.filter(x=>x&&typeof x==='object'):[];
  const text=(value,fallback='not logged')=>typeof value==='string'&&value.trim()?value:typeof value==='number'?String(value):fallback;
  const id=value=>text(value,'');
- function line(raw,C){const value=String(raw||'').toLowerCase().replace(/[^a-z0-9]/g,'');return C.order.find(k=>k.replace(/[^a-z0-9]/g,'')===value||String(C.names[k]||'').toLowerCase().replace(/[^a-z0-9]/g,'')===value)||null}
+ function line(raw,C,project=false){
+  const label=String(raw||'').trim(),named=C.order.find(k=>C.names[k]===label),recorded=C.order.find(k=>k===label),direct=project?named||recorded:recorded||named;if(direct)return direct;
+  const exact=label.toLowerCase(),match=C.order.find(k=>k===exact||String(C.names[k]||'').toLowerCase()===exact);if(match)return match;
+  const value=exact.replace(/[^a-z0-9]/g,'');return value?C.order.find(k=>k.replace(/[^a-z0-9]/g,'')===value||String(C.names[k]||'').toLowerCase().replace(/[^a-z0-9]/g,'')===value)||null:null;
+ }
  function normalize(which,snapshots,pulse,C){
   const matching=list(snapshots).filter(s=>s.kind==='pods'&&line(s.payload?.line||s.key,C)===which),meta=matching.at(-1)?.payload||{};
   const pods=[],seen=new Set();
@@ -11,7 +15,7 @@
    const key=id(raw.id||raw.pod_id||raw.name||raw.label);if(!key||seen.has(key))continue;seen.add(key);
    pods.push({...raw,id:key,name:text(raw.name||raw.label,key),state:text(raw.state),now:text(raw.now||raw.headline),legacy:false});
   }}
-  for(const raw of list(pulse).filter(p=>line(p.line||p.project,C)===which)){
+  for(const raw of list(pulse).filter(p=>(line(p.line,C)||line(p.project,C,true))===which)){
    const key=id(raw.pod_id||raw.id);if(!key||seen.has(key))continue;seen.add(key);
    pods.push({...raw,id:key,name:text(raw.label||raw.name,key),state:'not logged',now:text(raw.headline),legacy:true});
   }
