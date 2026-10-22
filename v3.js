@@ -149,7 +149,7 @@ class ControlCenterV3 {
   row.append(actions);return row;
  }
  async answerCard(card,option){const ok=await act(card,'choice',option.value);if(ok){this.lastAnswer={id:card.id};this.item=null;this.redraw();}}
- quick(card,index){const option=options(card)[index];if(option){const k=card.decision_kind||card.kind;if((!k||TedDecisionKinds.isReserved(k))&&!confirm(option.label+': '+card.title+'?'))return;return this.answerCard(card,option);}this.notice('Open the card and choose one of its recorded actions.');}
+ quick(card,index){const option=options(card)[index];if(option){const ks=[card.decision_kind,card.kind].filter(Boolean);if((!ks.length||ks.some(k=>TedDecisionKinds.isReserved(k)))&&!confirm(option.label+': '+card.title+'?'))return;return this.answerCard(card,option);}this.notice('Open the card and choose one of its recorded actions.');}
  swipe(node,right,left){let start=null;node.style.touchAction='pan-y';node.addEventListener('pointerdown',e=>{if(e.target.closest('button,a,input,textarea,select')||e.pointerType==='mouse')return;start={x:e.clientX,y:e.clientY};});node.addEventListener('pointercancel',()=>start=null);node.addEventListener('pointerup',e=>{if(!start)return;const dx=e.clientX-start.x,dy=e.clientY-start.y;start=null;if(Math.abs(dx)>90&&Math.abs(dx)>Math.abs(dy)*1.5)(dx>0?right:left)();});}
  itemDetail(card,cards){
   const detail=this.el('aside','v3-detail');detail.append(this.button((cards.includes(card)?'Inbox / Yours / '+(cards.indexOf(card)+1)+' of '+cards.length:'Inbox / '+card.project+' / '+({ted_doing:'In progress',up_next:'Up next',done:'Done',killed:'Killed'}[card.section]||'Card')),'v3-crumb',()=>{this.item=null;this.redraw()}),this.el('span','v3-tag',this.kind(card)),this.el('h2','v3-detail-title',card.title));

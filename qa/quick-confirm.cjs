@@ -10,7 +10,8 @@ const cases=[
  {name:'missing kind, dismissed confirmation',fields:{},accept:false,posts:0,prompts:1},
  {name:'missing kind, accepted confirmation',fields:{},accept:true,posts:1,prompts:1},
  {name:'explicit safe decision_kind',fields:{decision_kind:'routine'},accept:false,posts:1,prompts:0},
- {name:'explicit safe kind',fields:{kind:'routine'},accept:false,posts:1,prompts:0}
+ {name:'explicit safe kind',fields:{kind:'routine'},accept:false,posts:1,prompts:0},
+ {name:'safe decision_kind with reserved kind',fields:{decision_kind:'routine',kind:'money_out'},accept:false,posts:0,prompts:1}
 ];
 
 for(const shortcut of ['swipe right','key 1'])for(const scenario of cases){
