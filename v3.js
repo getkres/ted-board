@@ -13,12 +13,13 @@ class ControlCenterV3 {
  }
  constructor(deps){Object.assign(this,deps);this.reset();}
  reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.linesFallback=false;this.lineCards=[];this.lineSnapshots=[];this.linePulse=[];this.lineDirectory=null;ControlCenterV3.order=[];ControlCenterV3.names={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
- accept(data){this.acceptLines(data);this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();}
+ accept(data){this.acceptLines(data);this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();else if(Array.isArray(data.cards))this.snapshots=[];}
  // The authenticated feed owns line identity, order, and display names.
  acceptLines(data){
   const C=ControlCenterV3;
   if(Array.isArray(data.cards))this.lineCards=data.cards;
   if(Array.isArray(data.snapshots))this.lineSnapshots=data.snapshots;
+  else if(Array.isArray(data.cards)&&!data.capabilities?.snapshots)this.lineSnapshots=[];
   if(Array.isArray(data.pod_pulse))this.linePulse=data.pod_pulse;
   else if(Array.isArray(data.cards)&&data.pod_pulse_error!==true)this.linePulse=[];
   const directories=(Array.isArray(data.snapshots)?data.snapshots:[]).filter(s=>s?.kind==='lines');
@@ -47,15 +48,23 @@ class ControlCenterV3 {
    if(!snapshot||!['pods','roadmap'].includes(snapshot.kind))continue;
    const row=snapshot.payload||{};inferred.push({id:row.line||snapshot.key,name:row.line_name||row.project,project:row.project});
   }
-  // Legacy feeds identify projects only by label. Encode the label so routes
-  // stay distinct and stable for punctuation, Unicode, and reordered pods.
-  for(const row of this.linePulse){
-   const project=typeof row?.project==='string'?row.project.trim():'';
-   if(!project||Object.values(C.names).includes(project))continue;
-   const recorded=inferred.find(item=>[item.project,item.name].some(name=>typeof name==='string'&&name.trim()===project)&&typeof item.id==='string'&&/^[a-z0-9_-]+$/i.test(item.id.trim()));
-   add(recorded?.id||'project-'+Array.from(project,c=>c.codePointAt(0).toString(16)).join('-'),project);
+  const label=value=>typeof value==='string'?value.trim():'',canonical=value=>label(value).toLowerCase();
+  const encode=project=>'project-'+Array.from(project,c=>c.codePointAt(0).toString(16)).join('-');
+  // Project-only feeds use canonical labels for identity, preserving punctuation
+  // and Unicode. Card frequency chooses the display spelling, not the route.
+  const groups=new Map();
+  for(const row of [...this.linePulse.map(row=>({name:row?.project})),...inferred]){
+   const name=label(row.name),key=canonical(row.project||name);if(!key)continue;
+   if(!groups.has(key))groups.set(key,{name,id:null});
+   const group=groups.get(key);
+   if(!group.id&&typeof row.id==='string'&&/^[a-z0-9_-]+$/i.test(row.id.trim()))group.id=row.id;
   }
-  for(const row of inferred)if(!C.order.includes(String(row.id||'').toLowerCase().trim())&&!Object.values(C.names).includes(String(row.name||'').trim()))add(row.id,row.name);
+  for(const [key,group]of groups){
+   const spellings=new Map();
+   for(const row of this.lineCards){const name=label(row?.project||row?.line_name);if(canonical(name)===key)spellings.set(name,(spellings.get(name)||0)+1)}
+   const name=[...spellings].sort((a,b)=>b[1]-a[1])[0]?.[0]||group.name;
+   add(group.id||encode(key),name);
+  }
  }
  authFailed(){this.linesFallback=true;ControlCenterV3.order=Array.from({length:10},(_,i)=>'line'+(i+1));ControlCenterV3.names=Object.fromEntries(ControlCenterV3.order.map((id,i)=>[id,'Line '+(i+1)]));}
  unreadCount(card){return unread(card)?1:0;}
@@ -87,7 +96,7 @@ class ControlCenterV3 {
   const tabs=document.getElementById('tabs'),state=this.getState();tabs.replaceChildren();
   const active=ControlCenterV3.isMockups(state.project)?'Mockups':state.project.split(':')[0];
   const open=new Set(this.mockups.mockups.filter(m=>m.status!=='archived'&&!['approved','scrapped'].includes(m.verdict)).map(m=>JSON.stringify([m.project,m.batch]))).size;
-  const list=[['inbox','Inbox',state.cards.filter(c=>c.section==='needs_you').length],['spaces','Spaces',ControlCenterV3.order.length],['roadmap','Roadmap',this.feed('roadmap').length],['Mockups','Mockups',open]];
+  const list=[['inbox','Inbox',this.needs().length],['spaces','Spaces',ControlCenterV3.order.length],['roadmap','Roadmap',ControlCenterV3.order.length],['Mockups','Mockups',open]];
   list.forEach(([route,label,count],i)=>{const b=this.button(label,'tab',()=>this.select(route));b.id='v3-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(active===route||active==='space'&&route==='spaces'||active==='pod'&&route==='spaces'||active==='agent'&&route==='spaces'));b.setAttribute('aria-controls','main');b.append(this.el('span','tab-count',state.loaded?String(count):'…'));if(route==='inbox'&&state.loaded)this.attentionBadges(b,state.cards.filter(c=>this.unreadCount(c)).length,this.pendingApprovals().length);b.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const n=e.key==='Home'?0:e.key==='End'?3:(i+(e.key==='ArrowRight'?1:3))%4;this.select(list[n][0]);tabs.children[n].focus()}});tabs.append(b)});
   document.getElementById('main').setAttribute('aria-labelledby',tabs.querySelector('[aria-selected=true]')?.id||'v3-tab-0');
  }
@@ -99,7 +108,12 @@ class ControlCenterV3 {
  paper(parent){const p=this.el('section','v3-paper');parent.append(p);return p;}
  empty(parent,text='Not logged.'){parent.append(this.el('p','v3-empty',text));}
  tools(parent){const details=this.el('details','v3-tools'),summary=this.el('summary',null,'Rules, sprint, batches, and jobs');details.append(summary);const row=this.el('div','v3-actions');for(const name of ['Veto','Rules','Sprint','Batches'])row.append(this.button(name,'',()=>controlCenter.open(name)));row.append(this.button('Jobs','',()=>this.select('Jobs')));details.append(row);const all=this.el('details','v3-all-cards');all.append(this.el('summary',null,'All project cards'));const list=this.el('div','v3-card-directory');for(const card of this.getState().cards){const open=this.button(card.project+' / '+card.title,'',()=>{this.item=card.id;this.split='yours';this.select('inbox');});list.append(open);}all.append(list);details.append(all);parent.append(details);}
- needs(){return this.getState().cards.filter(c=>c.section==='needs_you');}
+ needsYou(card){return !['done','killed'].includes(card.section)&&(['yours','needs_you'].includes(card.section)||this.pendingApprovals(card).length>0);}
+ needs(){return this.getState().cards.filter(c=>this.needsYou(c));}
+ cardsForLine(which){
+  const number=(value,fallback)=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))?Number(value):fallback;
+  return this.getState().cards.filter(c=>this.lineOf(c)===which).sort((a,b)=>number(b.priority_value,0)-number(a.priority_value,0)||number(a.sort,Infinity)-number(b.sort,Infinity));
+ }
  kind(card){return ({money_out:'money out',your_words:'your words',your_login:'your login',legal:'legal',database_write:'database write'})[TedDecisionKinds.normalize(card.decision_kind||card.kind)]||'your call';}
  lineOf(card){const recorded=String(card.line||'').toLowerCase().trim();if(ControlCenterV3.order.includes(recorded))return recorded;const raw=String(card.project||card.line||'').trim(),lower=raw.toLowerCase();return ControlCenterV3.order.find(id=>ControlCenterV3.names[id]===raw)||ControlCenterV3.order.find(id=>id===lower||String(ControlCenterV3.names[id]||'').toLowerCase()===lower)||null;}
  payloads(kind){return this.snapshots.filter(s=>s.kind===kind).map(s=>s.payload||{});}
@@ -113,7 +127,7 @@ class ControlCenterV3 {
  async loadSnapshots(){
   if(!this.capabilities.snapshots||this.snapshotLoading)return;
   this.snapshotLoading=true;const generation=this.generation;
-  try{const data=await this.api('GET',undefined,'snapshots');if(generation!==this.generation)return;if(Array.isArray(data.snapshots)){this.snapshots=data.snapshots;this.acceptLines(data);this.redraw();}}
+  try{const data=await this.api('GET',undefined,'snapshots');if(generation!==this.generation||!this.capabilities.snapshots)return;if(Array.isArray(data.snapshots)){this.snapshots=data.snapshots;this.acceptLines(data);this.redraw();}}
   catch{if(generation===this.generation)this.notice('Snapshot updates are unavailable. Existing cards and mockups still work.',true);}
   finally{if(generation===this.generation)this.snapshotLoading=false;}
  }

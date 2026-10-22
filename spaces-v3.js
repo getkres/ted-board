@@ -23,7 +23,19 @@
  }
  window.SpacesV3Data={line,normalize};
  window.installSpacesV3=function(C){Object.assign(C.prototype,{
-  spData(which){return normalize(which,this.snapshots,this.getState().podPulse,C)},
+  spData(which){
+   const state=this.getState(),data=normalize(which,this.snapshots,state.podPulse,C);
+   if(this.snapshots.some(s=>s.kind==='pods'&&line(s.payload?.line||s.key,C)===which))return data;
+   const cards=this.cardsForLine(which);if(!cards.length)return data;
+   const doing=cards.filter(c=>c.section==='ted_doing'),top=doing[0],cardIds=new Set(cards.map(c=>c.id));
+   const stuck=state.jobsLoaded?state.jobs.filter(job=>job.status==='running'&&cardIds.has(job.card_id)&&Date.now()-Date.parse(job.heartbeat_at)>20*60000).length:null;
+   return {...data,logged:true,fromCards:true,yourCalls:cards.filter(c=>this.needsYou(c)).length,doing:doing.length,upNext:cards.filter(c=>c.section==='up_next').length,stuck,
+    now:'Ted is on: '+doing.length+' in progress'+(top?' · '+top.title+(top.live_status?' · '+top.live_status:''):'.')};
+  },
+  spSummary(parent,data){
+   const counts=this.el('p','sp-count',data.yourCalls+' your calls · '+data.upNext+' up next · '+(data.stuck===null?'Stuck: not logged.':data.stuck+' stuck'));
+   parent.append(counts,this.el('p','sp-now',data.now));
+  },
   spChip(value){const raw=text(value),label=({ok:'On track',risk:'At risk',off:'Off track',wait:'On your WAIT'})[raw]||raw,node=this.el('span','v3-status sp-state',label);node.dataset.state=raw.toLowerCase().replace(/[^a-z_]/g,'');return node},
   spCub(state,size=36){const art=this.el('span','sp-cub');art.style.width=size+'px';art.style.height=size+'px';art.innerHTML=TedTheme.cub(text(state),size);return art},
   spTitle(parent,title){const h=this.el('h2','sp-section-title',title);parent.append(h);return h},
@@ -40,7 +52,7 @@
   },
   spRoadMini(parent,which){this.spTitle(parent,'Roadmap, now and next');
    if(typeof this.roadData!=='function'){parent.append(this.el('p','sp-muted','Roadmap not logged.'));return}
-   const road=this.roadData(which);for(const lane of ['now','next']){const group=this.el('section','sp-mini-road');group.append(this.el('h3',null,lane==='now'?'Now':'Next'));if(!road[lane].length)group.append(this.el('p','sp-muted','Not logged.'));for(const item of road[lane].slice(0,3))group.append(this.el('p',null,text(item.title||item.name)));parent.append(group)}
+   const road=this.roadData(which);for(const lane of ['now','next']){const group=this.el('section','sp-mini-road');group.append(this.el('h3',null,lane==='now'?'Now':'Next'));if(!road[lane].length)group.append(this.el('p','sp-muted',this.roadEmpty(road,lane,which)));for(const item of road[lane].slice(0,3))group.append(this.el('p',null,text(item.title||item.name)));parent.append(group)}
    parent.append(this.button('Open '+C.names[which]+"'s roadmap",'',()=>this.select('roadmap:'+which)));
   },
   spSide(parent,which){
@@ -51,9 +63,10 @@
   },
   spTiles(parent){
    const grid=this.el('div','sp-space-grid');
-   for(const which of C.order){const data=this.spData(which),tile=this.el('article','sp-space-tile');tile.append(this.button(C.names[which],'sp-line-name',()=>this.select('space:'+which)),this.spChip(data.health));
-    const stuck=data.pods.filter(p=>p.state==='stuck').length;tile.append(this.el('p','sp-count',data.logged?data.pods.length+' pods, '+stuck+' logged stuck':'Pod count and stuck count not logged.'));
-    const bears=this.el('div','sp-pod-bears');for(const pod of data.pods){const b=this.button('','sp-pod-bear',()=>this.select('pod:'+which+'/'+encodeURIComponent(pod.id)));b.setAttribute('aria-label',pod.name+', '+pod.state);b.append(this.spCub(pod.state));bears.append(b)}tile.append(bears,this.el('p','sp-now',data.now));grid.append(tile)}parent.append(grid);parent.append(this.el('p','sp-shelf','On the shelf: not logged.'));return grid;
+   for(const which of C.order){const data=this.spData(which),tile=this.el('article','sp-space-tile');tile.append(this.button(C.names[which],'sp-line-name',()=>this.select('space:'+which)));if(!data.fromCards||data.health!=='not logged')tile.append(this.spChip(data.health));
+    if(data.fromCards)this.spSummary(tile,data);
+    else{const stuck=data.pods.filter(p=>p.state==='stuck').length;tile.append(this.el('p','sp-count',data.logged?data.pods.length+' pods, '+stuck+' logged stuck':'Pod count and stuck count not logged.'));}
+    const bears=this.el('div','sp-pod-bears');for(const pod of data.pods){const b=this.button('','sp-pod-bear',()=>this.select('pod:'+which+'/'+encodeURIComponent(pod.id)));b.setAttribute('aria-label',pod.name+', '+pod.state);b.append(this.spCub(pod.state));bears.append(b)}tile.append(bears);if(!data.fromCards)tile.append(this.el('p','sp-now',data.now));else if(data.pods.length)tile.append(this.el('p','sp-count',data.pods.length+' pods'));grid.append(tile)}parent.append(grid);parent.append(this.el('p','sp-shelf','On the shelf: not logged.'));return grid;
   },
   spaces(main){
    this.heading(main,'YOUR SPACES.','Your calls, what Ted is on, and what comes next.');this.spTiles(this.paper(main));
@@ -62,9 +75,9 @@
    if(!C.order.includes(which)){this.heading(main,'SPACE NOT LOGGED');const p=this.paper(main);p.append(this.button('Back to Spaces','',()=>this.select('spaces')));return}
    const surface=this.el('section','sp-space-surface');main.append(surface);main=surface;
    const data=this.spData(which);this.spSwitch(main,which);this.heading(main,C.names[which],data.now,'glass',text(data.ted_line,'No note logged for this line.'));
-   const paper=this.paper(main);paper.append(this.spChip(data.health),this.el('p','v3-keys','[ / ] next space · P pods · R roadmap · Esc inbox'));
+   const paper=this.paper(main);if(!data.fromCards||data.health!=='not logged')paper.append(this.spChip(data.health));paper.append(this.el('p','v3-keys','[ / ] next space · P pods · R roadmap · Esc inbox'));
    const layout=this.el('div','sp-layout'),body=this.el('div','sp-main'),side=this.el('aside','sp-side');
-   const weekly=this.el('section','sp-weekly');this.spTitle(weekly,"Ted's weekly read");weekly.append(this.el('p',null,data.weekly_read));body.append(weekly);const title=this.spTitle(body,'Pods');title.id='sp-pods-heading';title.tabIndex=-1;
+   const weekly=this.el('section','sp-weekly');this.spTitle(weekly,data.fromCards?'Current work':"Ted's weekly read");if(data.fromCards)this.spSummary(weekly,data);else weekly.append(this.el('p',null,data.weekly_read));body.append(weekly);const title=this.spTitle(body,'Pods');title.id='sp-pods-heading';title.tabIndex=-1;
    const grid=this.el('div','sp-pod-grid');if(!data.pods.length)grid.append(this.el('p','sp-muted','Pods not logged.'));
    for(const pod of data.pods){const row=this.el('article','sp-pod-card');row.append(this.spCub(pod.state,46));const copy=this.el('div');copy.append(this.button(pod.name,'sp-text-link',()=>this.select('pod:'+which+'/'+encodeURIComponent(pod.id))),this.el('p','sp-agent-name',text(typeof pod.agent==='object'?pod.agent.name:pod.agent)),this.el('p',null,pod.now),this.spChip(pod.state));row.append(copy);grid.append(row)}body.append(grid);this.spSide(side,which);layout.append(body,side);paper.append(layout);this.spSwipe(main,which);
   },

@@ -78,7 +78,7 @@ const cases = [
         assert.equal(appearance.displayCase, 'uppercase', label + ' uppercase display');
         assert.match(appearance.stampFont, /^['"]?Archivo['"]?(?:,|$)/, label + ' stamp font');
         assert.match(appearance.metadataFont, /^['"]?Courier Prime['"]?(?:,|$)/, label + ' metadata font');
-        assert.equal(appearance.stampColor, 'rgb(226, 64, 42)', label + ' exact Kres red');
+        assert.equal(appearance.stampColor, 'rgb(226, 64, 42)', label + ' exact theme red');
         assert.equal(appearance.stampBorder, 'double', label + ' stamp border');
         assert.ok(parseFloat(appearance.stampBorderWidth) >= 3, label + ' visible double border');
         assert.equal(appearance.stampText, 'TED HANDLED 1', label + ' confirmed decision count');
@@ -106,7 +106,7 @@ const cases = [
       }
     }
     fs.writeFileSync(path.join(out, 'theme-results.json'), JSON.stringify(report, null, 2));
-    console.log('Kres theme: ' + report.length + ' screenshots, system modes, explicit overrides, local fonts, and live counts pass.');
+    console.log('Poster theme: ' + report.length + ' screenshots, system modes, explicit overrides, local fonts, and live counts pass.');
   } finally {
     await browser.close();
   }

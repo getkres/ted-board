@@ -1,4 +1,4 @@
-/* Take A, Kres poster. Theme only; shared layout and actions stay in their existing files. */
+/* Take A, poster theme. Theme only; shared layout and actions stay in their existing files. */
 @font-face{font-family:Archivo;src:url('assets/archivo-variable.ttf') format('truetype');font-style:normal;font-weight:100 900;font-stretch:62% 125%;font-display:swap}
 @font-face{font-family:'Courier Prime';src:url('assets/courier-prime-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
 @font-face{font-family:'Courier Prime';src:url('assets/courier-prime-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
