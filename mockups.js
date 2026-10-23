@@ -505,11 +505,31 @@ class MockupsView {
     }, left + 30));
   }
   drawVerdicts() {
-    if (this.active && this.verdictBar) this.verdictBar.replaceChildren(this.verdictControls(this.active));
+    if (!this.active || !this.verdictBar) return;
+    this.verdictBar.replaceChildren(this.verdictControls(this.active));
+    const symbols = {approved: "✓", good_with_fix: "✓!", needs_work: "↻", scrapped: "×"};
+    this.verdictBar.querySelectorAll(".mockup-verdict-button").forEach((b) => {
+      const label = b.textContent, value = Object.keys(symbols).find((v) => b.classList.contains("verdict-" + v));
+      b.setAttribute("aria-label", label);
+      b.setAttribute("aria-pressed", String(this.verdict(this.active) === value));
+      b.title = label;
+      const icon = this.el("span", "mockup-verdict-symbol", symbols[value]), text = this.el("span", "mockup-verdict-label", label);
+      icon.setAttribute("aria-hidden", "true");
+      b.replaceChildren(icon, text);
+      let hold, held = false;
+      const cancel = () => { clearTimeout(hold); b.classList.remove("show-label"); };
+      b.addEventListener("pointerdown", (e) => {
+        held = false;
+        if (e.pointerType === "touch") hold = setTimeout(() => { held = true; b.classList.add("show-label"); }, 450);
+      });
+      b.addEventListener("click", (e) => { if (held) { held = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+      for (const event of ["pointerup", "pointercancel", "pointerleave", "blur"]) b.addEventListener(event, cancel);
+      b.addEventListener("contextmenu", (e) => e.preventDefault());
+    });
   }
   verdictControls(m) {
     const {el, button} = this, box = el("div", "mockup-verdicts"), value = this.verdict(m),
-      labels = {approved:"GOOD TO GO", needs_work:"NEEDS WORK", scrapped:"SCRAPPED"};
+      labels = {approved:"GOOD TO GO", good_with_fix:"GOOD, ONE FIX", needs_work:"NEEDS WORK", scrapped:"SCRAPPED"};
     box.dataset.verdictId = m.id;
     if (labels[value]) box.append(el("span", "mockup-verdict-badge verdict-" + value, labels[value]));
     const actions = el("div", "mockup-verdict-actions");
@@ -560,9 +580,9 @@ class MockupsView {
     }
     return box;
   }
-  async saveVerdict(m, value, token = null) {
+  async saveVerdict(m, value, token = null, text = "") {
     if (!this.verdictsEnabled || this.busy.has(m.id)) return;
-    if (!token && this.verdict(m) === value) {
+    if (!token && this.verdict(m) === value && !text.trim()) {
       if (value === "needs_work") this.verdictNotes.add(m.id);
       this.drawVerdicts(); this.onChange(); return;
     }
@@ -572,7 +592,7 @@ class MockupsView {
     try {
       const data = await this.api("POST", token
         ? {action:"undo_verdict", mockup_id:m.id, token}
-        : {action:"verdict", mockup_id:m.id, verdict:value, text:""});
+        : {action:"verdict", mockup_id:m.id, verdict:value, text});
       if (!data.ok || !data.mockup) throw Error("Verdict was not confirmed. Refresh to check it.");
       if (owner !== this.getKey()) return;
       this.revision++;
@@ -592,8 +612,10 @@ class MockupsView {
       }
       this.scheduleVerdict(updated);
       this.notify(token ? "Verdict undone." : "Verdict saved. Undo is available for 5 seconds.");
+      return true;
     } catch (e) {
       if (owner === this.getKey()) this.notify(e.message, true);
+      return false;
     } finally {
       this.busy.delete(m.id);
       this.drawVerdicts();
@@ -680,17 +702,18 @@ class MockupsView {
     this.dialog.replaceChildren();
     const { el, button } = this,
       head = el("div", "mockup-dialog-head"),
-      title = el("div"),
+      title = el("div", "mockup-dialog-title"),
       h = el("h2", null, m.title);
     h.id = "mockup-dialog-title";
     this.positionLabel = el("p", "mockup-position");
     this.positionLabel.setAttribute("aria-live", "polite");
-    title.append(h, el("p", null, m.project + " · " + m.batch), this.positionLabel);
-    head.append(title, button("Close", "", () => this.close()));
-    head.lastChild.setAttribute("aria-label", "Close mockup");
+    h.title = m.title;
+    title.title = m.project + " · " + m.batch;
+    title.append(h, this.positionLabel);
+    head.append(title);
     this.dialog.append(head);
     this.verdictBar = el("div", "mockup-dialog-verdicts");
-    this.dialog.append(this.verdictBar);
+    head.append(this.verdictBar);
     this.drawVerdicts();
     const tools = el("div", "mockup-tools");
     tools.append(
@@ -704,14 +727,12 @@ class MockupsView {
       tools.children[i].setAttribute("aria-label", label)
     );
     this.zoomLabel = tools.children[1];
-    this.dialog.append(
-      tools,
-      el(
-        "p",
-        "mockup-hint",
-        "Pinch to zoom, drag to pan, or swipe to change images. Use Add pin to leave feedback.",
-      ),
-    );
+    const close = button("Close", "mockup-close", () => this.close());
+    close.setAttribute("aria-label", "Close mockup");
+    close.autofocus = true;
+    const actions = el("div", "mockup-dialog-actions");
+    actions.append(tools, close);
+    head.append(actions);
     this.index = el("div", "mockup-pin-index");
     this.dialog.append(this.index);
     this.viewport = el("div", "mockup-viewport");
@@ -746,6 +767,7 @@ class MockupsView {
     this.resizeViewer.observe(this.viewport);
     this.onChange();
     const currentCanvas = this.canvas;
+    img.addEventListener('load',()=>{if(this.active&&this.canvas===currentCanvas)this.layoutViewer();});
     img.addEventListener("error", () => {
       if (!this.active || this.canvas !== currentCanvas) return;
       this.dialogStatus.textContent =
@@ -765,7 +787,8 @@ class MockupsView {
   layoutViewer() {
     if (!this.active) return;
     const v = this.viewport, m = this.active;
-    const width = m.full_width || m.width, height = m.full_height || m.height;
+    const image=this.canvas.querySelector('img');
+    const width = m.full_width || m.width || image?.naturalWidth || 1, height = m.full_height || m.height || image?.naturalHeight || 1;
     const oldW = this.baseWidth, oldH = this.baseHeight;
     const cx = oldW ? (this.lastWidth / 2 - this.panX) / (oldW * this.zoom) : .5;
     const cy = oldH ? (this.lastHeight / 2 - this.panY) / (oldH * this.zoom) : .5;
@@ -853,7 +876,7 @@ class MockupsView {
       this.setZoom(this.zoom * Math.exp(-e.deltaY * (e.deltaMode === 1 ? .04 : .002)), {x:e.clientX-r.left,y:e.clientY-r.top});
     }, {passive:false});
     v.addEventListener('pointerdown', e => {
-      if (e.target.closest('button') || e.button > 0 || this.pointers.size >= 2) return;
+      if (e.target.closest('button,input,select,textarea,label,.mkup-tools') || e.button > 0 || this.pointers.size >= 2) return;
       this.pointers.set(e.pointerId,point(e));
       try {v.setPointerCapture(e.pointerId);} catch {}
       if (this.pointers.size === 1) this.gesture = {start:point(e),last:point(e),moved:false,multi:false,touch:e.pointerType === "touch",swipe:this.zoom <= this.fitZoom * 1.001,at:Date.now()};

@@ -1,48 +1,42 @@
-# Ted Board
+# Ted Board, Control Center v3
 
-A phone-first roadmap for Sebastian and Ted. Choose a project, answer a card, or work through a guided task one step at a time.
+A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this eight-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
 
-**Live page:** https://getkres.github.io/ted-board/
+The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the authenticated line directory into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
 
-Open the private link supplied by Ted. Its access key arrives in the URL fragment, is saved on your device, and stays in the fragment for private tab links. If access is missing or expired, use **Access** to paste the private link again. Do not post that link in issues or commits.
+Private access stays in `#k=` and is remembered on the device. Deep routes use `#tab=inbox`, `spaces`, `space:line3`, `pod:line3/media`, `agent:line3/meta-media-buyer`, `roadmap`, `roadmap:line1`, `mockups`, or `mockups:<encoded batch key>`. Browser Back and Forward work. Never publish a keyed URL.
 
-## Using the board
+Use the desktop command field to find a view, space, or card. On phone, Inbox's “Rules, sprint, batches, and jobs” disclosure also contains All project cards, so active, queued, completed, and killed cards retain their conversations and guided steps. Talk to Ted, Fresh Ted, and the Access footer retain their existing behavior.
 
-- **All** shows only cards in Needs you. Each project shows Needs you, Ted’s doing, Up next, Done from the last seven days, and a collapsed Killed section.
-- Tap a quick choice, send a note, or choose **Ted, you do it**. Confirmed answers move to Ted’s doing and show **sent ✓**. The move menu can file a card into In progress, Done, Killed, or Up next.
-- **▶ Steps** opens a full-screen walkthrough. Open links in a new tab, use Back or Done, next, or send a stuck note. Finishing moves the card to Done. Progress is saved on this device, and step changes reset outdated progress.
-- Each card keeps a conversation under its actions. Ted replies have a marigold border; your messages sit on the right. The latest three messages show first. Use **show all** for the full thread, or **Mark replies read** to clear the unread dots on this device. Refresh to fetch new replies.
-- Every card in Ted’s doing shows its current step or blocker, a colored activity dot, and the update age. Running work turns amber after two hours without a changed update. Cards refresh every 20 seconds while the page is visible, preserving your draft and focused controls.
-- The Kres + clients, Fictora, and Bookish project tabs show a Pods strip above their cards. Each pod shows its health, source update age, and current headline. Open a row to see shipped work and current tests. A source older than 26 hours appears red and stale.
-- Use the refresh button for the latest cards. Failed requests show a message and keep the card available to retry. The board needs an internet connection.
+## Theme and layout
 
-The pinned **talk to Ted** button opens the current Ted chat in a new tab. It falls back to Claude Code when the current session is unknown. Fresh Ted updates the link after a successful rollover.
+Take A uses Kres poster typography: locally bundled Archivo condensed bold caps, red `#e2402a`, white, near-black, hard 2px structural rules, and a live `TED HANDLED N` stamp. System light and dark preferences are supported, with optional `data-theme="light"` or `data-theme="dark"` overrides on the root element. Both modes retain the same red. There are no textures, cut-out letters, or gradients. `theme.css`, `theme.js`, and `assets/` contain the theme. `v3.css`, `spaces-v3.css`, `roadmap-v3.css`, `mockups-v3.css`, and `markup-v3.css` contain layout and interaction styling. Alternate themes can replace tokens and artwork without changing view markup.
 
-## Mockups
+## Data and actions
 
-The **Mockups** tab has swipeable design batches, fullscreen detail up to 10x actual image scale, numbered feedback pins, threaded replies, unread dots, and image selections. Images open at Fit. Use the wheel, pinch, or zoom buttons to zoom out below Fit or in to 10x, and drag to pan. The percentage shows actual image scale, and tapping it or **Fit** resets the view. Use the edge arrows, Left/Right keys, or phone swipes at Fit to step through the batch without wrapping. Choose **Add pin** to leave feedback. Double-tap a spot for 2.5x, double-tap again to fit, or use **Fit**. Full detail loads above 1.5 times Fit when the preview needs more pixels; older images still open with their preview. Pins stay the same size as you zoom. See [MOCKUPS.md](MOCKUPS.md) for current designs, worker commands, and watcher routing.
+Existing card, guided-mode, control, pod-pulse, pin, reply, verdict, whole-batch approval, Undo, and archive/supersede paths remain. The old Control tab is replaced by the Inbox disclosure, which opens its preserved Veto, Rules, Sprint, and Batches workflows. No browser action applies SQL or directly sends or spends.
 
-See [FRONTDOOR.md](FRONTDOOR.md) for card sessions, Jobs, approvals, Telegram card routing, and the morning handoff.
+Snapshot feeds and new mockup writes are optional and capability-gated. Missing data says not logged. A local drawing remains a draft until the backend acknowledges its exact normalized path and crop. Needs work requires a reason before saving. Round approval requires a reason and the supported round transaction. Existing five-second verdict and whole-batch Undo tokens remain owned by the original API.
 
-## Control center
+The public clone omits the private backend and workers. Read [backend integration](backend-integration/README.md) before enabling snapshots, review choices, Good, one fix, round picks, or saved strokes. Proposed SQL is in `migrations/`. The build job contains `apply.sql` with opt-in backup and apply phases, plus manual rollback instructions. SQL was not run by this build.
 
-The **Control** tab has four ways to clear real cards: **Veto** shows routine drafts with a worker set countdown and a Stop button, **Rules** stores editable decisions for Ted's workers to check before asking again, **Sprint** gives you five minutes with one Needs you card at a time, and **Batches** groups cards with explicit action kinds for one approval per checked group. A Needs you card can also start a rule, and the All view can start a sprint or open batches.
+## Local verification
 
-Timed sending is currently off. The Control tab and veto rows show **sending off: gmail not connected** until Gmail is configured and sending is separately enabled. Stop remains available. When sending is enabled, veto expiry only clears a proposal for Ted's worker. Stop stays available after expiry and clearance until the server starts the send. The server verifies that every exact To, CC, and BCC address has prior sent mail from `hello@getkres.com`; missing history or Gmail configuration blocks the send. The board does not send a message or spend money. An unclassified card stays out of bundle approval, and a spend card needs a recorded amount. Bundle approval moves the checked cards to Ted for review; an exact email or spend can still need a later approval. Sprint ordering uses card value and effort fields when available, and labels fallback numbers as estimates.
-
-The public page depends on private Edge Function and worker changes. See [APPLY.md](APPLY.md) before publishing this branch.
-
-## Deploying the static page
-
-This public repository contains `index.html`, `mockups.js`, `mockups.css`, `control-center.js`, `control-center.css`, `cave.css`, this README, `REPLIES.md`, `MOCKUPS.md`, `FRONTDOOR.md`, and `APPLY.md`. There is no build step. GitHub Pages publishes the root of `main`.
+Serve the folder, then run the offline fixture tests. They never use live credentials or write to a live backend.
 
 ```sh
-git switch -c update-ted-board
-git add index.html mockups.js mockups.css control-center.js control-center.css cave.css README.md REPLIES.md MOCKUPS.md APPLY.md
-git commit -m "Update Ted Board"
-git push -u origin update-ted-board
-gh pr create --base main --fill
-gh pr merge --squash
+python3 -m http.server 8763
+# In a second terminal, with Playwright available:
+QA_THEME=light QA_OUT=qa/pr7/light node qa/run.cjs
+QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
 ```
 
-The backend, card data, worker tools, screenshots, and keyed URL are local operational files. They are not part of this public repository. Local deployment and sync instructions are in `~/ted-ops/ted-board/RESULT.md` on the Mac mini. Backend access requires the private page key; the worker key is never included in the page.
+`PLAYWRIGHT_MODULE` may name an installed Playwright module. Set it in the environment for every browser command when the machine's default fixture path is unavailable. Screenshots and JSON reports are under `qa/pr1/` through `qa/pr7/`. Run the theme suites sequentially. `QA_THEME` controls browser color preference, and `QA_OUT` preserves earlier evidence. The Kres theme group also checks explicit overrides, locally loaded fonts, and live stamp counts. Reports contain synthetic data only. Live authorization, private handler integration, server-side receipts, watchers, and database migrations require separate staging verification by Ted.
+
+Additional existing action contracts remain documented in [MOCKUPS.md](MOCKUPS.md), [FRONTDOOR.md](FRONTDOOR.md), [REPLIES.md](REPLIES.md), and [APPLY.md](APPLY.md).
+
+Final verification notes and review resolutions are in [CONTROL-CENTER-V3-QA.md](docs/CONTROL-CENTER-V3-QA.md). The complete local fixture suite is `node qa/run.cjs`.
+
+## Supabase table grants
+
+New public Supabase tables require explicit grants and RLS in their creating migration. Ted Board uses `service_role` only. See [AGENTS.md](AGENTS.md) for the SQL template, the offline check (`python3 scripts/check_data_api_grants.py`), and the local backend boundary, and [the grant audit](docs/data-api-grants-audit.md) for historical coverage.

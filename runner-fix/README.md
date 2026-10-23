@@ -27,11 +27,11 @@ Set `TED_BOARD_ROOT` and `TED_DECISIONS_ROOT` to the existing mini checkout dire
 
 After installation, run the existing `board_live.py` entry point, or let its existing 120-second launchd routine reconcile. Read fresh board cards and verify worker identities under the session lock before recounting. Use the board API for live card corrections. No SQL, schema migration, new routine, external send, or new worker is required.
 
-The board heading now shows running, queued, and stale counts from job heartbeats. A heartbeat older than two minutes cannot certify a running or queued job. The heading remains explicit when worker data has not loaded.
+The current Jobs view shows running and queued card workers across all board sections, plus stale cards in Ted doing. A manual move to Up next or Done does not hide an active or queued session. Retained project section headings show counts only for their cards. Untracked processes stay separate. A heartbeat older than two minutes cannot certify a running or queued job. Both views remain explicit when worker data has not loaded.
 
 ```sh
 node tests/board_status_test.cjs
 node tests/board_status_ui.cjs
 ```
 
-The browser check requires an installed Playwright module and Chromium. It uses intercepted API fixtures, checks the rendered counts, and verifies polling, draft preservation, and mobile layout.
+The browser check requires an installed Playwright module and Chromium. It uses intercepted API fixtures and verifies the current Jobs view, manual card moves, polling, stale heartbeats, and mobile and desktop layout. The existing board QA suite covers retained workflows and draft preservation.

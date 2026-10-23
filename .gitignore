@@ -1,0 +1,3 @@
+# Browser QA evidence belongs outside this public checkout.
+qa/**/*.png
+qa-evidence/

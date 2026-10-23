@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {doingCounts} = require('../board-status.js');
+const {doingCounts, workerCounts} = require('../board-status.js');
 
 const now = Date.parse('2026-10-21T20:00:00Z');
 const fresh = new Date(now - 30000).toISOString();
@@ -23,3 +23,14 @@ assert.deepEqual(doingCounts([{id: 'future', section: 'ted_doing'}], [
   {card_id: 'future', status: 'running', pid: 123, heartbeat_at: new Date(now + 600000).toISOString()},
 ], true, now), {running: 0, queued: 0, stale: 1});
 console.log('PASS board status counts');
+
+const movedCards = [
+  {id: 'running', section: 'up_next'},
+  {id: 'queued', section: 'done'},
+  {id: 'old', section: 'ted_doing'},
+  {id: 'idle', section: 'up_next'},
+];
+assert.deepEqual(workerCounts(movedCards, jobs, true, now), {running: 1, queued: 1, stale: 1});
+assert.equal(workerCounts(movedCards, jobs, false, now), null);
+assert.deepEqual(doingCounts(movedCards, jobs, true, now), {running: 0, queued: 0, stale: 1});
+console.log('PASS workers remain counted after a manual card move');
