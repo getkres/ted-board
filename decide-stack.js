@@ -1,7 +1,7 @@
 'use strict';
 /* A presentation layer over the board's existing card and approval actions. */
 class DecideStack {
- constructor(deps){Object.assign(this,deps);this.reset();this.clock=setInterval(()=>this.paintToast(),250);}
+ constructor(deps){Object.assign(this,deps);this.reset();this.clock=setInterval(()=>this.paintToast(),250);document.addEventListener('keydown',e=>{if(!this.active()||e.key.toLowerCase()!=='s'||e.metaKey||e.ctrlKey||e.altKey||e.repeat||e.target.closest('input,textarea,select,[contenteditable=true]')||document.querySelector('dialog[open]'))return;const item=this.items()[0];if(item&&!item.updates){e.preventDefault();this.skipItem(item);}});}
  reset(){
   this.sessionRecords||=new Map();
   for(const item of this.pending?.values()||[])clearTimeout(item.timer);
@@ -32,10 +32,13 @@ class DecideStack {
   const records=this.records();
   const visible=cards.filter(c=>!this.hidden(c,records)&&![...this.pending.values()].some(p=>p.cards.some(x=>x.id===c.id)));
   const updates=visible.filter(c=>this.isUpdate(c));
-  const normal=visible.filter(c=>!this.isUpdate(c)).sort((a,b)=>this.rank(a)-this.rank(b)).map(card=>({id:card.id,cards:[card]}));
+  const order=new Map(this.inboxQueue().map((card,i)=>[card.id,i]));
+  const normal=visible.filter(c=>!this.isUpdate(c)).sort((a,b)=>this.rank(a)-this.rank(b)||(order.get(a.id)??Infinity)-(order.get(b.id)??Infinity)).map(card=>({id:card.id,cards:[card]}));
   if(updates.length)normal.push({id:'ted-updates',cards:updates,updates:true});
-  return [...normal.filter(i=>!this.later.includes(i.id)),...this.later.map(id=>normal.find(i=>i.id===id)).filter(Boolean)];
+  const ordered=[...normal.filter(i=>!this.later.includes(i.id)),...this.later.map(id=>normal.find(i=>i.id===id)).filter(Boolean)],skips=this.skipOrder();
+  return [...ordered.filter(i=>!skips.includes(i.id)),...skips.map(id=>ordered.find(i=>i.id===id)).filter(Boolean)];
  }
+ skipItem(item){if(this.leaving||item.updates)return;this.lastShown=null;this.skipCard(item.cards[0]);}
  rank(card){return this.approvals(card).length||this.options(card).length||[card.decision_kind,card.kind].some(TedDecisionKinds.isReserved)||/design|approv/i.test(card.decision_kind||card.kind||'')?0:1;}
  laterItem(item){if(this.leaving)return;this.later=this.later.filter(id=>id!==item.id);this.later.push(item.id);this.lastShown=null;this.redraw();}
  depart(){
@@ -114,7 +117,8 @@ class DecideStack {
   const item=items[0];
   if(item){
    const card=item.cards[0],article=this.el('article','decide-card');article.dataset.cardId=item.id;article.setAttribute('aria-labelledby','decide-title');
-   article.append(this.el('span','decide-project',item.updates?'From Ted':card.project||card.line||'Ted ops'));
+   article.append(this.el('span','decide-project',item.updates?'From Ted':(card.project||card.line||'Ted ops')+' · '+this.projectCount(card)+' waiting'));
+   if(this.wasSkipped(card))article.append(this.el('span','v3-tag v3-skipped','skipped'));
    const title=this.el('h1',null,item.updates?'Ted’s updates ('+item.cards.length+')':card.title);title.id='decide-title';title.tabIndex=-1;article.append(title);
    if(item.updates){const list=this.el('ul','decide-updates');for(const update of item.cards){const row=this.el('li');row.append(this.el('span',null,update.project||'Ted ops'),this.el('strong',null,update.title));list.append(row);}article.append(list);}
    else{
@@ -133,6 +137,7 @@ class DecideStack {
     if((approvals.length||(!opts.length&&this.yesNo(card)))&&!opts.some(o=>/^(?:no|reject|decline)\b/i.test(o.label)))actions.append(this.button('No','',()=>{if(approvals.length>1){this.view('list');this.openCard(card);}else this.queue(item,approvals.length?{action:'approval',approval_id:approvals[0].id,decision:'reject'}:{action:'move',card_id:card.id,value:'killed',note:''});}));
     actions.append(this.button('Tell Ted','',()=>{this.notes.add(card.id);this.redraw();document.getElementById('decide-note')?.focus();}));
    }
+   if(!item.updates)actions.append(this.button('Skip','quiet',()=>this.skipItem(item)));
    actions.append(this.button('Later','quiet',()=>this.laterItem(item)));article.append(actions);
    if(!item.updates&&this.notes.has(card.id))article.append(this.noteForm(card,item));shell.append(article);
    if(this.lastShown!==item.id){this.lastShown=item.id;requestAnimationFrame(()=>{if(title.isConnected)title.focus({preventScroll:true});});}
