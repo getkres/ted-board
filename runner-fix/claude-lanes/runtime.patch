@@ -98,7 +98,7 @@
 +            result = subprocess.run([claude, 'auth', 'status', '--json'], env=environment(candidate, os.environ),
 +                                    cwd=session['cwd'], capture_output=True, text=True, timeout=10)
 +            auth = json.loads(result.stdout)
-+            if result.returncode or auth.get('loggedIn') is not True or auth.get('authMethod') != 'claude.ai' or auth.get('subscriptionType') != 'max' or Path(auth.get('configDirectory', '')).resolve() != Path(directory).resolve():
++            if result.returncode or not isinstance(auth, dict) or auth.get('loggedIn') is not True or auth.get('authMethod') != 'claude.ai' or auth.get('subscriptionType') != 'max' or Path(auth.get('configDirectory', '')).resolve() != Path(directory).resolve():
 +                raise ValueError()
 +        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
 +            raise Unavailable('waiting for verified claude max login in the ' + lane + ' lane') from None
@@ -191,10 +191,10 @@
  import time
  import uuid
 +import claude_lanes as lanes
- from board_client import call
+ from board_client import BoardConflict, BoardGone, call
  from live_status import instructions, publish_live
 
-@@ -60,10 +61,11 @@
+@@ -61,10 +62,11 @@
 
  def engine_command(s,prompt,prefix,review=False):
   if review:
@@ -207,7 +207,7 @@
    if s.get('session_id'):cmd+=['--resume',s['session_id']]
    return cmd+[prompt]
   common=['--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','-m','gpt-6.1-sol','-o',str(prefix)+'.last.txt']
-@@ -122,7 +124,7 @@
+@@ -123,7 +125,7 @@
     else:atomic(self.path,data)
   def read(self):
    with self.locked() as data:return json.loads(json.dumps(data))
@@ -216,7 +216,7 @@
    if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude'):raise ValueError('Invalid card or engine')
    veto_id=str(receipt_id)[5:] if str(receipt_id).startswith('veto-') else None
    if veto_id and (isinstance(card.get('revision'),bool) or not isinstance(card.get('revision'),int) or card['revision']<1):
-@@ -135,6 +137,7 @@
+@@ -136,6 +138,7 @@
      brief='Card: '+card['title']+'\nProject: '+card.get('project','Ted ops')+'\n'+card.get('body','')+'\nTask: '+brief
      (d/'BRIEF.md').write_text(RULES+'\n'+instructions(cid)+'\n'+brief);(d/'BRIEF.md').chmod(0o600)
      s=dict(id='card-'+cid,card_id=cid,engine=engine,session_id=None,cwd=str(d.resolve()),status='idle',last_line='Queued',started_at=None,last_activity=time.time(),pid=None,identity='',queue=[],title=card['title'],brief=brief or card.get('body',''),thread='',seen_artifacts=[])
@@ -224,7 +224,7 @@
      data['sessions'][cid]=s
     s.update(title=card['title'],thread='\n'.join(m.get('who','')+': '+m.get('text','') for m in card.get('messages',[]))[-30000:])
     if s['status']=='waiting_approval':
-@@ -152,6 +155,7 @@
+@@ -153,6 +156,7 @@
    line='approval artifact is unsafe or over 60 kb; fix it, then reply to retry'
    already_reported=s.get('artifact_error')==line
    s.update(status='failed',queue=[],last_line=line,artifact_error=line,last_activity=time.time())
@@ -232,7 +232,7 @@
    for approval in data['approvals'].values():
     if approval['card_id']==s['card_id'] and approval['status'] in ('pending','approved','reviewing'):
      approval.update(status='superseded',reason='approval artifact failed safety checks',sync_status=True)
-@@ -179,7 +183,17 @@
+@@ -180,7 +184,17 @@
          s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
       s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);continue
      r=json.loads(result.read_text()) if result.exists() else dict(ok=False,text='Worker stopped without a final result. Reply to retry.')
@@ -250,7 +250,7 @@
      veto_revision=s.pop('active_veto_revision',None)
      if veto_revision is not None:
       outcome=r.get('veto_outcome')
-@@ -192,6 +206,7 @@
+@@ -193,6 +207,7 @@
       a['status']='done' if r['ok'] and r.get('text','').strip().splitlines()[-1:] == ['APPLY_OK'] else 'failed'
       a['reason']='' if a['status']=='done' else review_reason(r.get('text',''))
       a['sync_status']=True
@@ -258,7 +258,7 @@
      if s.get('kill_requested_at'):
       s.update(status='failed',last_line='Stopped on request');s.pop('kill_requested_at',None)
      if s['queue']:s['status']='queued'
-@@ -203,22 +218,31 @@
+@@ -204,22 +219,31 @@
      if s['status']=='waiting_approval' and turn['kind']!='review':continue
      if turn['kind']=='review':
       a=data['approvals'][turn['approval_id']]
@@ -295,7 +295,7 @@
      try:
       with open(str(prefix)+'.log','a') as log:
        os.chmod(log.name,0o600)
-@@ -228,9 +252,11 @@
+@@ -229,9 +253,11 @@
       publish_live(s['card_id'],'running',line,section='ted_doing')
      except OSError:
       s.update(status='failed',pid=None);self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
@@ -308,7 +308,18 @@
   def flush(self):
    with self.locked() as data:
     remaining=[]
-@@ -302,4 +328,5 @@
+@@ -270,7 +296,9 @@
+        if s:
+         # Do not free a slot while a refusing process is still alive.
+         if killed:s.update(kill_requested_at=time.time(),last_line='Stopping on request',queue=[])
+-        elif not alive(pid,expected):s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
++        elif not alive(pid,expected):
++         s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
++         lanes.clear_review(s);s.pop('active_turn',None)
+         for a in data['approvals'].values():
+          if a['card_id']==s['card_id'] and a['status'] in ('pending','approved','reviewing'):a.update(status='failed',reason='job stopped on request',sync_status=True)
+         self._out(data,s,'Job stop requested.' if killed else 'Job is already stopped, or process identity changed.',cmd['id'])
+@@ -307,4 +335,5 @@
    data=self.read();jobs=[]
    for s in data['sessions'].values():
     jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})

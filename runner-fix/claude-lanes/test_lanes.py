@@ -149,6 +149,18 @@ class LaneTests(unittest.TestCase):
             self.enqueue(); self.store.tick()
         self.assertEqual(self.spawns, [])
 
+    def test_non_object_login_status_queues_claude_without_blocking_codex(self):
+        self.enqueue()
+        self.enqueue(engine='codex', id='implementation')
+        for value in ('[]', 'null', '"unexpected"', '0'):
+            with self.subTest(response=value), patch.object(sessions.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0, stdout=value)):
+                try:
+                    self.store.tick()
+                except Exception as exc:
+                    self.fail('Malformed auth status escaped the dispatcher: ' + type(exc).__name__)
+                self.assertEqual(self.state()['status'], 'queued')
+                self.assertEqual([s[0]['session']['card_id'] for s in self.spawns], ['implementation'])
+
     def test_summary_uses_existing_job_contract_and_omits_identity(self):
         self.enqueue(); self.store.tick()
         self.finish(dict(ok=True, text='done', session_id='sid', lane_usage=dict(input_tokens=12, output_tokens=3)))
@@ -281,6 +293,24 @@ class LaneTests(unittest.TestCase):
             self.store.tick()
         self.assertEqual(len(self.spawns), 1)
         self.assertEqual(self.store.read()['approvals'][aid]['status'], 'failed')
+
+    def test_stopping_limited_review_clears_affinity_before_codex_continuation(self):
+        aid = self.approve(); self.store.tick()
+        self.finish(dict(ok=False, text='limit', session_id='old-review', lane_usage=dict(limited=True, resets_at=9999999999)))
+        s = self.state()
+        with patch.object(sessions, 'call', return_value={}), patch.object(sessions, 'safe_kill', return_value=False), patch.object(sessions, 'alive', return_value=False):
+            self.store.controls([dict(id='kill-review', card_id='x', action='kill', target='card-x', payload=dict(pid=s['pid'], identity=s['identity']))])
+        self.assertEqual(self.store.read()['approvals'][aid]['status'], 'failed')
+        self.assertNotIn('reviewing', self.state())
+        self.assertNotIn('review_session_id', self.state())
+        self.assertNotIn('active_claude_lane', self.state())
+        self.enqueue(engine='codex'); self.store.tick()
+        inp, env = self.spawns[-1]
+        self.assertFalse(inp['review'])
+        self.assertNotIn('CLAUDE_CONFIG_DIR', env)
+        self.assertNotIn('active_claude_lane', inp['session'])
+        self.finish(dict(ok=True, text='implementation complete', session_id='codex-thread'))
+        self.assertEqual(self.state()['session_id'], 'codex-thread')
 
 
 if __name__ == '__main__':
