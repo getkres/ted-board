@@ -1,12 +1,12 @@
 # Hey Ted on the mini
 
-Status: staged for Ted review. The mini currently has no microphone. Jabra routing, microphone consent, room acoustics, and echo cancellation require the arriving speakerphone. Brian synthesis stays disabled until the exact credit-use draft is approved.
+Status: staged for Ted review. The mini currently has no microphone. Jabra routing, microphone consent, room acoustics, and echo cancellation require the arriving speakerphone. Brian is approved for seven days using existing credits, with $0 in new charges. The installed approval marker expires at 2026-10-30T03:11:29.190005+00:00.
 
 When the Jabra arrives, plug it into the Mac mini by USB. If macOS asks whether Ted Voice may use the microphone, click Allow once. The service selects Jabra input and output by name and retries when devices change. If consent was denied earlier, enable Ted Voice in System Settings > Privacy & Security > Microphone.
 
 Say "hey Ted," then your request. A small local Whisper model confirms each neural wake candidate before the chime or any playback interruption. This normally adds about 0.6 to 1 second to activation and prevents music candidates from chiming. A short chime marks listening. Recording ends after 1.2 seconds of silence, with a 30-second safety limit. A softer tone means the tagged voice request actually appeared in live Ted's transcript. No sent tone means delivery has not been confirmed. If live Ted is unavailable, the loop says so, saves a private local copy, and attempts to post it on this card. Uncertain deliveries are never automatically resent.
 
-Ted's final text is spoken locally while Brian approval is pending. The existing Brian helper is wired behind an expiring approval, a daily character cap, and a subscription check that requires usage-based billing to be disabled. Markdown, links, and code are removed. Longer replies use the opening gist and end with "Details are on your phone." The spoken output also removes its own wake and pause phrases.
+Ted's final text uses the approved Brian voice when the subscription guard confirms existing credits and disabled overages; otherwise, it uses local Daniel speech. The existing Brian helper enforces the expiring approval, a daily character cap, and a subscription check that requires usage-based billing to be disabled. Markdown, links, and code are removed. Longer replies use the opening gist and end with "Details are on your phone." The spoken output also removes its own wake and pause phrases.
 
 Say "hey Ted" during speech to interrupt it. Detection during playback requires native voice processing, a 0.99 wake score, two consecutive hits, and local Whisper confirmation. Ordinary wake candidates use a 0.95 threshold. Physical echo and barge-in acceptance remain unverified until the Jabra arrives.
 
@@ -54,5 +54,7 @@ Install the pinned runtime requirements first, then install `openwakeword==0.6.0
 Wake training uses the [openWakeWord feature pipeline](https://github.com/dscripka/openWakeWord) and the [Piper synthetic generator](https://github.com/dscripka/piper-sample-generator). Generated "hey Ted" and "Ted stop listening" clips are positives, confusable phrases are negatives, and LibriSpeech provides additional negative speech. The model and training metadata are versioned. The training set is smaller than upstream's recommended production dataset, so the measured holdouts are a provisional acceptance check.
 
 The final virtual background test produced zero confirmed false wakes in 30 minutes of audio. Its 46 neural candidates were all rejected locally before a chime or interruption. The virtual background test uses held-out [LibriSpeech](https://www.openslr.org/12) speakers and [SoundHelix sample music](https://www.soundhelix.com/audio-examples). It exercises 30 minutes of audio through local inference. It does not establish room performance or a measured hourly household false-trigger rate. The [ElevenLabs subscription API](https://elevenlabs.io/docs/api-reference/user/subscription/get) documents the zero-overage field used by the paid voice guard.
+
+Sebastian moved this card to Up next. Ted will finish inbox admission and live reply testing when the Jabra arrives on 10-23. Sebastian only needs to click Allow on the microphone prompt.
 
 Validation results, remaining review gates, and the PR are recorded in the card's `REPORT.md`. No production database SQL, Telegram message, or paid API request is part of this installation.

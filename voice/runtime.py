@@ -170,6 +170,33 @@ def reserve_usage(home, characters, cap):
         return True
 
 
+def approval_active(auth, characters, now=None):
+    """Accept the installed ISO marker and legacy Unix expiries without network I/O."""
+    from datetime import datetime
+    from math import isfinite
+
+    if not isinstance(auth, dict):
+        return False
+    expiry = auth.get("expires_at")
+    if isinstance(expiry, str):
+        try:
+            stamp = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                return False
+            expiry = stamp.timestamp()
+        except (ValueError, OverflowError):
+            return False
+    if type(expiry) not in (int, float) or not isfinite(expiry):
+        return False
+    return (
+        auth.get("approved") is True
+        and auth.get("voice_id") == VOICE_ID
+        and expiry > (time.time() if now is None else now)
+        and type(auth.get("max_characters")) is int
+        and auth["max_characters"] >= characters
+    )
+
+
 def render(text, home):
     home = Path(home)
     text = speech_text(text)
@@ -178,12 +205,7 @@ def render(text, home):
     allowed = False
     try:
         auth = json.loads(approval.read_text())
-        allowed = (
-            auth.get("approved") is True
-            and auth.get("voice_id") == VOICE_ID
-            and auth.get("expires_at", 0) > time.time()
-            and auth.get("max_characters", 0) >= len(text)
-        )
+        allowed = approval_active(auth, len(text))
     except (OSError, ValueError, TypeError):
         pass
     if allowed and not credits_available(len(text)):

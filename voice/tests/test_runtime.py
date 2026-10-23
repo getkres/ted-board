@@ -68,6 +68,52 @@ class CreditTests(unittest.TestCase):
 
 
 class ApprovalTests(unittest.TestCase):
+    def test_approval_expiry_accepts_iso_and_unix(self):
+        from runtime import VOICE_ID, approval_active
+
+        auth = dict(approved=True, voice_id=VOICE_ID, max_characters=400)
+        for expiry in [1001, "1970-01-01T00:16:41+00:00", "1970-01-01T00:16:41Z"]:
+            self.assertTrue(approval_active(dict(auth, expires_at=expiry), 100, now=1000))
+
+    def test_invalid_or_expired_approval_is_inactive(self):
+        from runtime import VOICE_ID, approval_active
+
+        auth = dict(approved=True, voice_id=VOICE_ID, max_characters=400)
+        for expiry in [
+            1000,
+            "1970-01-01T00:16:40+00:00",
+            "1970-01-01T00:16:41",
+            "invalid",
+            None,
+            True,
+        ]:
+            self.assertFalse(approval_active(dict(auth, expires_at=expiry), 100, now=1000))
+        self.assertFalse(approval_active([], 100, now=1000))
+
+    def test_iso_marker_reaches_credit_guard_without_synthesis(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import patch
+
+        from runtime import VOICE_ID, render
+
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            expiry = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+            (home / "elevenlabs-approved.json").write_text(
+                json.dumps(
+                    dict(approved=True, voice_id=VOICE_ID, max_characters=400, expires_at=expiry)
+                )
+            )
+            with (
+                patch("runtime.credits_available", return_value=False) as credits,
+                patch("runtime.render_local", return_value=home / "local.aiff"),
+                patch("runtime.subprocess.run") as synthesis,
+            ):
+                render("hello", home)
+                credits.assert_called_once_with(5)
+                synthesis.assert_not_called()
+
     def test_daily_cap_reserves_all_three_helper_attempts(self):
         import json
         import time
