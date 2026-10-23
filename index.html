@@ -341,8 +341,26 @@ async function control(action,body,transport={}){
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);
+ const laneRows=state.jobs.filter(j=>j.lane_summary===true&&['claude-lane-main','claude-lane-design','claude-lane-research'].includes(j.id));
+ if(laneRows.length){
+  const lanes=el('section','claude-lanes');lanes.setAttribute('aria-label','Claude account lanes');lanes.append(el('h3',null,'Claude account lanes'),el('p','job-meta','Usage from dispatched jobs only. Plan-wide usage unavailable from CLI.'));
+  const rows=el('div','job-list');
+  for(const j of laneRows){
+   const row=el('article','card claude-lane-summary');const names={'claude-lane-main':'Account 1: Ted and interactive work','claude-lane-design':'Account 2: design, art, and design review','claude-lane-research':'Account 3: research, analysis, and review gates'};
+   row.append(el('h4',null,names[j.id]),el('p','job-meta',j.last_line||'Limit status unknown'));
+   const usage=j.lane_usage||{},valid=n=>Number.isFinite(n)&&n>=0&&typeof n==='number';
+   const counts=[['input_tokens','input'],['output_tokens','output'],['cache_read_input_tokens','cache read'],['cache_creation_input_tokens','cache write']].filter(([key])=>valid(usage[key])).map(([key,label])=>usage[key].toLocaleString()+' '+label);
+   const tokenText=counts.length>1?counts.slice(0,-1).join(', ')+(counts.length>2?', and ':' and ')+counts[counts.length-1]:counts[0];
+   row.append(el('p','card-body',counts.length?'Observed tokens: '+tokenText+'.':'Usage not yet observed.'));
+   if(valid(usage.observed_at))row.append(el('p','job-meta','Last observed '+new Date(usage.observed_at*1000).toLocaleString()));
+   if(valid(usage.resets_at)&&usage.resets_at*1000>Date.now())row.append(el('p','job-meta','Reset reported for '+new Date(usage.resets_at*1000).toLocaleString()));
+   if(!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000||!Number.isFinite(Date.parse(j.heartbeat_at)))row.append(el('p','job-warning','Mini heartbeat is stale. Lane status may be out of date.'));
+   rows.append(row);
+  }
+  lanes.append(rows);main.append(lanes);
+ }
  const counts=BoardStatus.workerCounts(state.cards,state.jobs,state.jobsLoaded);main.append(el('p','work-summary jobs-work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale in Ted doing':'Checking workers'));
- const list=el('div','job-list');const active=state.jobs.filter(j=>j.id!=='fresh-ted-health'&&['running','queued','waiting_approval','untracked'].includes(j.status));
+ const list=el('div','job-list');const active=state.jobs.filter(j=>j.id!=='fresh-ted-health'&&j.lane_summary!==true&&['running','queued','waiting_approval','untracked'].includes(j.status));
  if(!state.jobsLoaded)list.append(el('p','status','Loading jobs…'));else if(!active.length)list.append(el('p','status','No active jobs.'));
  for(const j of active){const box=el('article','card');box.dataset.status=j.status;box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',j.engine+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
   const stale=!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000;if(stale)box.append(el('p','job-warning','Mini heartbeat is stale. Controls will wait for it to reconnect.'));
