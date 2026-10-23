@@ -21,15 +21,14 @@ class DecideStack {
  hidden(card,records=this.records()){const saved=records[card.id];return saved?.ask===this.ask(card)&&this.approvals(card).every(a=>(saved.approvals||[]).includes(a.id));}
  remember(card,approvalIds=[]){const rows=this.sessionRecords.get(this.getKey())||{};rows[card.id]={ask:this.ask(card),approvals:[...new Set(approvalIds)]};this.sessionRecords.set(this.getKey(),rows);this.storage.set(this.account(),JSON.stringify(this.records()));}
  isUpdate(card){
-  if(card.section==='done')return true;
-  if(this.approvals(card).length||[card.decision_kind,card.kind].some(TedDecisionKinds.isReserved))return false;
-  const choices=this.options(card);if(choices.some(o=>!/^(?:got it|noted|ok|okay|acknowledge|dismiss|thanks)[.!]?$/i.test(o.label.trim())))return false;
-  const text=[card.title,card.body].join(' ').replace(/\bno (?:decision|review|approval)(?: is)? needed\b/ig,'');
-  if(/[?]|\b(?:approve|choose|pick|please|need your|decision needed|review needed)\b/i.test(text))return false;
-  return ['fyi','status','update','info'].includes(card.decision_kind||card.kind)||/\b(?:done|merged|applied|live|deployed|shipped|completed)\b/i.test(text);
+  if(card.decision_kind||this.getState().approvals.some(a=>a.card_id===card.id)||card.amount_cents!=null||(Array.isArray(card.options)?card.options.length:Boolean(card.options)))return false;
+  if(/[?]|\b(?:approve|choose|pick|please|need your|decision needed|review needed)\b/i.test([card.title,card.body].join(' ').replace(/\bno (?:decision|review|approval)(?: is)? needed\b/ig,'')))return false;
+  return card.section==='done'||['fyi','status','update','info'].includes(card.kind);
  }
+ yesNo(card){return /^(?:yes|approve|send|proceed|confirm|allow|accept|go ahead)$/i.test(this.options(card)[0]?.label||'')||/^(?:should|shall|can|could|would|will|do|does|is|are|may|approve|send|proceed|confirm|allow|accept)\b/i.test(card.title||'');}
+
  items(){
-  const cards=this.getState().cards.filter(c=>this.needsYou(c)||(c.section==='done'&&Date.parse(c.updated_at)>Date.now()-7*86400000));
+  const cards=this.getState().cards.filter(c=>this.needsYou(c)||(c.section==='done'&&this.isUpdate(c)&&Date.parse(c.updated_at)>Date.now()-7*86400000));
   const records=this.records();
   const visible=cards.filter(c=>!this.hidden(c,records)&&![...this.pending.values()].some(p=>p.cards.some(x=>x.id===c.id)));
   const updates=visible.filter(c=>this.isUpdate(c));
@@ -47,30 +46,35 @@ class DecideStack {
  queue(item,payload){
   if(this.leaving||this.pending.has(item.id))return;
   this.notice('');
-  const entry={...item,payload,key:this.getKey(),generation:this.generation,until:Date.now()+5000,phase:'queued'};
+  const entry={...item,cards:structuredClone(item.cards),payload,key:this.getKey(),generation:this.generation,until:Date.now()+5000,phase:'queued'};
   entry.timer=setTimeout(()=>this.commit(entry),5000);this.pending.set(item.id,entry);this.depart();this.paintToast();
  }
  cancelQueued(cardId){
   let cancelled=false;for(const [id,entry] of this.pending){if(entry.phase!=='queued'||!entry.cards.some(card=>card.id===cardId))continue;clearTimeout(entry.timer);this.pending.delete(id);this.later=this.later.filter(item=>item!==id);cancelled=true;}
   if(cancelled){clearTimeout(this.departTimer);this.leaving=false;this.lastShown=null;this.paintToast();}return cancelled;
  }
- async commit(entry){
-  if(entry.generation!==this.generation||entry.key!==this.getKey()||!this.pending.has(entry.id))return;
+ async commit(entry,transport={}){
+  if(entry.phase!=='queued'||entry.generation!==this.generation||entry.key!==this.getKey()||this.pending.get(entry.id)!==entry)return;
+  clearTimeout(entry.timer);
   entry.phase='sending';this.paintToast();let ok=true;
   const work=entry.updates?entry.cards.map(card=>{const option=this.options(card)[0];return {card,payload:card.section==='done'?null:option?{action:'choice',value:option.value,note:''}:{action:'move',value:'done',note:''}};}):[{card:entry.cards[0],payload:entry.payload}];
-  for(const {card,payload} of work){
+  const save=async({card,payload})=>{
    // A new ask arriving during the grace period must be read before it is answered.
    const current=this.getState().cards.find(c=>c.id===card.id);
-   if(!current||current.section!==card.section||JSON.stringify(current.answer??null)!==JSON.stringify(card.answer??null)||this.ask(current)!==this.ask(card)||payload?.action==='approval'&&!this.approvals(current).some(a=>a.id===payload.approval_id)){
-    ok=false;this.notice('This card changed. Read the new ask before deciding.',true);continue;
+   if(!this.getState().jobsLoaded||!current||payload&&!this.needsYou(current)||current.section!==card.section||JSON.stringify(current.answer??null)!==JSON.stringify(card.answer??null)||this.ask(current)!==this.ask(card)||payload?.action==='approval'&&!this.approvals(current).some(a=>a.id===payload.approval_id)||this.approvals(current).length&&payload?.action!=='approval'){
+    ok=false;this.notice('This card changed. Read the new ask before deciding.',true);return;
    }
-   const confirmed=!payload||(payload.action==='approval'?await this.approve(payload):await this.answer(card,payload.action,payload.value,payload.note));
+   const confirmed=!payload||(payload.action==='approval'?await this.approve(payload,transport):await this.answer(current,payload.action,payload.value,payload.note,transport));
    if(entry.generation!==this.generation||entry.key!==this.getKey())return;
-   if(confirmed)this.remember(card,entry.approvalIds);else ok=false;
-  }
+   if(confirmed)this.remember(card,payload?.action==='approval'?[payload.approval_id]:[]);else ok=false;
+  };
+  // Exit handlers must start every request before the document can disappear.
+  if(transport.keepalive)await Promise.all(work.map(save));else for(const request of work)await save(request);
+  if(entry.generation!==this.generation||entry.key!==this.getKey())return;
   if(!ok){this.later=this.later.filter(id=>id!==entry.id);this.lastShown=null;if(entry.updates)this.notice('Some updates were not saved. Try Got it again.',true);}
   this.pending.delete(entry.id);this.redraw();
  }
+ flush(){for(const entry of this.pending.values())if(entry.phase==='queued')void this.commit(entry,{keepalive:true});}
  undo(){
   const queued=[...this.pending.values()].filter(p=>p.phase==='queued'&&p.until>Date.now());
   for(const entry of queued){clearTimeout(entry.timer);this.pending.delete(entry.id);this.later=this.later.filter(id=>id!==entry.id);}
@@ -102,8 +106,11 @@ class DecideStack {
  }
  render(main){
   const shell=this.el('section','decide-shell');shell.setAttribute('aria-label','Decide');
-  const head=this.el('div','decide-head');const items=this.items();head.append(this.el('span','decide-counter',items.length+' left'),this.button('List','',()=>this.view('list')));shell.append(head);
-  if(!this.getState().loaded){shell.append(this.el('p','loading','Opening your decisions…'));main.append(shell);return;}
+  const state=this.getState(),ready=state.loaded&&state.jobsLoaded;const head=this.el('div','decide-head');const items=ready?this.items():[];head.append(this.el('span','decide-counter',items.length+' left'),this.button('List','',()=>this.view('list')));shell.append(head);
+  if(state.loadError||state.jobsError){
+   const recovery=this.el('div','decide-recovery');const error=this.el('p','error',state.loadError||state.jobsError);error.setAttribute('role','alert');recovery.append(error,this.button('Refresh','',()=>this.refresh()),this.button('Access','',()=>this.access()));shell.append(recovery);main.append(shell);return;
+  }
+  if(!ready){shell.append(this.el('p','loading','Opening your decisions…'));main.append(shell);return;}
   const item=items[0];
   if(item){
    const card=item.cards[0],article=this.el('article','decide-card');article.dataset.cardId=item.id;article.setAttribute('aria-labelledby','decide-title');
@@ -120,10 +127,10 @@ class DecideStack {
    if(item.updates)actions.append(this.button('Got it','primary',()=>this.queue(item,null)));
    else{
     const approvals=this.approvals(card);let opts=this.options(card);
-    if(approvals.length){item.approvalIds=approvals.map(a=>a.id);opts=[{label:approvals.length>1?'Review approvals':'Approve',value:'approve'}];}
+    if(approvals.length){opts=[{label:approvals.length>1?'Review approvals':'Approve',value:'approve'}];}
     if(approvals.length>1){actions.append(this.button('Review approvals','primary',()=>{this.view('list');this.openCard(card);}));}
     else for(const opt of opts){const positive=!/^(?:no|reject|decline|not yet|wait|skip)\b/i.test(opt.label);actions.append(this.button(opt.label,positive?'primary':'',()=>this.queue(item,approvals.length?{action:'approval',approval_id:approvals[0].id,decision:'approve'}:{action:'choice',card_id:card.id,value:opt.value,note:''})));}
-    if(!opts.some(o=>/^(?:no|reject|decline)\b/i.test(o.label)))actions.append(this.button('No','',()=>{if(approvals.length>1){this.view('list');this.openCard(card);}else this.queue(item,approvals.length?{action:'approval',approval_id:approvals[0].id,decision:'reject'}:{action:'move',card_id:card.id,value:'killed',note:''});}));
+    if((approvals.length||(!opts.length&&this.yesNo(card)))&&!opts.some(o=>/^(?:no|reject|decline)\b/i.test(o.label)))actions.append(this.button('No','',()=>{if(approvals.length>1){this.view('list');this.openCard(card);}else this.queue(item,approvals.length?{action:'approval',approval_id:approvals[0].id,decision:'reject'}:{action:'move',card_id:card.id,value:'killed',note:''});}));
     actions.append(this.button('Tell Ted','',()=>{this.notes.add(card.id);this.redraw();document.getElementById('decide-note')?.focus();}));
    }
    actions.append(this.button('Later','quiet',()=>this.laterItem(item)));article.append(actions);

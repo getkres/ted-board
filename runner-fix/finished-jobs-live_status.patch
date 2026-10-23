@@ -1,0 +1,12 @@
+--- live_status.py
++++ live_status.py
+@@ -9,3 +9,3 @@
+ STATES=('running','blocked','waiting_on_you','done')
+-SECTIONS=('done','needs_you','ted_doing')
++SECTIONS=('done','needs_you','ted_doing','up_next')
+ REAPER_APPROVAL_LINE='review the pending approval on this card'
+@@ -53,3 +53,3 @@
+  return ("Every time you start a meaningful step, run "+command+" running '<what you are doing now>'. "
+-         "When you finish: if done, "+command+" done '<one line result>' --section done; "
++         "When a worker turn finishes successfully, "+command+" blocked 'ted review' --section up_next; "
+          "if you need Sebastian, "+command+" waiting_on_you '<exact thing he must do>' --section needs_you. "

@@ -35,3 +35,5 @@ node tests/board_status_ui.cjs
 ```
 
 The browser check requires an installed Playwright module and Chromium. It uses intercepted API fixtures and verifies the current Jobs view, manual card moves, polling, stale heartbeats, and mobile and desktop layout. The existing board QA suite covers retained workflows and draft preservation.
+
+The Decide review follow-up stages the newer successful-job routing rule in [FINISHED-JOBS.md](FINISHED-JOBS.md). Its patches supersede the successful terminal routing described above, after review and installation. Failed jobs and explicit pending approvals retain their dedicated handling.

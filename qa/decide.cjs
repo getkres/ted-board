@@ -5,10 +5,10 @@ const {chromium,fixture}=require('./browser.cjs');
 const out=process.env.QA_OUT||'../qa-evidence/decide';fs.mkdirSync(out,{recursive:true});
 const now=new Date().toISOString();
 const base=(id,title,extra={})=>({id,title,project:'Test project',section:'needs_you',revision:1,body:'Choose the next step.\nLong details stay behind More.',...extra});
-const seed=[base('fyi1','Homepage is live',{decision_kind:'status',body:'Deployed and verified. Nothing needed.'}),base('other','Name the next milestone'),base('spend','Approve the test budget',{decision_kind:'spend_money',amount_cents:2500,currency:'USD',ted_call:'Hold the budget until paid orders reconcile.',options:[{label:'Approve',value:'yes'},{label:'No',value:'no'}]}),base('send','Send the reviewed reply',{decision_kind:'send_email',options:[{label:'Send',value:'send'},{label:'No',value:'no'}]}),base('design','Pick the homepage design',{decision_kind:'approve_design',options:[{label:'Use A',value:'a'},{label:'Use B',value:'b'}]}),base('fyi2','The fix was merged',{body:'Merged, applied, and verified. No decision needed.'})];
+const seed=[base('fyi1','Homepage is live',{kind:'status',body:'Deployed and verified. Nothing needed.'}),base('other','Name the next milestone'),base('spend','Approve the test budget',{decision_kind:'spend_money',amount_cents:2500,currency:'USD',ted_call:'Hold the budget until paid orders reconcile.',options:[{label:'Approve',value:'yes'},{label:'No',value:'no'}]}),base('send','Send the reviewed reply',{decision_kind:'send_email',options:[{label:'Send',value:'send'},{label:'No',value:'no'}]}),base('design','Pick the homepage design',{decision_kind:'approve_design',options:[{label:'Use A',value:'a'},{label:'Use B',value:'b'}]}),base('fyi2','The fix was merged',{kind:'update',body:'Merged, applied, and verified. No decision needed.'})];
 let browser;
 before(async()=>browser=await chromium.launch());after(async()=>browser?.close());
-async function open({cards=seed,width=390,mode='',fail=false,approvals=[],reduced=false,onPost=()=>{}}={}){
+async function open({cards=seed,width=390,mode='',fail=false,approvals=[],reduced=false,onPost=()=>{},jobsDelay=0,loadFailure='',waitJobs=true}={}){
  const page=await browser.newPage({viewport:{width,height:844},reducedMotion:reduced?'reduce':'no-preference'}),posts=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));await fixture(page,{list:false});
  let rows=structuredClone(cards);
@@ -21,14 +21,14 @@ async function open({cards=seed,width=390,mode='',fail=false,approvals=[],reduce
    const saved={...card,section:body.action==='move'?body.value:'ted_doing',answer:{choice:body.action==='choice'?body.value:body.action,note:body.note}};rows=rows.map(c=>c.id===card.id?saved:c);
    return route.fulfill({json:{ok:true,card:saved}});
   }
-  if(url.searchParams.get('resource')==='jobs')return route.fulfill({json:{jobs:[],approvals,fresh_ted:{status:'done',completed_at:'2026-01-01T00:00:00Z'}}});
+  if(url.searchParams.get('resource')==='jobs'){if(jobsDelay)await new Promise(resolve=>setTimeout(resolve,jobsDelay));if(loadFailure==='jobs')return route.fulfill({status:503,json:{error:'Approvals unavailable. Refresh to try again.'}});return route.fulfill({json:{jobs:[],approvals,fresh_ted:{status:'done',completed_at:'2026-01-01T00:00:00Z'}}});}
   if(url.searchParams.get('resource')==='control')return route.fulfill({json:{vetoes:[],rules:[],server_time:now}});
-  return route.fulfill({json:{cards:rows,snapshots:[],capabilities:{}}});
+  if(loadFailure==='cards')return route.fulfill({status:403,json:{error:'Access denied'}});return route.fulfill({json:{cards:rows,snapshots:[],capabilities:{}}});
  });
- await page.goto('http://127.0.0.1:8763/'+(mode?'?view='+mode:'')+'#k=fixture-only');await page.waitForFunction(()=>state.loaded);
- return {page,posts,errors};
+ await page.goto('http://127.0.0.1:8763/'+(mode?'?view='+mode:'')+'#k=fixture-only');if(!loadFailure)await page.waitForFunction(waitJobs?()=>state.loaded&&state.jobsLoaded:()=>state.loaded);else await page.waitForFunction(()=>!state.loading);
+ return {page,posts,errors,recover:()=>{loadFailure='';}};
 }
-async function advance(page,ms=5300){await page.clock.runFor(ms);await page.waitForTimeout(30);}
+async function advance(page,ms=5300){await page.clock.runFor(ms);await page.waitForFunction(()=>![...decide.pending.values()].some(p=>p.phase==='sending'));}
 async function shot(page,name){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});}
 async function visibleCard(page,id){await page.locator('.decide-card[data-card-id="'+id+'"]').waitFor();}
 
@@ -73,7 +73,7 @@ test('No, Send, design picks, Tell Ted, fallback No, and pending approvals reuse
   {card:seed[2],label:'No',expected:{action:'choice',card_id:'spend',value:'no',note:''}},
   {card:seed[3],label:'Send',expected:{action:'choice',card_id:'send',value:'send',note:''}},
   {card:seed[4],label:'Use B',expected:{action:'choice',card_id:'design',value:'b',note:''}},
-  {card:seed[1],label:'No',expected:{action:'move',card_id:'other',value:'killed',note:''}},
+  {card:base('yesno','Should we stop this experiment?'),label:'No',expected:{action:'move',card_id:'yesno',value:'killed',note:''}},
   {card:seed[1],note:'Use the paid order milestone.',expected:{action:'note',card_id:'other',value:'',note:'Use the paid order milestone.'}},
   {card:base('approval','Approve the reviewed draft'),approvals:[{id:'ap1',card_id:'approval',status:'pending',summary:'Send the reviewed draft',content:'Exact synthetic draft'}],label:'Approve',expected:{action:'approval',approval_id:'ap1',decision:'approve'}},
   {card:base('approval','Approve the reviewed draft'),approvals:[{id:'ap1',card_id:'approval',status:'pending',summary:'Send the reviewed draft',content:'Exact synthetic draft'}],label:'No',expected:{action:'approval',approval_id:'ap1',decision:'reject'}}
@@ -142,9 +142,9 @@ test('partial updates failure keeps only unsaved updates, with a visible retry e
  }finally{await page.close();}
 });
 
-test('completed cards with old approval options appear only in the updates pile',async()=>{
+test('completed cards with decision fields cannot enter the updates pile',async()=>{
  const {page,posts}=await open({cards:[{...seed[2],section:'done',updated_at:now,answer:{choice:'yes'}}]});try{
-  await page.clock.install();assert.equal(await page.locator('.decide-updates li').count(),1);assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),0);await page.getByRole('button',{name:'Got it',exact:true}).click();await advance(page);await page.locator('.decide-empty').waitFor();assert.equal(posts.length,0,'already-done updates need no second backend decision');
+  await page.locator('.decide-empty').waitFor();assert.equal(await page.locator('.decide-updates li').count(),0);assert.equal(posts.length,0);
  }finally{await page.close();}
 });
 
@@ -188,4 +188,64 @@ test('a newer approval rejection cancels the queued approval submission',async()
   await page.clock.install();await visibleCard(page,'approval');await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page,210);await page.getByRole('button',{name:'List',exact:true}).click();await page.evaluate(()=>control('approval',{approval_id:'ap1',decision:'reject'}));await advance(page);
   assert.deepEqual(posts.map(({action,decision})=>({action,decision})),[{action:'approval',decision:'reject'}]);
  }finally{await page.close();}
+});
+
+
+test('Tell Ted on a pending approval stays in Decide after five seconds and reload',async()=>{
+ const {page,posts}=await open({cards:[base('approval','Approve the reviewed draft')],approvals:[{id:'ap1',card_id:'approval',status:'pending',summary:'Draft',content:'Synthetic draft'}]});try{
+  await page.clock.install();await visibleCard(page,'approval');await page.getByRole('button',{name:'Tell Ted',exact:true}).click();await page.getByRole('textbox',{name:'Tell Ted'}).fill('Revise the greeting.');await page.getByRole('button',{name:'Send note',exact:true}).click();await advance(page);await page.reload();await page.waitForFunction(()=>state.jobsLoaded);assert.equal(await page.locator('.decide-card[data-card-id="approval"]').count(),1);assert.equal(posts.length,0,'no non-approval action may pass a pending approval');
+ }finally{await page.close();}
+});
+
+test('approvals delayed 2500 ms keep Decide actions unavailable until loaded',async()=>{
+ for(const [label,decision] of [['No','reject'],['Approve','approve']]){
+  const {page,posts}=await open({cards:[base('approval','Approve the reviewed draft',{options:[{label:'Approve',value:'yes'}]})],approvals:[{id:'ap1',card_id:'approval',status:'pending',summary:'Draft',content:'Synthetic draft'}],jobsDelay:2500,waitJobs:false});try{
+   assert.equal(await page.locator('.decide-card').count(),0);assert.equal(await page.getByRole('button',{name:'No',exact:true}).count(),0);await page.waitForFunction(()=>state.jobsLoaded);await visibleCard(page,'approval');await page.clock.install();await page.getByRole('button',{name:label,exact:true}).click();await advance(page);assert.deepEqual(posts.map(({action,approval_id,decision})=>({action,approval_id,decision})),[{action:'approval',approval_id:'ap1',decision}]);
+  }finally{await page.close();}
+ }
+});
+
+test('commit refuses a plain choice when a pending approval arrives during Undo',async()=>{
+ const {page,posts}=await open({cards:[seed[2]]});try{
+  await page.clock.install();await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page,210);await page.evaluate(()=>state.approvals.push({id:'new-approval',card_id:'spend',status:'pending'}));await advance(page);assert.equal(posts.length,0);await visibleCard(page,'spend');
+ }finally{await page.close();}
+});
+
+test('completion words and decision fields never turn an ask into an update',async()=>{
+ const cards=[base('migration','Migration applied on staging, prod next',{body:'Production is next.'}),base('kind','FYI',{decision_kind:'status'}),base('money','Applied',{kind:'update',amount_cents:0}),base('options','Applied',{kind:'update',options:[{label:'Got it',value:'ack'}]}),base('old-approval','Applied',{kind:'update'})];
+ const {page}=await open({cards,approvals:[{id:'old',card_id:'old-approval',status:'approved'}]});try{
+  assert.deepEqual(await page.evaluate(()=>state.cards.map(c=>decide.isUpdate(c))),[false,false,false,false,false]);assert.equal(await page.locator('.decide-updates').count(),0);assert.equal(await page.locator('.decide-counter').textContent(),'5 left');
+ }finally{await page.close();}
+});
+
+test('a mutable List answer and a no-longer-actionable card cancel queued work',async()=>{
+ for(const change of ['answer','section']){const {page,posts}=await open({cards:[seed[2]]});try{
+  await page.clock.install();await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page,210);await page.evaluate(change=>{if(change==='answer')state.cards[0].answer={choice:'no'};else state.cards[0].section='up_next';},change);await advance(page);assert.equal(posts.length,0,change+' must invalidate the original decision');
+ }finally{await page.close();}}
+});
+
+test('A or B choices show only their recorded options and never a kill shortcut',async()=>{
+ const {page,posts}=await open({cards:[base('ab','Pick the next version',{options:[{label:'A',value:'a'},{label:'B',value:'b'}]})]});try{
+  assert.equal(await page.getByRole('button',{name:'No',exact:true}).count(),0);await page.clock.install();await page.getByRole('button',{name:'B',exact:true}).click();await advance(page);assert.deepEqual(posts.map(({action,value})=>({action,value})),[{action:'choice',value:'b'}]);
+ }finally{await page.close();}
+});
+
+test('Decide card and approval loading failures expose working Refresh and Access controls',async()=>{
+ for(const loadFailure of ['cards','jobs']){const {page,recover}=await open({cards:[seed[2]],loadFailure});try{
+  const recovery=page.locator('.decide-recovery');await recovery.waitFor({timeout:3000});assert.match(await recovery.innerText(),loadFailure==='cards'?/Access key not accepted/:/Approvals unavailable/);assert.equal(await page.locator('.decide-card').count(),0);await recovery.getByRole('button',{name:'Access',exact:true}).click();await page.getByRole('textbox',{name:'Private link or access key'}).waitFor();await page.evaluate(()=>render());recover();await recovery.getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>state.loaded&&state.jobsLoaded&&!state.loadError&&!state.jobsError);await visibleCard(page,'spend');
+ }finally{await page.close();}}
+});
+
+test('pagehide and hidden visibility flush a queued decision once with keepalive',async()=>{
+ for(const event of ['pagehide','visibilitychange']){const {page,posts}=await open({cards:[seed[2]]});try{
+  await page.clock.install();await page.evaluate(()=>{window.exitFetch=[];const original=window.fetch;window.fetch=(url,init)=>{if(init?.method==='POST')exitFetch.push({keepalive:init.keepalive});return original(url,init);};});await page.getByRole('button',{name:'Approve',exact:true}).click();await page.evaluate(event=>{if(event==='visibilitychange'){Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event(event));}else window.dispatchEvent(new Event(event));window.dispatchEvent(new Event('pagehide'));},event);await page.waitForFunction(()=>exitFetch.length>0,{},{timeout:3000});await advance(page);assert.deepEqual(posts.map(({action,value})=>({action,value})),[{action:'choice',value:'yes'}]);assert.deepEqual(await page.evaluate(()=>exitFetch),[{keepalive:true}]);
+ }finally{await page.close();}}
+});
+
+
+test('tab exit starts every update save before an earlier response resolves',async()=>{
+ let release,started;const held=new Promise(resolve=>release=resolve),secondStarted=new Promise(resolve=>started=resolve);
+ const {page,posts}=await open({cards:seed.filter(c=>c.id.startsWith('fyi')),onPost:body=>body.card_id==='fyi1'?held:started()});try{
+  await page.clock.install();await page.getByRole('button',{name:'Got it',exact:true}).click();await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));await page.waitForFunction(()=>state.busy.size===2,{},{timeout:1500});await secondStarted;assert.equal(posts.length,2);release();await page.waitForFunction(()=>state.busy.size===0);
+ }finally{release();await page.close();}
 });

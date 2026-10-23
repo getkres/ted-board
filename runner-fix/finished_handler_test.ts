@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
+const root=process.env.TED_RUNTIME_SOURCE||path.join(process.env.HOME||'', 'ted-ops/ted-board/supabase/functions/ted-board');
+const {createHandler}=await import(pathToFileURL(path.resolve(root,'handler.ts')).href);
+test('worker completion accepts Up next, preserves the section guard, and rejects page auth',async()=>{
+ const writes:unknown[]=[],filters:unknown[]=[];
+ const query:any={update:(fields:unknown)=>{writes.push(fields);return query;},eq:(...args:unknown[])=>{filters.push(args);return query;},select:()=>query,maybeSingle:async()=>({data:{id:'x',section:'up_next'},error:null})};
+ const handler=createHandler({from:()=>query},'fixture-page','fixture-worker',null);
+ const post=(extra={})=>handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({action:'live_status',key:'fixture-worker',card_id:'x',state:'blocked',line:'Ted review',section:'up_next',...extra})}));
+ assert.equal((await post({key:'fixture-page'})).status,403);
+ assert.equal((await post({section:'killed'})).status,400);
+ assert.equal(writes.length,0);
+ assert.equal((await post()).status,200);
+ assert.equal(writes.length,1);
+ assert.deepEqual(filters,[['id','x'],['section','ted_doing']]);
+ assert.equal((writes[0] as any).section,'up_next');
+ assert.equal((writes[0] as any).live_status,'ted review');
+});
