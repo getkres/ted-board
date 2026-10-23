@@ -1,0 +1,19 @@
+# Inbox project columns and local Skip
+
+Inbox List groups actionable cards by the authenticated project identity. Each project has a heading and waiting count, empty projects are absent, and projects with the most waiting cards appear first. At 1400px and wider, the Inbox shell uses the available width, with project columns of at least 320px that wrap into rows. Below 1400px, cards remain in a single vertical list with the existing detail behavior.
+
+Skip, or S, moves a card to the tail of a browser-tab queue. The rendered card moves to the bottom of its project so project grouping and count order stay intact. Keyboard navigation follows the global queue across project boundaries. Skip closes an open detail and focuses the next card, including when only one card remains. Queue order uses an account-scoped sessionStorage key, with both reads and writes guarded. Only card IDs are saved. In-memory skipped tags clear on reload, while queue order lasts for the tab session.
+
+The focused phone Decide mode retains its existing approval priority, recorded actions, Undo window, and Later behavior. It also shows the current project count and offers the same local Skip, including S. Skip does not queue an answer, announce a saved decision, or call the API. Editable fields, modifiers, and other tabs retain their shortcut isolation. Not yet and H Snooze retain their existing action payloads.
+
+Verification on 2026-10-23:
+
+- The new `qa/inbox-projects.cjs` checks pass at 375px, 1399px, 1400px, 1440px, and 2560px. Coverage includes grouping, counts, ordering, empty projects, full-width layout, zero horizontal overflow, button and S rotation, cross-project focus, repeat skips, reload persistence, cleared tags, storage denial, single-card queues, account changes, unchanged card data, zero writes after the old action window, editable fields, modifiers, other tabs, Not yet, H Snooze, and focused phone Skip.
+- `node qa/run.cjs` passes all 19 offline verification groups in dark mode. Existing Decide, approval, SQL, polling, account isolation, Spaces, Roadmap, Mockups, retained workflow, and theme checks pass. The final focused run passes all 38 Decide and Inbox tests after the tag sizing adjustment.
+- The grant guard, all 17 grant regression tests, the board status unit check, and `git diff --check` pass. This change contains no migrations.
+- Live GET-only verification at 375px, 1440px, and 2560px shows 26 actionable cards in nine project groups. The live browser routes allow GET reads and block write methods. Clicking Skip produces zero write requests, and a fresh server read confirms that the skipped card's section, answer, messages, and revision are unchanged. Screenshots cover the live Inbox and the skipped state at each width. A separate fixed read-only snapshot supplies before-and-after full-page captures and the focused phone capture.
+- Visual inspection confirms three project columns at 1440px and seven at 2560px, followed by wrapped rows, with the existing fonts, bear, flat theme colors, and red accents. The local review board places the reference studies, ten thumbnails, selected layouts, notan and value studies, construction, color studies, clean drawing, and critique beside the finals. Thumbnail and horizontal-flip inspection are retained.
+
+Private real-data images and snapshots remain in the card job's `evidence/` and `private/` directories, outside the public worktree. The review board is `evidence/process-board.html`, and the live verification report is `evidence/live/results.json`.
+
+Review was an author self-review because the card prohibits independent background workers. The diff changes only static Inbox presentation, its local queue, tests, and documentation. Physical iPhone Safari was not exercised. The PR requires Ted review before merge, and no merge or deployment was performed.

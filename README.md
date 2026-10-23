@@ -6,6 +6,8 @@ Phones narrower than 760px open Inbox in Decide: one card, real recorded choices
 
 List opens the full board in one tap. The choice lasts for the browser tab session. Desktop starts in List, with a Decide button for the same stack. Explicit deep links to other views retain their target.
 
+Inbox List groups waiting cards by project, with counts and the busiest projects first. At 1400px and wider, project columns fill the screen and wrap into rows. Narrower screens retain the vertical list. Skip, or S, rotates a decision to the end of this tab's local queue and focuses the next card. Within its project, the skipped card appears last. Queue order uses guarded sessionStorage, while the small skipped tag clears on reload. Skip is also available in Decide and never records an answer or calls the action API. Not yet, Snooze, and Later retain their existing actions.
+
 The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the authenticated line directory into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
 
 Private access stays in `#k=` and is remembered on the device. Deep routes use `#tab=inbox`, `spaces`, `space:line3`, `pod:line3/media`, `agent:line3/meta-media-buyer`, `roadmap`, `roadmap:line1`, `mockups`, or `mockups:<encoded batch key>`. Browser Back and Forward work. Never publish a keyed URL.
@@ -36,6 +38,8 @@ QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
 ```
 
 `qa/decide.cjs` covers 390x844 decisions, Undo, Later, updates, the empty bear, existing action payloads, failed saves, account resets, new asks during the grace period, keyboard isolation, reduced motion, the 760px boundary, and horizontal overflow. Legacy list tests explicitly select List through the shared fixture.
+
+`qa/inbox-projects.cjs` covers project counts, ordering, the 1399/1400px boundary, 375/1440/2560px layouts, and Skip through buttons and S. It checks cross-project focus, reload persistence, cleared badges, denied storage, account isolation, unchanged card data, zero write requests, Not yet, H Snooze, editable fields, and focused phone decisions.
 
 `PLAYWRIGHT_MODULE` may name an installed Playwright module. Set it in the environment for every browser command when the machine's default fixture path is unavailable. Screenshots and JSON reports are under `qa/pr1/` through `qa/pr7/`. Run the theme suites sequentially. `QA_THEME` controls browser color preference, and `QA_OUT` preserves earlier evidence. The Kres theme group also checks explicit overrides, locally loaded fonts, and live stamp counts. Reports contain synthetic data only. Live authorization, private handler integration, server-side receipts, watchers, and database migrations require separate staging verification by Ted.
 
