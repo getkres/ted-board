@@ -157,7 +157,8 @@ test('a newer List choice replaces the queued Decide action',async()=>{
 
 test('an approval arriving during submission stays visible until reviewed',async()=>{
  const approvals=[{id:'ap1',card_id:'approval',status:'pending',summary:'Reviewed draft',content:'Original synthetic draft'}];
- const {page,posts}=await open({cards:[base('approval','Approve the reviewed draft')],approvals,onPost:body=>{if(body.action==='approval')approvals.push({id:'ap2',card_id:'approval',status:'pending',summary:'A new draft',content:'Unreviewed synthetic draft'});}});try{
+ let activePage;const next={id:'ap2',card_id:'approval',status:'pending',summary:'A new draft',content:'Unreviewed synthetic draft'};
+ const {page,posts}=await open({cards:[base('approval','Approve the reviewed draft')],approvals,onPost:async body=>{if(body.action==='approval'){approvals.push(next);await activePage.evaluate(next=>state.approvals.push(next),next);}}});activePage=page;try{
   await page.clock.install();await visibleCard(page,'approval');await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page);
   assert.equal(posts.length,1);assert.equal(await page.locator('.decide-card[data-card-id="approval"]').count(),1,'the new approval must not be marked reviewed by the earlier submission');
  }finally{await page.close();}
