@@ -3,6 +3,7 @@
 class DecideStack {
  constructor(deps){Object.assign(this,deps);this.reset();this.clock=setInterval(()=>this.paintToast(),250);}
  reset(){
+  this.sessionRecords||=new Map();
   for(const item of this.pending?.values()||[])clearTimeout(item.timer);
   clearTimeout(this.departTimer);document.querySelector('.decide-toast')?.remove();this.generation=(this.generation||0)+1;this.pending=new Map();this.later=[];this.leaving=false;this.lastShown=null;this.more=new Set();this.notes=new Set();this.errors='';
   let preference='';try{preference=sessionStorage.getItem('ted-board-view')||'';}catch{}
@@ -11,21 +12,21 @@ class DecideStack {
  active(){return this.mode==='decide'&&this.getState().project==='inbox';}
  view(mode){this.mode=mode;try{sessionStorage.setItem('ted-board-view',mode);}catch{}this.lastShown=null;this.select('inbox');}
  account(){let hash=2166136261;for(const c of this.getKey())hash=Math.imul(hash^c.charCodeAt(0),16777619);return 'ted-board-decided:'+String(hash>>>0);}
- records(){try{return JSON.parse(this.storage.get(this.account())||'{}')||{};}catch{return {};}}
+ records(){let saved={};try{const parsed=JSON.parse(this.storage.get(this.account())||'{}');if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))saved=parsed;}catch{}return {...saved,...this.sessionRecords.get(this.getKey())};}
  ask(card){
   const asks=(Array.isArray(card.messages)?card.messages:[]).filter(m=>m?.who==='ted'&&typeof m.text==='string'&&(/\?|\b(?:please (?:approve|choose|pick|review)|new ask|need your (?:approval|decision|input))\b/i.test(m.text)));
   return JSON.stringify([card.title||'',card.body||'',card.why||'',card.ted_call||'',card.decision_kind||card.kind||'',this.options(card),asks.at(-1)||null]);
  }
  approvals(card){return this.getState().approvals.filter(a=>a.card_id===card.id&&a.status==='pending');}
  hidden(card,records=this.records()){const saved=records[card.id];return saved?.ask===this.ask(card)&&this.approvals(card).every(a=>(saved.approvals||[]).includes(a.id));}
- remember(card,approvalIds=[]){const rows=this.records();rows[card.id]={ask:this.ask(card),approvals:[...new Set([...approvalIds,...this.approvals(card).map(a=>a.id)])]};this.storage.set(this.account(),JSON.stringify(rows));}
+ remember(card,approvalIds=[]){const rows=this.sessionRecords.get(this.getKey())||{};rows[card.id]={ask:this.ask(card),approvals:[...new Set(approvalIds)]};this.sessionRecords.set(this.getKey(),rows);this.storage.set(this.account(),JSON.stringify(this.records()));}
  isUpdate(card){
   if(card.section==='done')return true;
   if(this.approvals(card).length||[card.decision_kind,card.kind].some(TedDecisionKinds.isReserved))return false;
   const choices=this.options(card);if(choices.some(o=>!/^(?:got it|noted|ok|okay|acknowledge|dismiss|thanks)[.!]?$/i.test(o.label.trim())))return false;
-  if(['fyi','status','update','info'].includes(card.decision_kind||card.kind))return true;
   const text=[card.title,card.body].join(' ').replace(/\bno (?:decision|review|approval)(?: is)? needed\b/ig,'');
-  return !/[?]|\b(?:approve|choose|pick|please|need your|decision needed|review needed)\b/i.test(text)&&/\b(?:done|merged|applied|live|deployed|shipped|completed)\b/i.test(text);
+  if(/[?]|\b(?:approve|choose|pick|please|need your|decision needed|review needed)\b/i.test(text))return false;
+  return ['fyi','status','update','info'].includes(card.decision_kind||card.kind)||/\b(?:done|merged|applied|live|deployed|shipped|completed)\b/i.test(text);
  }
  items(){
   const cards=this.getState().cards.filter(c=>this.needsYou(c)||(c.section==='done'&&Date.parse(c.updated_at)>Date.now()-7*86400000));
@@ -49,6 +50,10 @@ class DecideStack {
   const entry={...item,payload,key:this.getKey(),generation:this.generation,until:Date.now()+5000,phase:'queued'};
   entry.timer=setTimeout(()=>this.commit(entry),5000);this.pending.set(item.id,entry);this.depart();this.paintToast();
  }
+ cancelQueued(cardId){
+  let cancelled=false;for(const [id,entry] of this.pending){if(entry.phase!=='queued'||!entry.cards.some(card=>card.id===cardId))continue;clearTimeout(entry.timer);this.pending.delete(id);this.later=this.later.filter(item=>item!==id);cancelled=true;}
+  if(cancelled){clearTimeout(this.departTimer);this.leaving=false;this.lastShown=null;this.paintToast();}return cancelled;
+ }
  async commit(entry){
   if(entry.generation!==this.generation||entry.key!==this.getKey()||!this.pending.has(entry.id))return;
   entry.phase='sending';this.paintToast();let ok=true;
@@ -56,7 +61,7 @@ class DecideStack {
   for(const {card,payload} of work){
    // A new ask arriving during the grace period must be read before it is answered.
    const current=this.getState().cards.find(c=>c.id===card.id);
-   if(!current||this.ask(current)!==this.ask(card)||payload?.action==='approval'&&!this.approvals(current).some(a=>a.id===payload.approval_id)){
+   if(!current||current.section!==card.section||JSON.stringify(current.answer??null)!==JSON.stringify(card.answer??null)||this.ask(current)!==this.ask(card)||payload?.action==='approval'&&!this.approvals(current).some(a=>a.id===payload.approval_id)){
     ok=false;this.notice('This card changed. Read the new ask before deciding.',true);continue;
    }
    const confirmed=!payload||(payload.action==='approval'?await this.approve(payload):await this.answer(card,payload.action,payload.value,payload.note));

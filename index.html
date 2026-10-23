@@ -311,7 +311,7 @@ setInterval(pollCards,20000);
 setInterval(updatePodPulseAges,60000);
 function setCardBusy(id,busy){if(busy)state.busy.add(id);else state.busy.delete(id);document.querySelectorAll('[data-card-id]').forEach(e=>{if(e.dataset.cardId===id)e.querySelectorAll('button,select,textarea').forEach(c=>c.disabled=busy)})}
 async function act(card,action,value='',note=''){
- if(state.busy.has(card.id))return false;const requestKey=key,generation=v3.generation;setCardBusy(card.id,true);announce('Saving…');
+ if(state.busy.has(card.id))return false;decide.cancelQueued(card.id);const requestKey=key,generation=v3.generation;setCardBusy(card.id,true);announce('Saving…');
  try{const data=await api('POST',{card_id:card.id,action,value,note});if(requestKey!==key||generation!==v3.generation)return false;if(!data.ok||!data.card)throw new Error('Save was not confirmed. Refresh to check your answer.');state.revision++;const i=state.cards.findIndex(c=>c.id===card.id);if(i>=0)state.cards[i]=data.card;if(action==='note')delete state.drafts[card.id];render();announce(action==='stuck'?'Ted has your note.':action==='steps_done'?'All steps finished. Sent to Ted.':'Sent to Ted.');return true}
  catch(e){if(requestKey!==key||generation!==v3.generation)return false;announce(e.message,true);if(state.guide)$('guide-status').textContent=e.message;return false}
  finally{if(requestKey===key&&generation===v3.generation)setCardBusy(card.id,false)}
@@ -335,6 +335,7 @@ async function loadJobs(){
  }catch(e){if(requestId===state.jobsRequestId&&requestKey===key&&state.project==='Jobs')announce(e.message,true)}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
 async function control(action,body){
+ if(action==='approval'){const cardId=state.approvals.find(a=>a.id===body.approval_id)?.card_id;if(cardId)decide.cancelQueued(cardId);}
  const requestKey=key,generation=v3.generation;
  try{const data=await api('POST',{action,...body});if(requestKey!==key||generation!==v3.generation)return false;if(!data.ok)throw new Error('Decision was not confirmed. Refresh to check it.');announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');if(action==='approval')await load(true);else await loadJobs();return true}catch(e){if(requestKey===key&&generation===v3.generation)announce(e.message,true);return false}
 }

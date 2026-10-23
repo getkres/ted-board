@@ -8,14 +8,14 @@ const base=(id,title,extra={})=>({id,title,project:'Test project',section:'needs
 const seed=[base('fyi1','Homepage is live',{decision_kind:'status',body:'Deployed and verified. Nothing needed.'}),base('other','Name the next milestone'),base('spend','Approve the test budget',{decision_kind:'spend_money',amount_cents:2500,currency:'USD',ted_call:'Hold the budget until paid orders reconcile.',options:[{label:'Approve',value:'yes'},{label:'No',value:'no'}]}),base('send','Send the reviewed reply',{decision_kind:'send_email',options:[{label:'Send',value:'send'},{label:'No',value:'no'}]}),base('design','Pick the homepage design',{decision_kind:'approve_design',options:[{label:'Use A',value:'a'},{label:'Use B',value:'b'}]}),base('fyi2','The fix was merged',{body:'Merged, applied, and verified. No decision needed.'})];
 let browser;
 before(async()=>browser=await chromium.launch());after(async()=>browser?.close());
-async function open({cards=seed,width=390,mode='',fail=false,approvals=[],reduced=false}={}){
+async function open({cards=seed,width=390,mode='',fail=false,approvals=[],reduced=false,onPost=()=>{}}={}){
  const page=await browser.newPage({viewport:{width,height:844},reducedMotion:reduced?'reduce':'no-preference'}),posts=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));await fixture(page,{list:false});
  let rows=structuredClone(cards);
  await page.route('**/functions/v1/ted-board*',async route=>{
   const req=route.request(),url=new URL(req.url()),body=req.postDataJSON()||{};
   if(req.method()==='POST'){
-   posts.push({...body,key:undefined});if(fail===true||fail===body.card_id)return route.fulfill({status:503,json:{error:'Could not save. Try again.'}});
+   posts.push({...body,key:undefined});await onPost(body);if(fail===true||fail===body.card_id)return route.fulfill({status:503,json:{error:'Could not save. Try again.'}});
    if(body.action==='approval')return route.fulfill({json:{ok:true}});
    const card=rows.find(c=>c.id===body.card_id);if(!card)return route.fulfill({json:{ok:true}});
    const saved={...card,section:body.action==='move'?body.value:'ted_doing',answer:{choice:body.action==='choice'?body.value:body.action,note:body.note}};rows=rows.map(c=>c.id===card.id?saved:c);
@@ -145,5 +145,46 @@ test('partial updates failure keeps only unsaved updates, with a visible retry e
 test('completed cards with old approval options appear only in the updates pile',async()=>{
  const {page,posts}=await open({cards:[{...seed[2],section:'done',updated_at:now,answer:{choice:'yes'}}]});try{
   await page.clock.install();assert.equal(await page.locator('.decide-updates li').count(),1);assert.equal(await page.getByRole('button',{name:'Approve',exact:true}).count(),0);await page.getByRole('button',{name:'Got it',exact:true}).click();await advance(page);await page.locator('.decide-empty').waitFor();assert.equal(posts.length,0,'already-done updates need no second backend decision');
+ }finally{await page.close();}
+});
+
+test('a newer List choice replaces the queued Decide action',async()=>{
+ const {page,posts}=await open({cards:[seed[2]]});try{
+  await page.clock.install();await visibleCard(page,'spend');await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page,210);await page.getByRole('button',{name:'List',exact:true}).click();await page.locator('[data-ticket="spend"]').getByRole('button',{name:'No',exact:true}).click();await page.waitForFunction(()=>state.busy.size===0);await advance(page);
+  assert.deepEqual(posts.map(({action,value})=>({action,value})),[{action:'choice',value:'no'}],'the earlier queued approval must not overwrite the newer No');
+ }finally{await page.close();}
+});
+
+test('an approval arriving during submission stays visible until reviewed',async()=>{
+ const approvals=[{id:'ap1',card_id:'approval',status:'pending',summary:'Reviewed draft',content:'Original synthetic draft'}];
+ const {page,posts}=await open({cards:[base('approval','Approve the reviewed draft')],approvals,onPost:body=>{if(body.action==='approval')approvals.push({id:'ap2',card_id:'approval',status:'pending',summary:'A new draft',content:'Unreviewed synthetic draft'});}});try{
+  await page.clock.install();await visibleCard(page,'approval');await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page);
+  assert.equal(posts.length,1);assert.equal(await page.locator('.decide-card[data-card-id="approval"]').count(),1,'the new approval must not be marked reviewed by the earlier submission');
+ }finally{await page.close();}
+});
+
+test('confirmed decisions stay dismissed for the session when persistent storage is full',async()=>{
+ const {page}=await open({cards:[seed[2]]});try{
+  await page.clock.install();await page.evaluate(()=>{const set=storage.set;storage.set=(name,value)=>name.startsWith('ted-board-decided:')?false:set(name,value);});await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page);await page.evaluate(()=>{state.cards=state.cards.map(c=>({...c,section:'needs_you',revision:99,live_status:'Still working'}));render();});
+  assert.equal(await page.locator('.decide-card[data-card-id="spend"]').count(),0,'storage failure must not put an answered card back in the stack');
+ }finally{await page.close();}
+});
+
+test('status metadata cannot hide an explicit new question in the updates pile',async()=>{
+ const {page}=await open({cards:[base('status-ask','Deployment update',{decision_kind:'status',body:'The deployment is live. Can you approve the next launch?'})]});try{
+  assert.equal(await page.locator('.decide-updates').count(),0);assert.equal(await page.getByRole('button',{name:'Tell Ted',exact:true}).count(),1);
+ }finally{await page.close();}
+});
+
+test('a decision received by polling cancels a conflicting queued action',async()=>{
+ const {page,posts}=await open({cards:[seed[2]]});try{
+  await page.clock.install();await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page,210);await page.evaluate(()=>{state.cards=state.cards.map(c=>({...c,section:'ted_doing',answer:{choice:'no'}}));render();});await advance(page);assert.equal(posts.length,0,'a stale queued approval must not overwrite a recorded decision from another view or device');
+ }finally{await page.close();}
+});
+
+test('a newer approval rejection cancels the queued approval submission',async()=>{
+ const {page,posts}=await open({cards:[base('approval','Approve the reviewed draft')],approvals:[{id:'ap1',card_id:'approval',status:'pending',summary:'Reviewed draft',content:'Synthetic draft'}]});try{
+  await page.clock.install();await visibleCard(page,'approval');await page.getByRole('button',{name:'Approve',exact:true}).click();await advance(page,210);await page.getByRole('button',{name:'List',exact:true}).click();await page.evaluate(()=>control('approval',{approval_id:'ap1',decision:'reject'}));await advance(page);
+  assert.deepEqual(posts.map(({action,decision})=>({action,decision})),[{action:'approval',decision:'reject'}]);
  }finally{await page.close();}
 });
