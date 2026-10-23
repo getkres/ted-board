@@ -90,7 +90,7 @@ class ControlCenterV3 {
    for(const c of this.getState().cards.filter(c=>c.title.toLowerCase().includes(q)).slice(0,8))results.append(this.button(c.title,'',()=>{command.value='';results.hidden=true;this.item=c.id;this.split='yours';this.select('inbox')}));
    if(!results.children.length)results.append(this.el('p',null,'No matching view, space, or card.'));
   };command.addEventListener('input',search);command.addEventListener('keydown',e=>{if(e.key==='Escape'){results.hidden=true;command.blur()}if(e.key==='Enter')results.querySelector('button')?.click()});
-  document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();command.focus();return}if(e.target.closest('input,textarea,select,[contenteditable=true]')||document.querySelector('dialog[open]')||e.metaKey||e.ctrlKey||e.altKey)return;this.keydown?.(e)});
+  document.addEventListener('keydown',e=>{if(this.deciding?.())return;if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();command.focus();return}if(e.target.closest('input,textarea,select,[contenteditable=true]')||document.querySelector('dialog[open]')||e.metaKey||e.ctrlKey||e.altKey)return;this.keydown?.(e)});
  }
  tabs(){
   const tabs=document.getElementById('tabs'),state=this.getState();tabs.replaceChildren();

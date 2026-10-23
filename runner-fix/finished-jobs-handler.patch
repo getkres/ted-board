@@ -1,0 +1,7 @@
+--- handler.ts
++++ handler.ts
+@@ -112,3 +112,3 @@
+       if (typeof b.line !== 'string' || !b.line.trim() || b.line.length > 240 || /[\u0000-\u001f\u007f\u2014]/.test(b.line)) return json({error:'Use one short status line'},400);
+-      if (b.section !== undefined && !['done','needs_you','ted_doing'].includes(String(b.section))) return json({error:'Invalid live section'},400);
++      if (b.section !== undefined && !['done','needs_you','ted_doing','up_next'].includes(String(b.section))) return json({error:'Invalid live section'},400);
+       if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') return json({error:'Invalid section guard'},400);

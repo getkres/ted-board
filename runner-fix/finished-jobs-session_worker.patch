@@ -1,0 +1,6 @@
+--- session_worker.py
++++ session_worker.py
+@@ -57,2 +57,3 @@
+  except Exception as exc:result=dict(ok=False,text='Worker failed: '+type(exc).__name__+'. Reply to retry.')
++ if result['ok']:result['completion']=dict(section='up_next',note='Ted review')
+  atomic(str(prefix)+'.result.json',result)

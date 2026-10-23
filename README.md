@@ -2,6 +2,10 @@
 
 A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this eight-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
 
+Phones narrower than 760px open Inbox in Decide: one card, real recorded choices, Tell Ted, and Later. Decisions disappear into a five-second cancellation window, then use the existing action API. Undo cancels every decision still in that window. Failed saves restore the card. Confirmed dismissals stay on this browser until the ask changes; Later lasts only for the page session. FYI cards share one updates pile, cleared with one Got it through the existing card actions. Reloading cancels actions still in the window.
+
+List opens the full board in one tap. The choice lasts for the browser tab session. Desktop starts in List, with a Decide button for the same stack. Explicit deep links to other views retain their target.
+
 The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the authenticated line directory into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
 
 Private access stays in `#k=` and is remembered on the device. Deep routes use `#tab=inbox`, `spaces`, `space:line3`, `pod:line3/media`, `agent:line3/meta-media-buyer`, `roadmap`, `roadmap:line1`, `mockups`, or `mockups:<encoded batch key>`. Browser Back and Forward work. Never publish a keyed URL.
@@ -30,6 +34,8 @@ python3 -m http.server 8763
 QA_THEME=light QA_OUT=qa/pr7/light node qa/run.cjs
 QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
 ```
+
+`qa/decide.cjs` covers 390x844 decisions, Undo, Later, updates, the empty bear, existing action payloads, failed saves, account resets, new asks during the grace period, keyboard isolation, reduced motion, the 760px boundary, and horizontal overflow. Legacy list tests explicitly select List through the shared fixture.
 
 `PLAYWRIGHT_MODULE` may name an installed Playwright module. Set it in the environment for every browser command when the machine's default fixture path is unavailable. Screenshots and JSON reports are under `qa/pr1/` through `qa/pr7/`. Run the theme suites sequentially. `QA_THEME` controls browser color preference, and `QA_OUT` preserves earlier evidence. The Kres theme group also checks explicit overrides, locally loaded fonts, and live stamp counts. Reports contain synthetic data only. Live authorization, private handler integration, server-side receipts, watchers, and database migrations require separate staging verification by Ted.
 

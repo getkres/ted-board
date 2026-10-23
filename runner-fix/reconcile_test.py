@@ -45,11 +45,11 @@ class TerminalCardReconciliation(unittest.TestCase):
                 board_live.reap([self.card()], temp, now=30000)
             self.assertEqual(update.call_args.kwargs['section'], 'needs_you')
 
-    def test_blocked_report_moves_to_needs_you_and_done_report_to_done(self):
+    def test_successful_job_reports_move_to_up_next_for_ted_review(self):
         for report_text, expected_state, expected_section in (
-            ('LIVE_STATE: blocked\nLIVE_STATUS: pr needs review', 'blocked', 'needs_you'),
-            ('LIVE_STATE: done\nLIVE_STATUS: merged and verified', 'done', 'done'),
-            ('LIVE_STATE: waiting_on_you\nLIVE_STATUS: approve the plan', 'waiting_on_you', 'needs_you'),
+            ('LIVE_STATE: blocked\nLIVE_STATUS: pr needs review', 'blocked', 'up_next'),
+            ('LIVE_STATE: done\nLIVE_STATUS: merged and verified', 'blocked', 'up_next'),
+            ('LIVE_STATE: waiting_on_you\nLIVE_STATUS: approve the plan', 'blocked', 'up_next'),
         ):
             with self.subTest(expected_state=expected_state), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)

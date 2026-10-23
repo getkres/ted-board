@@ -1,0 +1,7 @@
+--- sessions.py
++++ sessions.py
+@@ -197,2 +197,4 @@
+     if s['queue']:s['status']='queued'
++    elif s['status']=='done' and veto_revision is None:
++     publish_live(s['card_id'],'blocked','Ted review',section='up_next')
+    running=sum(s['status']=='running' for s in data['sessions'].values())

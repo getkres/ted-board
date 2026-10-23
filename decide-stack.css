@@ -1,0 +1,46 @@
+/* Focused decisions use the board's existing fonts, flat colors, and bear. */
+body.deciding .masthead,body.deciding>.talk-ted,body.deciding>.fresh-ted,body.deciding #fresh-status,body.deciding footer{display:none}
+body.deciding>.shell{max-width:680px;padding:0 20px}
+body.deciding #main{padding:0}
+body.deciding #notice{margin:12px 0 0;font-size:14px}
+body.deciding #notice:not(.error){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.decide-shell{min-height:100svh;padding:max(12px,env(safe-area-inset-top)) 0 max(94px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px;color:var(--text)}
+.decide-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex:none}
+.decide-counter{font-size:15px;font-weight:700}
+.decide-head button{font-size:14px;padding:8px 16px}
+.decide-card{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;padding:24px 0 8px;overflow-wrap:anywhere}
+.decide-project{align-self:flex-start;font-size:13px;line-height:1.3;padding:6px 9px;border:1px solid var(--line);margin-bottom:22px}
+.decide-card h1{font-family:var(--v3-display);font-size:clamp(32px,5.8vw,48px);font-weight:800;font-stretch:condensed;line-height:1.08;letter-spacing:-.025em;margin-bottom:18px;color:var(--text)}
+.decide-ask{font-size:17px;line-height:1.45;color:var(--muted);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.decide-recommendation{margin:24px 0 8px;border-left:3px solid var(--accent);padding:0 0 0 14px;font-size:15px;line-height:1.5}
+.decide-recommendation strong{font-size:13px;display:block;margin-bottom:4px}
+.decide-recommendation p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.decide-more{margin:16px 0 24px}
+.decide-more summary{display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:14px;min-height:44px;gap:8px}
+.decide-more summary::after{content:'+';font-size:20px}
+.decide-more[open] summary::after{content:'−'}
+.decide-details{font-size:15px;line-height:1.55;padding:10px 0}
+.decide-details p,.decide-details pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.decide-details pre{max-width:100%;font-size:13px}
+.decide-details h2{font-size:20px;margin:20px 0 12px}
+.decide-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:auto;padding-top:24px}
+.decide-actions button{min-height:52px;font-size:16px;padding:12px;font-weight:700}
+.decide-actions button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.decide-note{display:grid;gap:10px;margin-top:18px}
+.decide-note label{font-weight:700;font-size:14px}
+.decide-note textarea{width:100%;min-height:96px;resize:vertical;padding:12px;font-size:16px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+.decide-updates{list-style:none;padding:0;margin:4px 0 24px;max-height:52svh;overflow-y:auto}
+.decide-updates li{border-bottom:1px solid var(--line);padding:14px 0;line-height:1.4}
+.decide-updates span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}
+.decide-updates strong{font-size:16px;font-weight:600}
+.decide-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:36px 0}
+.decide-empty h1{font:800 36px/1.1 var(--v3-display);letter-spacing:-.03em}
+.decide-empty p{font-size:16px;color:var(--muted);line-height:1.5}
+.decide-bear svg{width:150px;height:160px;stroke:none;fill:initial;overflow:visible}
+.decide-toast{position:fixed;bottom:max(16px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:640px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--text);color:var(--bg);padding:10px 12px 10px 16px;z-index:40;border:1px solid var(--text);font-size:14px;line-height:1.4}
+.decide-toast button{color:var(--bg);border-color:var(--bg);font-weight:700;flex-shrink:0}
+.decide-toast[hidden],.decide-toast button[hidden]{display:none}
+.decide-leaving{animation:decide-away 180ms ease-in both;pointer-events:none}
+@keyframes decide-away{to{opacity:0;transform:translateY(-12px)}}
+@media(min-width:760px){.decide-card{padding-top:34px}.decide-shell{gap:20px}.decide-ask{font-size:19px}}
+@media(prefers-reduced-motion:reduce){.decide-leaving{animation:none}}
