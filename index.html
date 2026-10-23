@@ -48,6 +48,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <script src="markup-v3.js"></script>
 <script>installMarkupV3(MockupsV3);</script>
 <script src="control-center.js"></script>
+<script src="board-status.js"></script>
 <script src="theme.js"></script>
 <script src="spaces-v3.js"></script>
 <script src="roadmap-v3.js"></script>
@@ -256,7 +257,7 @@ function render(){
  (state.project==='All'?[SECTIONS[0]]:SECTIONS).forEach(([id,label])=>{
   const matching=cards.filter(c=>c.section===id&&(id!=='done'||recent(c)||unread(c)||state.readCards.has(c.id)));
   if(state.project==='All'&&!matching.length)return;
-  const section=el('section','section');section.dataset.section=id;const heading=el('div','section-heading');heading.append(el('h2',null,label),el('span','count',matching.length));if(id==='done')heading.append(el('span','count','last 7 days + unread'));section.append(heading);
+  const section=el('section','section');section.dataset.section=id;const heading=el('div','section-heading');heading.append(el('h2',null,label),el('span','count',matching.length));if(id==='ted_doing'){const counts=BoardStatus.doingCounts(matching,state.jobs,state.jobsLoaded);heading.append(el('span','work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale':'checking workers'))}if(id==='done')heading.append(el('span','count','last 7 days + unread'));section.append(heading);
   if(matching.length)matching.forEach(c=>section.append(renderCard(c)));else section.append(el('p','empty-section',({needs_you:'nothing on you here.',ted_doing:'nothing running here right now.',up_next:'nothing queued yet.',done:'nothing shipped this week yet.'})[id]));board.append(section);
  });
  if(state.project!=='All'){const killed=cards.filter(c=>c.section==='killed');const d=el('details','killed');const sum=el('summary');sum.append(el('span',null,'Killed'),el('span','count',killed.length));if(killed.some(unread))sum.append(replyDot());d.append(sum);if(killed.length)killed.forEach(c=>d.append(renderCard(c)));else d.append(el('p','empty-section','nothing killed.'));board.append(d)}
@@ -332,6 +333,7 @@ async function control(action,body){
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);
+ const counts=BoardStatus.workerCounts(state.cards,state.jobs,state.jobsLoaded);main.append(el('p','work-summary jobs-work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale in Ted doing':'Checking workers'));
  const list=el('div','job-list');const active=state.jobs.filter(j=>j.id!=='fresh-ted-health'&&['running','queued','waiting_approval','untracked'].includes(j.status));
  if(!state.jobsLoaded)list.append(el('p','status','Loading jobs…'));else if(!active.length)list.append(el('p','status','No active jobs.'));
  for(const j of active){const box=el('article','card');box.dataset.status=j.status;box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',j.engine+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
