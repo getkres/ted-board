@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Install the reviewed voice sources on a Mac mini. Never installs on a MacBook."""
+
+import argparse
+import json
+import os
+import plistlib
+import shutil
+import subprocess
+from pathlib import Path
+
+
+def launchd_config(home, python):
+    return dict(
+        Label="co.ted.voice",
+        ProgramArguments=[
+            str(home / "Ted Voice.app/Contents/MacOS/TedVoice"),
+            "--supervise",
+            str(python),
+            str(home / "app/daemon.py"),
+            "--home",
+            str(home),
+        ],
+        RunAtLoad=True,
+        KeepAlive=True,
+        ThrottleInterval=30,
+        ProcessType="Background",
+        WorkingDirectory=str(home),
+        EnvironmentVariables=dict(PATH="/opt/homebrew/bin:/usr/bin:/bin", PYTHONUNBUFFERED="1"),
+        StandardOutPath=str(home / "logs/launchd.out.log"),
+        StandardErrorPath=str(home / "logs/launchd.err.log"),
+    )
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--home", type=Path, default=Path.home() / "ted-ops/voice")
+    p.add_argument("--python", type=Path, required=True)
+    p.add_argument("--models", type=Path, required=True)
+    p.add_argument("--load", action="store_true")
+    a = p.parse_args()
+    machine = json.loads(
+        subprocess.check_output(["/usr/sbin/system_profiler", "SPHardwareDataType", "-json"])
+    )["SPHardwareDataType"][0]["machine_name"]
+    if machine != "Mac mini":
+        raise SystemExit("Install voice routines on the Mac mini only.")
+    os.umask(0o077)
+    home = a.home
+    source = Path(__file__).resolve().parent
+    for folder in ["app", "models", "logs", "tmp", "tones", "pending"]:
+        (home / folder).mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name in [
+        "core.py",
+        "session.py",
+        "runtime.py",
+        "loop.py",
+        "daemon.py",
+        "README.md",
+        "requirements.txt",
+    ]:
+        if (source / name).exists():
+            shutil.copy2(source / name, home / "app" / name)
+    if (source / "README.md").exists():
+        shutil.copy2(source / "README.md", home / "README.md")
+    for name in ["hey_ted.onnx", "training.json"]:
+        shutil.copy2(a.models / name, home / "models" / name)
+    bundle = home / "Ted Voice.app/Contents"
+    (bundle / "MacOS").mkdir(parents=True, exist_ok=True)
+    info = dict(
+        CFBundleIdentifier="co.ted.voice",
+        CFBundleName="Ted Voice",
+        CFBundleDisplayName="Ted Voice",
+        CFBundleExecutable="TedVoice",
+        CFBundlePackageType="APPL",
+        CFBundleVersion="1",
+        LSUIElement=True,
+        NSMicrophoneUsageDescription="Ted listens locally for hey Ted, then transcribes your request on this Mac.",
+    )
+    (bundle / "Info.plist").write_bytes(plistlib.dumps(info))
+    subprocess.run(
+        [
+            "/usr/bin/swiftc",
+            "-O",
+            str(source / "Audio.swift"),
+            "-o",
+            str(bundle / "MacOS/TedVoice"),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        [
+            "/usr/bin/codesign",
+            "--force",
+            "--sign",
+            "-",
+            "--identifier",
+            "co.ted.voice",
+            str(home / "Ted Voice.app"),
+        ],
+        check=True,
+    )
+    import math
+    import struct
+    import wave
+
+    for name, hz in [("listen", 660), ("sent", 440)]:
+        samples = [
+            int(math.sin(2 * math.pi * hz * i / 16000) * 2200 * math.sin(math.pi * i / 1600))
+            for i in range(1600)
+        ]
+        with wave.open(str(home / "tones" / (name + ".wav")), "wb") as f:
+            f.setnchannels(1)
+            f.setsampwidth(2)
+            f.setframerate(16000)
+            f.writeframes(struct.pack("<" + "h" * len(samples), *samples))
+    plist = Path.home() / "Library/LaunchAgents/co.ted.voice.plist"
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    plist.write_bytes(plistlib.dumps(launchd_config(home, a.python.absolute())))
+    subprocess.run(["/usr/bin/plutil", "-lint", str(plist)], check=True)
+    if a.load:
+        domain = "gui/" + str(os.getuid())
+        subprocess.run(["/bin/launchctl", "bootout", domain + "/co.ted.voice"], capture_output=True)
+        subprocess.run(["/bin/launchctl", "bootstrap", domain, str(plist)], check=True)
+    print("voice installation staged on the mini")
+
+
+if __name__ == "__main__":
+    main()

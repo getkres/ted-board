@@ -1,0 +1,9 @@
+# Python 3.11. Install these first, then openwakeword with --no-deps on macOS.
+numpy==2.4.6
+scipy==1.17.1
+onnxruntime==1.31.0
+requests==2.34.2
+tqdm==4.70.1
+scikit-learn==1.9.1
+webrtcvad-wheels==2.0.14.post1
+# openwakeword==0.6.0, installed separately because tflite-runtime is Linux-only.
