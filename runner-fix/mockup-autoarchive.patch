@@ -1,18 +1,22 @@
 --- /dev/null
 +++ mockup_autoarchive.py
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,308 @@
 +#!/usr/bin/env python3
 +"""Archive reviewed, completed, or stale superseded mockup batches on the mini.
 +
 +Dry-run is the default. Writes require --apply and the reviewed enable flag.
 +"""
 +import argparse
++from contextlib import contextmanager
 +from datetime import datetime, timedelta, timezone
++import fcntl
++import hashlib
 +import json
 +import os
 +from pathlib import Path
 +import re
 +import sys
++import tempfile
 +
 +ENABLE_FLAG = 'TED_MOCKUP_AUTOARCHIVE_ENABLED'
 +LOG_PATH = Path.home() / 'ted-ops/ted-board/mockup-autoarchive.jsonl'
@@ -121,7 +125,12 @@
 +        linked = [card for card in cards if card['project'] == project and (
 +            card['id'] in explicit or card['title'] == 'build approved: ' + batch or
 +            ids.intersection(MOCKUP_LINK.findall(card.get('body') or '')))]
-+        if linked and all(card['section'] in ('done', 'killed') for card in linked):
++        whole_batch_link = any(card['id'] in explicit or card['title'] == 'build approved: ' + batch
++                               for card in linked)
++        every_frame_reviewed = bool(reviewable) and all(
++            _verdict(row) in VERDICTS | {'needs_work'} for row in reviewable)
++        if (linked and all(card['section'] in ('done', 'killed') for card in linked)
++                and (whole_batch_link or every_frame_reviewed)):
 +            reason = 'linked_card_killed' if any(card['section'] == 'killed' for card in linked) else 'linked_card_done'
 +            result.append(dict(decision, reason=reason, card_ids=sorted(card['id'] for card in linked)))
 +            continue
@@ -147,7 +156,74 @@
 +        os.fsync(stream.fileno())
 +
 +
-+def run_pass(*, dry_run=True, mockup_call=None, cards_call=None, log_path=LOG_PATH, now=None):
++@contextmanager
++def _locked_state(path):
++    with path.with_suffix('.lock').open('a') as lock:
++        fcntl.flock(lock, fcntl.LOCK_EX)
++        try:
++            state = json.loads(path.read_text())
++        except FileNotFoundError:
++            state = dict(heartbeat_at=None, batches={})
++        if (not isinstance(state, dict) or not isinstance(state.get('batches'), dict)
++                or any(not isinstance(key, str) or not isinstance(value, str)
++                       for key, value in state['batches'].items())
++                or (state.get('heartbeat_at') is not None and _time(state['heartbeat_at']) is None)):
++            raise ValueError('Invalid archive state')
++        yield state
++
++
++def _save_state(path, state):
++    temporary = None
++    try:
++        with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent,
++                                         prefix=path.name + '.', delete=False) as stream:
++            temporary = Path(stream.name)
++            json.dump(state, stream, ensure_ascii=True, sort_keys=True)
++            stream.flush()
++            os.fsync(stream.fileno())
++        os.replace(temporary, path)
++    finally:
++        if temporary is not None:
++            temporary.unlink(missing_ok=True)
++
++
++def _batch_key(candidate):
++    return json.dumps([candidate['project'], candidate['batch']], ensure_ascii=True)
++
++
++def _record_outcome(log_path, event, state, state_path, observed=None):
++    evidence = dict(outcome={key: value for key, value in event.items() if key != 'at'}, observed=observed)
++    signature = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
++    key = _batch_key(event)
++    if (event['event'] in ('archive_failed', 'skipped_changed')
++            and state['batches'].get(key) == signature):
++        return
++    _log(log_path, event)
++    state['batches'][key] = signature
++    _save_state(state_path, state)
++
++
++def run_pass(*, dry_run=True, mockup_call=None, cards_call=None, log_path=LOG_PATH, now=None,
++             heartbeat=False):
++    """Serialize passes and persist heartbeat cadence and per-batch outcome state."""
++    if not dry_run and os.environ.get(ENABLE_FLAG) != 'true':
++        raise RuntimeError('Mockup auto-archive is not enabled')
++    log_path = Path(log_path)
++    state_path = log_path.with_suffix('.state.json')
++    with _locked_state(state_path) as state:
++        if heartbeat:
++            at = now or datetime.now(timezone.utc)
++            previous = _time(state.get('heartbeat_at'))
++            if previous is not None and at - previous < timedelta(minutes=10):
++                return []
++            # Claim the interval before network I/O, including attempts that fail.
++            state['heartbeat_at'] = at.isoformat()
++            _save_state(state_path, state)
++        return _run_pass(dry_run=dry_run, mockup_call=mockup_call, cards_call=cards_call,
++                         log_path=log_path, now=now, state=state, state_path=state_path)
++
++
++def _run_pass(*, dry_run, mockup_call, cards_call, log_path, now, state, state_path):
 +    """Read candidates, log their reasons, and optionally archive after rechecking."""
 +    if not dry_run and os.environ.get(ENABLE_FLAG) != 'true':
 +        raise RuntimeError('Mockup auto-archive is not enabled')
@@ -166,6 +242,11 @@
 +        return candidates(snapshot['mockups'], cards_call(), at, pins=snapshot['pins'])
 +
 +    planned = read(now)
++    keys = {_batch_key(candidate) for candidate in planned}
++    retained = {key: value for key, value in state['batches'].items() if key in keys}
++    if retained != state['batches']:
++        state['batches'] = retained
++        _save_state(state_path, state)
 +    events = []
 +    for candidate in planned:
 +        event = dict(candidate, at=now.isoformat())
@@ -178,7 +259,7 @@
 +                          (candidate['project'], candidate['batch'])), None)
 +            if fresh != candidate:
 +                event['event'] = 'skipped_changed'
-+                _log(log_path, event)
++                _record_outcome(log_path, event, state, state_path, observed=fresh)
 +                events.append(event)
 +                continue
 +            # A durable intent is required before the network write.
@@ -197,15 +278,15 @@
 +                event.update(event='archived', archived=confirmed)
 +            except Exception as exc:
 +                event.update(event='archive_failed', archived=confirmed, error_type=type(exc).__name__)
-+            _log(log_path, event)
++            _record_outcome(log_path, event, state, state_path)
 +        events.append(event)
 +    return events
 +
 +
-+def heartbeat_pass():
++def heartbeat_pass(*, now=None, log_path=LOG_PATH):
 +    if os.environ.get(ENABLE_FLAG) != 'true':
 +        return []
-+    return run_pass(dry_run=False)
++    return run_pass(dry_run=False, now=now, log_path=log_path, heartbeat=True)
 +
 +
 +def main(argv=None):
