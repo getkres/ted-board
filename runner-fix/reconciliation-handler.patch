@@ -1,0 +1,19 @@
+--- a/handler.ts
++++ b/handler.ts
+@@ -1,3 +1,6 @@
++// BEGIN RECONCILER SUPPORT
++import {reconcilerEnabled, createHandler as createReconcilerHandler} from './reconciler_handler.ts';
++// END RECONCILER SUPPORT
+ import { currentChat, publishChat, validChatURL } from './chat.ts';
+ import { syncCards } from './sync.ts';
+ import { frontdoor, workerActions, pageActions } from './frontdoor.ts';
+@@ -62,6 +65,9 @@
+   });
+ }
+ export function createHandler(db: Database, pageKey: string, workerKey: string, delivery = vetoDelivery()) {
++ // BEGIN RECONCILER ROUTE
++ if (reconcilerEnabled()) return createReconcilerHandler(db,pageKey,workerKey,delivery);
++ // END RECONCILER ROUTE
+  return async(req: Request): Promise<Response> => {
+   if (req.method === 'OPTIONS') return new Response(null,{status:204,headers:cors});
+   try {

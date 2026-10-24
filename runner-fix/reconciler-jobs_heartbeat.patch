@@ -1,0 +1,14 @@
+--- a/jobs_heartbeat.py
++++ b/jobs_heartbeat.py
+@@ -61,6 +61,11 @@
+  print('Heartbeat published: '+str(len(jobs))+' jobs, '+str(len(approvals))+' pending approvals.')
+  return 0
+ 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_heartbeat import main
++# END RECONCILER ROUTE
+ if __name__=='__main__':
+  try:sys.exit(main())
+  except Exception as exc:print('Heartbeat failed: '+type(exc).__name__,file=sys.stderr);sys.exit(1)

@@ -1,0 +1,12 @@
+--- a/card.py
++++ b/card.py
+@@ -125,4 +125,9 @@
+   return 0
+  except Exception as exc:print('Card command failed: '+type(exc).__name__,file=sys.stderr);return 1
+ 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_card import create
++# END RECONCILER ROUTE
+ if __name__=='__main__':sys.exit(main())

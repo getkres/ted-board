@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>co.ted.card-reconciler</string>
+  <key>ProgramArguments</key><array>
+    <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
+    <string>__TED_BOARD_ROOT__/reconciler_runtime.py</string>
+    <string>--root</string><string>__TED_BOARD_ROOT__</string>
+    <string>--apply</string>
+  </array>
+  <key>WorkingDirectory</key><string>__TED_BOARD_ROOT__</string>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>__TED_BOARD_ROOT__/jobs/card-reconciler.stdout.log</string>
+  <key>StandardErrorPath</key><string>__TED_BOARD_ROOT__/jobs/card-reconciler.stderr.log</string>
+  <key>Umask</key><integer>63</integer>
+</dict></plist>

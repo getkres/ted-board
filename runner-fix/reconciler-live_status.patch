@@ -1,0 +1,12 @@
+--- a/live_status.py
++++ b/live_status.py
+@@ -75,4 +75,9 @@
+   print('Live status failed; check card, status, credentials, and connectivity.',file=sys.stderr);return 1
+  print('Rule applied: '+result['rule_id']+'. No Needs you transition made.' if result.get('outcome')=='rule_applied' else 'Live status saved.');return 0
+ 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_status import update, publish_live, SECTIONS
++# END RECONCILER ROUTE
+ if __name__=='__main__':sys.exit(main())

@@ -1,0 +1,253 @@
+--- /dev/null
++++ reconciler.py
+@@ -0,0 +1,250 @@
++"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
++import hashlib
++import json
++import math
++import re
++from datetime import datetime, timezone
++
++RETRY_LIMIT=2
++LEASE_SECONDS=150
++MISSED_RENEWALS=3
++LIFETIME_DISPATCH_LIMIT=3
++RESERVED={'spend_money','send_email','contracts','legal','pricing','database_write','approve_design','your_words','his_copy'}
++TERMINAL={'done','killed','closed','verified'}
++
++
++def stamp(value):
++ if isinstance(value,(int,float)) and not isinstance(value,bool):return float(value) if math.isfinite(value) and -62135596800<=value<=253402300799 else 0
++ if not isinstance(value,str):return 0
++ try:return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
++ except (ValueError,TypeError,OverflowError):return 0
++
++
++def iso(value):return datetime.fromtimestamp(value,timezone.utc).isoformat().replace('+00:00','Z')
++
++def digest(*parts):return hashlib.sha256(json.dumps(parts,sort_keys=True,default=str).encode()).hexdigest()[:24]
++
++def reserved(card):
++ if 'inbox_decision' in card:return card['inbox_decision'] in {'send_email','spend_money','legal','pricing','prod_write','copy','approve_design'}
++ kind=card.get('decision_kind')
++ if kind=='approve_design':return bool(card.get('fresh_mockup_batch') or card.get('mockup_batch'))
++ return kind in RESERVED
++
++
++def priority_key(card):
++ value=card.get('priority_class')
++ priority=0 if value=='urgent' or card.get('explicit_ask') is True else 1 if value in ('launch','revenue','client_revenue') else 2
++ return priority,stamp(card.get('action_started_at') or card.get('created_at')) or stamp(card.get('updated_at')),str(card.get('id',''))
++
++
++def classify_priorities(snapshot,overrides):
++ for c in snapshot['cards']:
++  metadata=c.get('metadata') if isinstance(c.get('metadata'),dict) else {}
++  if 'priority_class' not in c and metadata.get('priority_class'):c['priority_class']=metadata['priority_class']
++  if 'explicit_ask' not in c and 'explicit_ask' in metadata:c['explicit_ask']=metadata['explicit_ask']
++  messages=[m for m in c.get('messages',[]) if isinstance(m,dict) and stamp(m.get('at'))]
++  latest=max(messages,key=lambda m:stamp(m.get('at')),default={})
++  if 'explicit_ask' not in c and latest.get('who') in ('seb','sebastian'):c['explicit_ask']=True
++  if 'priority_class' not in c:
++   text=(str(c.get('title',''))+' '+str(c.get('body',''))).lower()
++   if re.search(r'\b(?:launch|client revenue|revenue launch)\b',text):c['priority_class']='launch'
++  if not c.get('created_at') and messages:c['created_at']=min(messages,key=lambda m:stamp(m.get('at')))['at']
++  override=overrides.get(c['id'],{})
++  if isinstance(override,dict):
++   if override.get('priority_class') in ('urgent','launch','revenue','client_revenue','ordinary'):c['priority_class']=override['priority_class']
++   if type(override.get('explicit_ask')) is bool:c['explicit_ask']=override['explicit_ask']
++  c.setdefault('priority_class','ordinary');c.setdefault('explicit_ask',False)
++
++
++def unsafe_session(s):
++ turn=s.get('active_turn') or {}
++ return bool(s.get('reviewing') or s.get('active_veto_revision') is not None or s.get('side_effecting') or s.get('veto_outcome') or turn.get('kind')=='review' or turn.get('veto_proposal_id') or turn.get('side_effecting'))
++
++
++def backoff(entity,attempt):
++ base=min(3300,60*2**min(max(attempt-1,0),6))
++ return min(3600,base+int(digest(entity,attempt)[:4],16)%max(1,base//4))
++
++
++def evidenced_stage(snapshot,cid,now=None):
++ w=snapshot.get('workflows',{}).get(cid,{})
++ pr=snapshot.get('prs',{}).get(w.get('pr_url'),{})
++ if pr.get('state')!='MERGED':return 'pr' if w.get('pr_url') else 'build'
++ d=w.get('deployment',{});v=w.get('verification',{})
++ merged=stamp(pr.get('merged_at'));deployed=stamp(d.get('deployed_at'));verified=stamp(v.get('verified_at'));revision=pr.get('merge_revision')
++ if not (d.get('verified') is True and deployed and revision and d.get('revision')==revision and deployed>=merged and (now is None or deployed<=now)):return 'merged'
++ if v.get('ok') is True and verified>=deployed and (now is None or verified<=now) and v.get('revision')==revision:return 'verified'
++ return 'deployed'
++
++
++def workflow_stage(snapshot,cid,now=None):
++ observed=evidenced_stage(snapshot,cid,now)
++ c=next((c for c in snapshot['cards'] if c.get('id')==cid),{})
++ previous=c.get('reconciliation_stage') or snapshot.get('workflows',{}).get(cid,{}).get('last_stage')
++ rank={'build':0,'pr':1,'merged':2,'deployed':3,'verified':4}
++ return previous if rank.get(previous,-1)>rank[observed] else observed
++
++
++def plan(snapshot,completed=(),now=None):
++ if now is None:raise ValueError('planner requires an explicit observation time')
++ if not isinstance(snapshot.get('cards'),list):raise ValueError('complete card feed required')
++ completed=set(completed);items=[];actions=[];coverage=[]
++ def action(kind,entity,generation,payload=None):
++  aid=digest(kind,entity,generation)
++  if aid not in completed:actions.append(dict(id=aid,kind=kind,entity=entity,payload=payload or {}))
++ def item(key,kind,cid,owner,start,due,stage='work',status='open',priority=2,summary='',expected=None):
++  start=min(now,start)
++  row=dict(id=key,kind=kind,card_id=cid,owner=owner,action_started_at=iso(start),next_action_due=iso(due),stage=stage,status=status,priority=priority,summary=summary[:200])
++  if expected:row['expected_updated_at']=expected
++  items.append(row);return row
++ for source,state in snapshot.get('coverage',{}).items():
++  if state!='ok':
++   coverage.append(source);action('coverage_defect',source,state,dict(source=source))
++ cards={}
++ for index,c in enumerate(snapshot['cards']):
++  if not isinstance(c,dict) or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',str(c.get('id',''))):
++   coverage.append('card_row:'+str(index));continue
++  cards[c['id']]=c
++ sessions=snapshot.get('sessions',{});review_ids=[]
++ for c in sorted(cards.values(),key=priority_key):
++  cid=c['id'];s=sessions.get(cid,{})
++  stage=workflow_stage(snapshot,cid,now=now)
++  # A done build is still open delivery work until deployment and verification evidence exists.
++  has_chain=bool(snapshot.get('workflows',{}).get(cid)) or c.get('reconciliation_stage') in ('pr','merged','deployed','verified')
++  evidence_gap=stage!=evidenced_stage(snapshot,cid,now)
++  if evidence_gap:
++   source='workflow:'+cid
++   if source not in coverage:coverage.append(source)
++   action('coverage_defect',source,stage,dict(source=source))
++  if c.get('section') in TERMINAL and (not has_chain or stage=='verified' or c.get('section')=='killed'):continue
++  started=stamp(c.get('action_started_at') or c.get('created_at')) or stamp(c.get('updated_at')) or now
++  review=cid=='reconciler-initial-ted-digest' or bool(snapshot.get('workflows',{}).get(cid,{}).get('review_required')) or stage in ('pr','merged','deployed') or any(x in str(c.get('live_status','')).lower() for x in ('ted review','ted owns','ted must','waiting on ted','worker stopped','exceeded','could not start'))
++  owner=c.get('owner')
++  valid_owner=owner in ('ted','sebastian','external') or (isinstance(owner,str) and owner.startswith('worker:') and len(owner)>7)
++  desired_owner='worker:'+cid if s.get('status')=='running' else 'sebastian' if c.get('section')=='needs_you' and reserved(c) else 'external' if c.get('external_wait') is True else 'ted'
++  if not valid_owner:owner=desired_owner
++  if s.get('status')=='running' and c.get('section')!='needs_you' and not review:owner='worker:'+cid
++  if owner=='sebastian' and not reserved(c):owner='ted'
++  if owner.startswith('worker:') and s.get('status')!='running':owner='ted'
++  if c.get('section')=='needs_you' and (reserved(c) or c.get('classification_uncertain')):owner='sebastian'
++  if review and not (c.get('section')=='needs_you' and reserved(c)):owner='ted'
++  previous_stage=c.get('reconciliation_stage')
++  transition=previous_stage not in (None,'unclassified',stage)
++  if transition:
++   w=snapshot.get('workflows',{}).get(cid,{})
++   pr=snapshot.get('prs',{}).get(w.get('pr_url'),{})
++   started=max(started,stamp(pr.get('merged_at') if stage=='merged' else pr.get('created_at') if stage=='pr' else w.get('deployment',{}).get('deployed_at') if stage=='deployed' else w.get('verification',{}).get('verified_at')) or started)
++  due=(0 if transition else stamp(c.get('next_action_due'))) or started+(6*3600 if review else 2*3600)
++  row=item('card:'+cid,'card',cid,owner,started,due,stage,priority=priority_key(c)[0],summary='card requires next action',expected=c.get('updated_at'))
++  if not valid_owner or not stamp(c.get('next_action_due')) or owner!=c.get('owner'):
++   action('repair_metadata',cid,c.get('updated_at'),dict(card_id=cid,owner=owner,next_action_due=iso(due),action_started_at=iso(started)))
++  if c.get('section')=='needs_you' and not reserved(c) and not c.get('classification_uncertain'):
++   action('route_ted',cid,c.get('updated_at'),dict(card_id=cid,expected_updated_at=c.get('updated_at')))
++  age=max(0,now-started)
++  for hours,kind in ((2,'escalate_2h'),(12,'escalate_12h')):
++   if age>=hours*3600 and now>=due:action(kind,cid,[stage,iso(started)],dict(card_id=cid,owner='ted'))
++  if age>=24*3600 and now>=due and owner=='sebastian' and reserved(c):action('sebastian_escalation',cid,[stage,iso(started)],dict(card_id=cid))
++  if review:
++   review_ids.append(row)
++   if age>=6*3600:action('review_sla',cid,[stage,iso(started)],dict(card_id=cid))
++  if has_chain:
++   if stage=='merged' and not evidence_gap:action('advance_deploy',cid,snapshot['workflows'][cid].get('pr_url'),dict(card_id=cid,stage='deploy'))
++   if stage=='deployed' and not evidence_gap:action('advance_verify',cid,snapshot['workflows'][cid]['deployment'],dict(card_id=cid,stage='verify'))
++   if stage=='verified':
++    v=snapshot['workflows'][cid].get('verification',{})
++    active=s.get('status') in ('running','queued') or bool(s.get('queue'))
++    if not active and s.get('status')!='failed' and c.get('revision') is not None and v.get('card_revision')==c.get('revision') and snapshot.get('prs',{}).get(snapshot['workflows'][cid].get('pr_url'),{}).get('state')=='MERGED':
++     action('close_verified',cid,v,dict(card_id=cid))
++    else:
++     review_ids.append(row)
++     action('verification_review',cid,v,dict(card_id=cid))
++  status=s.get('status')
++  if s and (s.get('status') not in ('done','finished','idle','stopped') or s.get('queue')):
++   start=stamp(s.get('started_at')) or started
++   expires=stamp(s.get('lease_expires_at'))
++   item('job:'+cid,'job',cid,'worker:'+cid if status=='running' else 'ted',start,expires or start+LEASE_SECONDS,'worker',status='dead_letter' if status=='dead_letter' else 'open',priority=priority_key(c)[0],summary='worker lease' if status=='running' else 'worker '+str(status))
++   # Result consumption is owned by Store.tick, before planning another retry.
++   lease_missing=status=='running' and not s.get('lease_token')
++   if lease_missing:coverage.append('lease_missing:'+cid)
++   expired=status=='running' and not lease_missing and expires<=now and s.get('pid_dead') is True and s.get('activity_quiet') is True and int(s.get('missed_renewals') or 0)>=MISSED_RENEWALS and not s.get('result_ready')
++   failed=status=='failed' and not s.get('queue')
++   if s.get('stop_requested') and not lease_missing:
++    row['owner']='ted';review_ids.append(row)
++    action('stop_worker',cid,[s.get('turn'),s.get('kill_requested_at') or 'stop'],dict(card_id=cid,expected_turn=s.get('turn'),expected_lease_token=s.get('lease_token')))
++   elif (expired or failed) and stage!='verified':
++    unsafe=unsafe_session(s)
++    attempt=int(s.get('retry_count') or 0)
++    kind='dead_letter' if not s.get('lease_token') or unsafe or attempt>=RETRY_LIMIT or int(s.get('automatic_dispatch_count') or 0)>=LIFETIME_DISPATCH_LIMIT or s.get('artifact_error') else 'retry'
++    payload=dict(card_id=cid,expected_turn=s.get('turn'),expected_lease_token=s.get('lease_token'),attempt=attempt+1,retry_at=iso(now+backoff(cid,attempt+1)))
++    action(kind,cid,[s.get('turn'),attempt],payload)
++    row['owner']='ted'
++    if kind=='dead_letter':row['status']='dead_letter';review_ids.append(row)
++   elif status=='dead_letter':
++    row['owner']='ted';row['status']='dead_letter';review_ids.append(row)
++  elif c.get('section') in ('up_next','ted_doing') and owner=='ted' and not review and not has_chain and not s.get('turn') and not s.get('started_at') and not s.get('queue') and not s.get('automatic_dispatched'):
++   action('dispatch',cid,s.get('first_enqueued_at') or c.get('created_at') or 'initial',dict(card_id=cid))
++ for a in snapshot.get('approvals',[]):
++  if a.get('status') in ('done','failed','superseded','rejected'):continue
++  cid=a.get('card_id');c=cards.get(cid,{})
++  start=stamp(a.get('created_at') or a.get('requested_at')) or stamp(c.get('action_started_at') or c.get('created_at') or c.get('updated_at')) or now
++  owner='sebastian' if a.get('status')=='pending' and reserved(c) else 'ted'
++  item('approval:'+str(a['id']),'approval',cid,owner,start,start+6*3600,'approval',summary='exact approval packet requires review')
++ for cid,w in snapshot.get('workflows',{}).items():
++  c=cards.get(cid,{})
++  if c.get('section')=='killed':continue
++  start=stamp(w.get('created_at')) or stamp(c.get('action_started_at') or c.get('created_at') or c.get('updated_at')) or now
++  if w.get('sql_pending'):item('sql:'+cid,'sql',cid,'ted',start,start+6*3600,'sql_review',summary='sql packet requires ted review')
++  if w.get('pr_url') and workflow_stage(snapshot,cid,now=now)!='verified':
++   pr=snapshot.get('prs',{}).get(w['pr_url'],{})
++   phase=workflow_stage(snapshot,cid,now=now)
++   ps=stamp(w.get('deployment',{}).get('deployed_at')) if phase=='deployed' else stamp(pr.get('merged_at')) if phase=='merged' else stamp(pr.get('created_at'))
++   ps=ps or start
++   item('pr:'+digest(w['pr_url']),'pr',cid,'ted',ps,ps+6*3600,workflow_stage(snapshot,cid,now=now),summary='pull request requires delivery evidence')
++ groups={}
++ for m in snapshot.get('mockups',[]):
++  if m.get('status')=='deleted':continue
++  groups.setdefault((m.get('project',''),m.get('batch','')),[]).append(m)
++ for (project,batch),frames in groups.items():
++  if not project or not batch:continue
++  # Archived approved batches retain lineage. Scrapped-only batches do not start builds.
++  approved=[m for m in frames if m.get('verdict')=='approved' or (not m.get('verdict') and m.get('status')=='picked')]
++  undo_pending=any(stamp((m.get('verdict_change') or {}).get('undo_until'))>now for m in frames)
++  if not approved and all(m.get('status')=='archived' for m in frames):continue
++  key=digest(project,batch);start=min((stamp(m.get('created_at')) or now for m in frames),default=now)
++  build_id='mockup-build-'+hashlib.sha256(json.dumps([project,batch],ensure_ascii=False,separators=(',',':')).encode()).hexdigest()[:24]
++  linked=[c for c in cards.values() if c.get('project')==project and (c.get('id')==build_id or c.get('title') in ('Build: '+batch,'build approved: '+batch) or any(m.get('card_id')==c['id'] for m in frames))]
++  cid=linked[0]['id'] if len(linked)==1 else None
++  stage=workflow_stage(snapshot,cid,now=now) if cid else 'approved' if approved else 'mockup_review'
++  if stage=='verified' or (linked and all(c.get('section')=='killed' for c in linked)):continue
++  item('mockup:'+key,'mockup',cid,'ted',start,start+2*3600,stage,summary='approved mockup delivery chain' if approved else 'mockup batch review')
++  if approved and not linked and not undo_pending:
++   action('create_build',key,sorted(m['id'] for m in approved),dict(card_id=build_id,project=project,batch=batch,mockup_ids=[m['id'] for m in approved]))
++  if len(linked)>1:action('ambiguous_link',key,'ambiguous',dict(project=project))
++ for job in snapshot.get('external_jobs',[]):
++  jid=digest('external-job',job.get('id','unknown'));start=stamp(job.get('started_at')) or stamp(job.get('last_activity')) or now
++  cid=job.get('card_id') if job.get('card_id') in cards else None
++  item('external-job:'+jid,'job',cid,'ted',start,start+2*3600,'unmanaged_worker',summary='worker outside managed session store requires ted adoption')
++ for old in snapshot.get('retained_items',[]):
++  if old.get('id') not in {x['id'] for x in items}:items.append(dict(old))
++ for cid,s in sessions.items():
++  if cid in cards and cards[cid].get('section') not in ('done','killed'):continue
++  if s.get('status') not in ('running','queued','dead_letter','failed') and not s.get('queue'):continue
++  key='job:'+cid
++  if any(x['id']==key for x in items):continue
++  start=stamp(s.get('started_at') or s.get('first_enqueued_at')) or now
++  item(key,'job',None,'ted',start,stamp(s.get('lease_expires_at')) or start+150,'orphan_worker',status='dead_letter' if s.get('status')=='dead_letter' else 'open',summary='worker has no open source card, ted must reconcile before restart')
++  action('detached_worker',key,s.get('turn'),{})
++ # Every entity, including detached approvals and SQL packets, participates in aging.
++ for row in items:
++  if row['kind']=='card':continue
++  age=now-stamp(row['action_started_at'])
++  for hours,kind in ((2,'escalate_2h'),(12,'escalate_12h')):
++   if age>=hours*3600 and now>=stamp(row['next_action_due']):action(kind,row['id'],[row['stage'],row['action_started_at']],dict(card_id=row['card_id'],owner='ted'))
++  if row['owner']=='ted' and (row['kind'] in ('pr','sql','approval') or row['status']=='dead_letter'):review_ids.append(row)
++ for row in items:
++  if row['owner']=='ted' and now>=stamp(row['next_action_due']):review_ids.append(row)
++ by_work={}
++ for row in sorted((x for x in review_ids if x.get('owner')=='ted'),key=lambda x:(stamp(x['action_started_at']),x['priority'],x['id'])):
++  by_work.setdefault(row.get('card_id') or row['id'],row)
++ by_id={x['id']:x for x in by_work.values()}
++ return dict(generated_at=iso(now),items=items,actions=actions,coverage_defects=coverage,ted_queue=[x['id'] for x in sorted(by_id.values(),key=lambda x:(stamp(x['action_started_at']),x['priority'],x['id']))],banner=bool(coverage) or any(now-stamp(x['action_started_at'])>=12*3600 and now>=stamp(x['next_action_due']) for x in items))
