@@ -1,0 +1,75 @@
+--- sessions.py
++++ sessions.py
+@@ -15,0 +16 @@
++from inbox_policy import failure_kind, FAILURE_LINE, approval_line
+@@ -140,0 +142 @@
++   s['decision_scope']={k:card.get(k) for k in ('title','body','decision_kind','project')}
+@@ -153 +155 @@
+-  line='approval artifact is unsafe or over 60 kb; fix it, then reply to retry'
++  line='approval artifact failed safety checks, ted needs to repair the packet'
+@@ -160 +162,15 @@
+-   self._out(data,s,'Approval stopped: the artifact is unsafe, unreadable, or over 60 KB. Fix the file, then reply to retry.','artifact-error-'+uuid.uuid4().hex)
++   self._out(data,s,'Ted review: the approval artifact is unsafe, unreadable, or over 60 KB. Ted will repair the packet.','artifact-error-'+uuid.uuid4().hex)
++  s['failure_publish_pending']=True
++ def _worker_failure(self,data,s,kind,retry=False):
++  active=s.get('active_turn') or {}
++  group=active.get('recovery_group') or s.get('turn') or uuid.uuid4().hex
++  s.update(failure_kind=kind,failure_publish_pending=True,last_line=FAILURE_LINE)
++  if s.get('failure_note_group')!=group:
++   self._out(data,s,'Ted review: a worker failed. Ted owns recovery from the job files. Timeout and missing-result work gets one automatic retry, then holds for Ted.','worker-failure-'+group)
++   s['failure_note_group']=group
++  if retry and not active.get('recovery_attempt') and not s.get('queue'):
++   s['queue'].insert(0,dict(id=str(uuid.uuid4()),kind='work',message='Resume from your files. Read BRIEF.md and REPORT.md, inspect saved artifacts, and continue the unfinished work. Check prior effects before repeating any action.',recovery_attempt=1,recovery_group=group))
++ def _publish_failure(self,s):
++  if s.get('failure_publish_pending'):
++   if publish_live(s['card_id'],'blocked',FAILURE_LINE,section='up_next'):
++    s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
+@@ -162,0 +179,5 @@
++   for s in data['sessions'].values():
++    self._publish_failure(s)
++    if s.get('recovery_section') and s['status']=='running' and alive(s.get('pid'),s.get('identity')):
++     if publish_live(s['card_id'],'running','worker is resuming from the saved job files',section='ted_doing',expected_section='up_next'):
++      s.pop('recovery_section',None)
+@@ -182 +203,7 @@
+-    r=json.loads(result.read_text()) if result.exists() else dict(ok=False,text='Worker stopped without a final result. Reply to retry.')
++    try:
++     r=json.loads(result.read_text()) if result.exists() else dict(ok=False,failure_kind='no_result',text='Worker stopped without a final result.')
++     if not isinstance(r,dict) or not isinstance(r.get('ok'),bool) or not isinstance(r.get('text'),str):raise ValueError('Invalid worker result')
++    except (OSError,ValueError):r=dict(ok=False,failure_kind='crash',text='Worker result was unreadable, ted needs to inspect the job files.')
++    if r.get('ok') and not r.get('text','').strip():r.update(ok=False,failure_kind='no_result')
++    if r.get('text','').startswith('Worker returned no final answer.'):
++     r.update(ok=False,failure_kind='no_result')
+@@ -190 +217,7 @@
+-    self._out(data,s,r.get('text',''),s['turn'])
++    known_veto_gate=veto_revision is not None and r.get('veto_outcome') in ('failed','uncertain')
++    failed=not r['ok'] and not s.get('kill_requested_at') and not known_veto_gate
++    if failed:
++     kind=r.get('failure_kind') or failure_kind(r.get('text')) or 'crash'
++     self._worker_failure(data,s,kind,retry=kind in ('timeout','no_result') and not s.get('reviewing') and veto_revision is None)
++     self._publish_failure(s)
++    else:self._out(data,s,r.get('text',''),s['turn'])
+@@ -198,0 +232,2 @@
++    elif s['status']=='done' and veto_revision is None:
++     publish_live(s['card_id'],'blocked','ted review',section='up_next')
+@@ -205 +240 @@
+-    if s['status']=='running' or not s['queue']:continue
++    if s['status']=='running' or not s['queue'] or s.get('failure_publish_pending'):continue
+@@ -222 +257,2 @@
+-    s['queue'].pop(0);s['turn']=turn['id'];s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
++    s['queue'].pop(0);s['turn']=turn['id'];s['active_turn']=turn;s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
++    s.pop('failure_kind',None)
+@@ -234 +270,2 @@
+-     publish_live(s['card_id'],'running',line,section='ted_doing')
++     if publish_live(s['card_id'],'running',line,section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {})):
++      s.pop('recovery_section',None)
+@@ -236 +273 @@
+-     s.update(status='failed',pid=None);self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
++     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s)
+@@ -250 +287 @@
+-    if s['status'] in ('running','queued'):continue
++    if s['status'] in ('running','queued','failed') or s.get('failure_kind'):continue
+@@ -257,0 +295,4 @@
++     if not approval_line(kind,s.get('decision_scope') or {}):
++      s['seen_artifacts'].append(a['digest']);s['last_line']='ted review needed for the prepared packet'
++      self._out(data,s,'Ted review: a prepared packet needs operational review. It is not a Sebastian decision.','ted-packet-'+a['digest'])
++      continue

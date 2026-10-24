@@ -1,0 +1,15 @@
+--- session_worker.py
++++ session_worker.py
+@@ -39 +39 @@
+-   p=subprocess.run(command,cwd=s['cwd'],stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
++   p=subprocess.run(command,cwd=s['cwd'],stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=3*3600)
+@@ -55,3 +55,6 @@
+-  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer. Reply to retry.',session_id=sid)
+- except subprocess.TimeoutExpired:result=dict(ok=False,text='Worker exceeded the twelve-hour limit.')
+- except Exception as exc:result=dict(ok=False,text='Worker failed: '+type(exc).__name__+'. Reply to retry.')
++  ok=ok and bool(text.strip())
++  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer.',session_id=sid)
++  if not ok:result['failure_kind']='no_result' if p.returncode==0 and not text.strip() else 'crash'
++ except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the three-hour limit.')
++ except Exception:result=dict(ok=False,failure_kind='crash',text='Worker failed before returning a result.')
++ if result['ok']:result['completion']=dict(section='up_next',note='ted review')

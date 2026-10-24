@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 ROOT = Path(os.environ.get('TED_RUNTIME_SOURCE', Path.home() / 'ted-ops/ted-board'))
+sys.path.insert(0, str(ROOT))
 
 def module(name, filename, deps):
     spec = importlib.util.spec_from_file_location(name, ROOT / filename)
@@ -41,7 +42,7 @@ class FinishedJobs(unittest.TestCase):
                 store.tick();store.tick()
             self.assertEqual(store.read()['sessions']['x']['status'], 'done')
             self.assertEqual(publish.call_count, 1)
-            self.assertEqual(publish.call_args.args, ('x', 'blocked', 'Ted review'))
+            self.assertEqual(publish.call_args.args, ('x', 'blocked', 'ted review'))
             self.assertEqual(publish.call_args.kwargs, dict(section='up_next'))
 
     def test_dispatcher_does_not_mark_failure_or_queued_work_finished(self):
@@ -55,9 +56,9 @@ class FinishedJobs(unittest.TestCase):
                         for i in range(3):
                             data['sessions'][str(i)] = dict(status='running', cwd=tmp, turn='other', pid=1, identity='alive', last_activity=0)
                 sessions.atomic(Path(s['cwd']) / 'turn.result.json', dict(ok=ok, text='result'))
-                with patch.object(sessions, 'alive', side_effect=lambda pid, expected: pid == 1), patch.object(sessions, 'publish_live') as publish:
+                with patch.object(sessions, 'alive', side_effect=lambda pid, expected: pid == 1), patch.object(sessions, 'publish_live') as publish, patch.object(sessions.os, 'getloadavg', return_value=(100000, 0, 0)):
                     store.tick()
-                self.assertFalse(any(c.kwargs.get('section') == 'up_next' for c in publish.call_args_list))
+                self.assertEqual(any(c.kwargs.get('section') == 'up_next' for c in publish.call_args_list), not ok)
 
     def test_worker_records_review_handoff_without_publishing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -68,7 +69,7 @@ class FinishedJobs(unittest.TestCase):
             with patch.object(worker, 'identity', return_value='fixture'), patch.object(worker, 'engine_command', return_value=['fixture-only']), patch.object(worker.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)):
                 worker.run(prefix)
             result = json.loads(Path(str(prefix) + '.result.json').read_text())
-            self.assertEqual(result.get('completion'), dict(section='up_next', note='Ted review'))
+            self.assertEqual(result.get('completion'), dict(section='up_next', note='ted review'))
             self.assertTrue(result['ok'])
 
     def test_reaper_retries_successful_handoff_even_for_blocked_or_missing_reports(self):
@@ -80,7 +81,7 @@ class FinishedJobs(unittest.TestCase):
                 (root / 'sessions.json').write_text(json.dumps(dict(sessions={'x':dict(cwd=str(d), status='done', queue=[], started_at=1)})))
                 with patch.object(reaper, 'update') as publish:
                     reaper.reap([dict(id='x', section='ted_doing', updated_at='1970-01-01T00:00:00Z')], root, now=30000)
-                self.assertEqual(publish.call_args.args, ('x', 'blocked', 'Ted review'))
+                self.assertEqual(publish.call_args.args, ('x', 'blocked', 'ted review'))
                 self.assertEqual(publish.call_args.kwargs['section'], 'up_next')
                 self.assertNotIn('ask_anyway_reason', publish.call_args.kwargs)
 

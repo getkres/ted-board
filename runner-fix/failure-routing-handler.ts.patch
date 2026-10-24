@@ -1,0 +1,13 @@
+--- handler.ts
++++ handler.ts
+@@ -113,2 +113,8 @@
+-      if (b.section !== undefined && !['done','needs_you','ted_doing'].includes(String(b.section))) return json({error:'Invalid live section'},400);
+-      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') return json({error:'Invalid section guard'},400);
++      if (b.section !== undefined && !['done','needs_you','ted_doing','up_next'].includes(String(b.section))) return json({error:'Invalid live section'},400);
++      if (b.state === 'waiting_on_you' && b.section !== 'needs_you') return json({error:'A decision requires a Needs you transition'},400);
++      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') {
++        const cleanup=b.expected_section==='needs_you' && typeof b.expected_updated_at==='string'
++          && ((b.section==='up_next' && b.state==='blocked') || (b.section==='done' && b.state==='done'));
++        const recovery=b.expected_section==='up_next' && b.section==='ted_doing' && b.state==='running';
++        if(!cleanup&&!recovery)return json({error:'Invalid section guard'},400);
++      }

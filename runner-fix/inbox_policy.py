@@ -1,0 +1,125 @@
+"""Shared, conservative routing policy for Sebastian's decision inbox."""
+from datetime import datetime
+import re
+
+TED_LINE = 'ted review needed, this is not a sebastian decision'
+FAILURE_LINE = 'worker failed, ted will review recovery from the job files'
+FAILURES = re.compile(r'\bworker (?:exceeded|timed out|timeout|stopped|could not start|failed|crashed|returned no final)|'
+                      r'\bno worker on this|\bapproval artifact (?:is unsafe|needs fixing|failed)', re.I)
+ASK = re.compile(r'\?|\b(?:approve|approval|review|sign|choose|pick|decide|write|type|your call|your version|'
+                 r'you decide|flat fee|must|please|action required|needed|pending)\b', re.I)
+FYI = re.compile(r'\b(?:fyi|receipts?|confirmations?|payment completed|export completed|welcome|subscription notice)\b', re.I)
+
+
+def stamp(value):
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
+def last_message(card):
+    rows = [m for m in card.get('messages') or [] if isinstance(m, dict) and stamp(m.get('at'))]
+    return max(rows, key=lambda m: stamp(m['at']), default={})
+
+
+def current_text(card):
+    last = last_message(card)
+    live = str(card.get('live_status') or '')
+    if live and (not last or not card.get('live_status_at') or stamp(card.get('live_status_at')) >= stamp(last.get('at'))):
+        return live
+    return str(last.get('text') or card.get('body') or card.get('title') or '')
+
+
+def failure_kind(text):
+    text = str(text or '')
+    if not FAILURES.search(text):
+        return None
+    if re.search(r'exceeded|timed out|timeout', text, re.I):
+        return 'timeout'
+    if re.search(r'without (?:a )?(?:current report|final result)|no final|stopped without', text, re.I):
+        return 'no_result'
+    if re.search(r'could not start', text, re.I):
+        return 'start_failure'
+    return 'crash'
+
+
+def linked_mockups(card, mockups):
+    text = '\n'.join(str(card.get(k) or '') for k in ('title', 'body', 'live_status'))
+    text += '\n' + str(last_message(card).get('text') or '')
+    rows = [m for m in mockups if m.get('project') == card.get('project') and m.get('batch')]
+    if card.get('batch'):
+        return [m for m in rows if m['batch'].casefold() == str(card['batch']).casefold()]
+    matches = [m for m in rows if re.search(r'(?<!\w)'+re.escape(str(m['batch']))+r'(?!\w)', text, re.I)
+               or (m.get('id') and str(m['id']) in text)]
+    return matches
+
+
+def decision(card, line=None, mockups=()):
+    """Return the allowed decision family only for a current, concrete ask."""
+    line = current_text(card) if line is None else str(line)
+    if failure_kind(line):
+        return None
+    # A worker's operational progress or Ted review is not a fresh human ask.
+    if re.search(r'\b(?:ted review|pr \d+.*review|pending ted review|worker slot|waiting for CI)\b', line, re.I):
+        return None
+    text = line
+    if line.strip().lower() == 'review the pending approval on this card':
+        text += '\n' + str(last_message(card).get('text') or '')
+    text = re.sub(r'\bno action (?:required|needed)\b', '', text, flags=re.I)
+    rows = linked_mockups(card, mockups)
+    # Match the action and its object within one sentence. Background prices,
+    # historical failures, and quoted UI questions do not create decisions.
+    for ask in re.split(r'(?<=[.!?])\s+|\n+', text):
+        if not ASK.search(ask):
+            continue
+        if re.search(r'\b(?:write|type) (?:your|the|each)|\byours to write\b', ask, re.I) and re.search(r'\b(?:copy|headline|line|version|words)\b', ask, re.I):
+            if not rows or not all(m.get('status') == 'archived' for m in rows):
+                return 'copy'
+            continue
+        if re.search(r'\b(?:send(?:ing)? (?:the |this |an? |exact |drafted )*(?:email|draft)|send_email)\b', ask, re.I):
+            return 'send_email'
+        if re.search(r'\b(?:spend(?:ing)?|pay(?:ment)?|charge|flat fee|budget|billing)\b|\$\s*\d', ask, re.I):
+            return 'spend_money'
+        if re.search(r'\b(?:contract|legal|signature|docusign)\b', ask, re.I):
+            return 'legal'
+        if re.search(r'\b(?:pricing|price|prices)\b', ask, re.I):
+            return 'pricing'
+        if re.search(r'\b(?:gated (?:prod|production)|production (?:database|db) write|prod write)\b', ask, re.I):
+            return 'prod_write'
+        if re.search(r'\b(?:pick|choose|taste|mockup|design|batch)\b', ask, re.I):
+            if any(m.get('status') == 'open' and not m.get('verdict') for m in rows):
+                return 'approve_design'
+    return None
+
+
+def approval_line(kind, card):
+    if kind == 'email':
+        return 'approve sending the drafted email'
+    if kind == 'spend':
+        return 'approve the proposed spend'
+    if kind == 'db' and decision(card) == 'prod_write':
+        return 'approve the gated production database write'
+    return None
+
+
+def disposition(card, mockups=()):
+    """Mechanical inbox move, or a reason to retain a real or ambiguous ask."""
+    text = current_text(card)
+    if failure_kind(text):
+        return 'up_next', FAILURE_LINE
+    family = decision(card, text, mockups)
+    if family:
+        return None, 'sebastian decision: '+family
+    rows = linked_mockups(card, mockups)
+    if rows and all(m.get('status') == 'archived' for m in rows):
+        return 'done', 'linked mockup batch is archived'
+    if re.search(r'\b(?:superseded by|replaced by|obsolete|no longer needed)\b', text, re.I):
+        return 'done', 'superseded work, no current decision'
+    content = text+'\n'+str(card.get('title') or '')+'\n'+str(card.get('body') or '')
+    without_notice = re.sub(r'\bno action (?:required|needed)\b', '', content, flags=re.I)
+    if FYI.search(content) and not ASK.search(without_notice):
+        return 'done', 'pure fyi, no action required'
+    if card.get('live_state') == 'running' or re.search(r'\b(?:ted review|pr \d+|draft pr|pending ted review|worker slot|approval needed)\b', text, re.I):
+        return 'up_next', 'ted review, no sebastian decision'
+    return 'up_next', 'ted judgment required, no current sebastian ask'

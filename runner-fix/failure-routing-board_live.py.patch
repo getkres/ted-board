@@ -1,0 +1,58 @@
+--- board_live.py
++++ board_live.py
+@@ -13,0 +14 @@
++from inbox_policy import decision, approval_line, FAILURE_LINE, TED_LINE
+@@ -81 +82,3 @@
+- sessions=read_json(root/'sessions.json',{}).get('sessions',{})
++ data=read_json(root/'sessions.json',{});sessions=data.get('sessions',{})
++ for cid,s in sessions.items():
++  s['pending_approval_kinds']=[a.get('kind') for a in data.get('approvals',{}).values() if a.get('card_id')==cid and a.get('status')=='pending']
+@@ -125,2 +128 @@
+-    state,line,section='blocked','no worker on this, ted needs to pick it up','needs_you'
+-    ask_anyway_reason='No worker or queued turn exists for this card. Sebastian must review it before work can resume.'
++    state,line,section='blocked','no worker on this, ted needs to pick it up','up_next'
+@@ -137,3 +139,2 @@
+-   elif job.get('artifact_error'):
+-    state,line,section='waiting_on_you','approval artifact needs fixing, see the card note','needs_you'
+-    ask_anyway_reason='An approval artifact failed safety checks. The file must be corrected before this card can continue.'
++   elif job.get('artifact_error') or job.get('failure_kind') or job.get('failure_publish_pending') or (job.get('status')=='failed' and not isinstance(job.get('veto_outcome'),dict)):
++    state,line,section='blocked',FAILURE_LINE,'up_next'
+@@ -143 +144,4 @@
+-    state,line,section='waiting_on_you','review the pending approval on this card','needs_you'
++    asks=[approval_line(kind,card) for kind in job.get('pending_approval_kinds',[])]
++    asks=[ask for ask in asks if ask]
++    if asks:state,line,section='waiting_on_you',asks[0],'needs_you'
++    else:state,line,section='blocked','ted review needed for the prepared packet','up_next'
+@@ -153,2 +157,2 @@
+-     state,line,section='waiting_on_you','timed email was not sent, review the proposal','needs_you'
+-     ask_anyway_reason='The timed email was refused before sending. Sebastian must review the proposal before retrying.'
++     state,line,section='waiting_on_you','review sending the drafted email after checking the refused proposal','needs_you'
++     ask_anyway_reason='The timed email gate refused the proposal. Sebastian must review it before any new send.'
+@@ -156,2 +160,8 @@
+-     state,line,section='waiting_on_you','email send result uncertain, check Gmail Sent before retrying','needs_you'
+-     ask_anyway_reason='The email send result is uncertain. Sebastian must reconcile Gmail Sent before any retry.'
++     state,line,section='waiting_on_you','review sending the drafted email after reconciling Gmail Sent','needs_you'
++     ask_anyway_reason='The timed email result is uncertain. Sebastian must reconcile Gmail Sent before any new send.'
++   elif job.get('status') in ('done','finished'):
++    completed=max(float(job.get('last_activity') or 0),float(job.get('started_at') or 0))
++    report=directory/'REPORT.md'
++    if report.is_file():completed=max(completed,report.stat().st_mtime)
++    if stamp((card.get('answer') or {}).get('created_at'))>completed:continue
++    state,line,section='blocked','ted review','up_next'
+@@ -161,2 +171 @@
+-     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'needs_you'}.get(state)
+-     if section=='needs_you':ask_anyway_reason='The worker report has unfinished work that Sebastian must review before this card can continue.'
++     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'up_next'}.get(state)
+@@ -164,2 +173,10 @@
+-     state,line,section='blocked','worker stopped without a current report, review and restart the card','needs_you'
+-     ask_anyway_reason='The worker stopped without a current report. Sebastian must review the card before work can resume.'
++     state,line,section='blocked','worker stopped without a current report, ted needs to review recovery','up_next'
++  if section=='needs_you' or state=='waiting_on_you':
++   mockups=[]
++   if re.search(r'\b(?:mockup|batch|design|copy|headline|write|type)\b',line or '',re.I):
++    try:
++     from mockup_client import call as mockup_call
++     mockups=mockup_call()['mockups']
++    except (RuntimeError,KeyError,TypeError):failed+=1;continue
++   if decision(card,line,mockups) is None:
++    state,line,section='blocked',TED_LINE,'up_next';ask_anyway_reason=None
