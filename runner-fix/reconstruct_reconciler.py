@@ -20,13 +20,23 @@ def main():
  here=Path(__file__).resolve().parent
  manifest=json.loads((here/'reconciler-manifest.json').read_text())
  if a.output.exists():p.error('output must be a new private directory')
- sources={name:a.baseline/name for name,row in manifest.items() if row.get('baseline_sha256')}
- sources.update({'hourly-SKILL.md':a.hourly_skill,'inbox_steward.py':a.steward_source,'handler.ts':a.baseline/'supabase/functions/ted-board/handler.ts'})
+ sources={}
+ baselines={}
+ for name,row in manifest.items():
+  source=row.get('source',name)
+  if row.get('baseline_sha256'):
+   path=a.baseline/source
+   if source=='hourly-SKILL.md':path=a.hourly_skill
+   elif source=='inbox_steward.py':path=a.steward_source
+   elif source=='handler.ts':path=a.baseline/'supabase/functions/ted-board/handler.ts'
+   sources[name]=path;baselines[source]=path
  for name,source in sources.items():
   if source.is_symlink() or not source.is_file() or sha(source)!=manifest[name]['baseline_sha256']:p.error('baseline changed for '+name+', rebase and rerun review')
  a.output.mkdir(parents=True,mode=0o700)
+ archive=a.output/'legacy-baseline';archive.mkdir(mode=0o700)
+ for name,path in baselines.items():shutil.copyfile(path,archive/name);(archive/name).chmod(0o600)
  for name,row in manifest.items():
-  folder=a.output/'backend' if name=='handler.ts' else a.output;folder.mkdir(exist_ok=True)
+  folder=a.output/'backend' if name.endswith('.ts') else a.output;folder.mkdir(exist_ok=True)
   target=folder/name
   if name in sources:shutil.copyfile(sources[name],target)
   command=['patch','--batch','--fuzz=0','-s']+([str(target)] if name in sources else ['-p0'])+['-i',str(here/row['patch'])]
@@ -40,6 +50,7 @@ def main():
  for source in (a.baseline/'supabase/functions/ted-board').glob('*.ts'):
   if source.name!='handler.ts':shutil.copyfile(source,a.output/'backend'/source.name)
  shutil.copyfile(here.parent/'backend-integration/reconciliation.ts',a.output/'backend/reconciliation.ts')
+ shutil.copyfile(a.output/'legacy-baseline/handler.ts',a.output/'backend/legacy-handler-baseline.ts')
  print('private candidate reconstructed and checksums verified; nothing installed')
 
 if __name__=='__main__':main()

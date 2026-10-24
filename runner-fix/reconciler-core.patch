@@ -1,20 +1,23 @@
 --- /dev/null
 +++ reconciler.py
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,250 @@
 +"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
 +import hashlib
 +import json
++import math
 +import re
 +from datetime import datetime, timezone
 +
 +RETRY_LIMIT=2
 +LEASE_SECONDS=150
++MISSED_RENEWALS=3
++LIFETIME_DISPATCH_LIMIT=3
 +RESERVED={'spend_money','send_email','contracts','legal','pricing','database_write','approve_design','your_words','his_copy'}
 +TERMINAL={'done','killed','closed','verified'}
 +
 +
 +def stamp(value):
-+ if isinstance(value,(int,float)) and not isinstance(value,bool):return float(value)
++ if isinstance(value,(int,float)) and not isinstance(value,bool):return float(value) if math.isfinite(value) and -62135596800<=value<=253402300799 else 0
 + if not isinstance(value,str):return 0
 + try:return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
 + except (ValueError,TypeError,OverflowError):return 0
@@ -93,13 +96,18 @@
 +  aid=digest(kind,entity,generation)
 +  if aid not in completed:actions.append(dict(id=aid,kind=kind,entity=entity,payload=payload or {}))
 + def item(key,kind,cid,owner,start,due,stage='work',status='open',priority=2,summary='',expected=None):
++  start=min(now,start)
 +  row=dict(id=key,kind=kind,card_id=cid,owner=owner,action_started_at=iso(start),next_action_due=iso(due),stage=stage,status=status,priority=priority,summary=summary[:200])
 +  if expected:row['expected_updated_at']=expected
 +  items.append(row);return row
 + for source,state in snapshot.get('coverage',{}).items():
 +  if state!='ok':
 +   coverage.append(source);action('coverage_defect',source,state,dict(source=source))
-+ cards={c['id']:c for c in snapshot['cards']}
++ cards={}
++ for index,c in enumerate(snapshot['cards']):
++  if not isinstance(c,dict) or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',str(c.get('id',''))):
++   coverage.append('card_row:'+str(index));continue
++  cards[c['id']]=c
 + sessions=snapshot.get('sessions',{});review_ids=[]
 + for c in sorted(cards.values(),key=priority_key):
 +  cid=c['id'];s=sessions.get(cid,{})
@@ -159,23 +167,25 @@
 +   expires=stamp(s.get('lease_expires_at'))
 +   item('job:'+cid,'job',cid,'worker:'+cid if status=='running' else 'ted',start,expires or start+LEASE_SECONDS,'worker',status='dead_letter' if status=='dead_letter' else 'open',priority=priority_key(c)[0],summary='worker lease' if status=='running' else 'worker '+str(status))
 +   # Result consumption is owned by Store.tick, before planning another retry.
-+   expired=status=='running' and (not expires or expires<=now) and not s.get('result_ready')
++   lease_missing=status=='running' and not s.get('lease_token')
++   if lease_missing:coverage.append('lease_missing:'+cid)
++   expired=status=='running' and not lease_missing and expires<=now and s.get('pid_dead') is True and s.get('activity_quiet') is True and int(s.get('missed_renewals') or 0)>=MISSED_RENEWALS and not s.get('result_ready')
 +   failed=status=='failed' and not s.get('queue')
-+   if s.get('stop_requested'):
++   if s.get('stop_requested') and not lease_missing:
 +    row['owner']='ted';review_ids.append(row)
 +    action('stop_worker',cid,[s.get('turn'),s.get('kill_requested_at') or 'stop'],dict(card_id=cid,expected_turn=s.get('turn'),expected_lease_token=s.get('lease_token')))
 +   elif (expired or failed) and stage!='verified':
 +    unsafe=unsafe_session(s)
 +    attempt=int(s.get('retry_count') or 0)
-+    kind='dead_letter' if unsafe or attempt>=RETRY_LIMIT or s.get('artifact_error') else 'retry'
++    kind='dead_letter' if not s.get('lease_token') or unsafe or attempt>=RETRY_LIMIT or int(s.get('automatic_dispatch_count') or 0)>=LIFETIME_DISPATCH_LIMIT or s.get('artifact_error') else 'retry'
 +    payload=dict(card_id=cid,expected_turn=s.get('turn'),expected_lease_token=s.get('lease_token'),attempt=attempt+1,retry_at=iso(now+backoff(cid,attempt+1)))
 +    action(kind,cid,[s.get('turn'),attempt],payload)
 +    row['owner']='ted'
 +    if kind=='dead_letter':row['status']='dead_letter';review_ids.append(row)
 +   elif status=='dead_letter':
 +    row['owner']='ted';row['status']='dead_letter';review_ids.append(row)
-+  elif c.get('section') in ('up_next','ted_doing') and owner=='ted' and not review and not has_chain:
-+   action('dispatch',cid,c.get('updated_at'),dict(card_id=cid))
++  elif c.get('section') in ('up_next','ted_doing') and owner=='ted' and not review and not has_chain and not s.get('turn') and not s.get('started_at') and not s.get('queue') and not s.get('automatic_dispatched'):
++   action('dispatch',cid,s.get('first_enqueued_at') or c.get('created_at') or 'initial',dict(card_id=cid))
 + for a in snapshot.get('approvals',[]):
 +  if a.get('status') in ('done','failed','superseded','rejected'):continue
 +  cid=a.get('card_id');c=cards.get(cid,{})
@@ -214,7 +224,7 @@
 +   action('create_build',key,sorted(m['id'] for m in approved),dict(card_id=build_id,project=project,batch=batch,mockup_ids=[m['id'] for m in approved]))
 +  if len(linked)>1:action('ambiguous_link',key,'ambiguous',dict(project=project))
 + for job in snapshot.get('external_jobs',[]):
-+  jid=str(job.get('id','unknown'));start=stamp(job.get('started_at')) or stamp(job.get('last_activity')) or now
++  jid=digest('external-job',job.get('id','unknown'));start=stamp(job.get('started_at')) or stamp(job.get('last_activity')) or now
 +  cid=job.get('card_id') if job.get('card_id') in cards else None
 +  item('external-job:'+jid,'job',cid,'ted',start,start+2*3600,'unmanaged_worker',summary='worker outside managed session store requires ted adoption')
 + for old in snapshot.get('retained_items',[]):
@@ -237,7 +247,7 @@
 + for row in items:
 +  if row['owner']=='ted' and now>=stamp(row['next_action_due']):review_ids.append(row)
 + by_work={}
-+ for row in sorted(review_ids,key=lambda x:(stamp(x['action_started_at']),x['priority'],x['id'])):
++ for row in sorted((x for x in review_ids if x.get('owner')=='ted'),key=lambda x:(stamp(x['action_started_at']),x['priority'],x['id'])):
 +  by_work.setdefault(row.get('card_id') or row['id'],row)
 + by_id={x['id']:x for x in by_work.values()}
 + return dict(generated_at=iso(now),items=items,actions=actions,coverage_defects=coverage,ted_queue=[x['id'] for x in sorted(by_id.values(),key=lambda x:(stamp(x['action_started_at']),x['priority'],x['id']))],banner=bool(coverage) or any(now-stamp(x['action_started_at'])>=12*3600 and now>=stamp(x['next_action_due']) for x in items))

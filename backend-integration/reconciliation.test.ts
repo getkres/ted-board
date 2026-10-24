@@ -7,17 +7,18 @@ const packet=()=>({generated_at:'2026-10-23T20:00:00Z',items:[{...item}],banner:
 test('accepts bounded typed ledger fields and strips the authentication envelope',()=>{
  assert.deepEqual(validateReconciliationPublish({...packet(),action:'reconcile_publish',key:'private-auth'},now),packet());
 });
-test('rejects invalid owners, unguarded card metadata, impossible dates, unknown fields, and duplicate identities',()=>{
+test('quarantines invalid rows and rejects invalid snapshot envelopes',()=>{
  for(const change of [{owner:''},{owner:'worker:'},{owner:'browser'},{next_action_due:null},{next_action_due:'2026-02-30T00:00:00Z'},{expected_updated_at:undefined},{priority:3},{secret:'private'},{status:'closed'}]){
-  assert.throws(()=>validateReconciliationPublish({...packet(),items:[{...item,...change}]},now));
+  const result=validateReconciliationPublish({...packet(),items:[{...item,...change}]},now);
+  assert.deepEqual(result.items,[]);assert.ok(result.coverage_defects?.includes('item_row:0'));
  }
- assert.throws(()=>validateReconciliationPublish({...packet(),items:[item,item]},now));
+ assert.equal(validateReconciliationPublish({...packet(),items:[item,item]},now).items.length,1);
  assert.throws(()=>validateReconciliationPublish({...packet(),generated_at:'2026-10-23T20:06:00Z'},now));
- assert.throws(()=>validateReconciliationPublish({...packet(),items:[{...item,action_started_at:'2026-10-23T20:01:00Z'}]},now));
+ assert.deepEqual(validateReconciliationPublish({...packet(),items:[{...item,action_started_at:'2026-10-23T20:01:00Z'}]},now).items,[]);
 });
 test('queue references only distinct Ted-owned published entities',()=>{
- for(const ted_queue of [['missing'],['card:c-example','card:c-example']])assert.throws(()=>validateReconciliationPublish({...packet(),ted_queue},now));
- assert.throws(()=>validateReconciliationPublish({...packet(),items:[{...item,owner:'sebastian'}]},now));
+ for(const ted_queue of [['missing'],['card:c-example','card:c-example']])assert.ok(validateReconciliationPublish({...packet(),ted_queue},now).coverage_defects?.some(x=>x.startsWith('queue_row:')));
+ assert.deepEqual(validateReconciliationPublish({...packet(),items:[{...item,owner:'sebastian'}]},now).ted_queue,[]);
 });
 test('links from non-card items do not require metadata mutation guards',()=>{
  const {expected_updated_at,...job}={...item,id:'job:j1',kind:'job',owner:'worker:j1'};
@@ -72,6 +73,7 @@ test('only workers can route an existing Needs you card to Ted with a timestamp 
 // Set RECONCILIATION_HANDLER_SOURCE to the reconstructed candidate to exercise integration.
 const handlerSource=process.env.RECONCILIATION_HANDLER_SOURCE;
 test('private handler preserves Jobs controls and restricts reconciliation writes to the distinct worker key',{skip:!handlerSource},async()=>{
+ const prior=process.env.TED_RECONCILER_ENABLED;process.env.TED_RECONCILER_ENABLED='true';
  const {pathToFileURL}=await import('node:url');
  const {createHandler}=await import(pathToFileURL(handlerSource!).href);
  const rpcCalls:string[]=[];
@@ -94,6 +96,7 @@ test('private handler preserves Jobs controls and restricts reconciliation write
  assert.equal(route.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_route_ted'));
  const closed=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_close_verified',key:'worker-test',card_id:'c-example',expected_updated_at:item.expected_updated_at})}));
  assert.equal(closed.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_close_verified'));
+ if(prior===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=prior;
 });
 test('degraded snapshots retain explicit bounded coverage identifiers through publish and read',async()=>{
  const degraded={...packet(),coverage_defects:['mockups','github:read']};
@@ -113,4 +116,35 @@ test('verified closure requires worker credentials, a source guard, and a config
  const configured={...missing,closeVerified:async(value:unknown)=>{request=value;return {ok:true}}};
  assert.equal((await handleReconciliationAction({method:'POST',principal:'worker',body},configured,now))?.status,200);
  assert.deepEqual(request,{card_id:'c-example',expected_updated_at:item.expected_updated_at});
+});
+
+test('quarantines one malformed item and invalid queue entries without losing valid work',()=>{
+ const worker={...item,id:'job:active',kind:'job',owner:'worker:c-example'};
+ const bad={...item,id:'unsafe id?',owner:'untrusted',secret:'do-not-echo-this-row'};
+ const result=validateReconciliationPublish({...packet(),items:[item,bad,worker],ted_queue:[item.id,worker.id,'missing']},now);
+ assert.deepEqual(result.items.map(x=>x.id),[item.id,worker.id]);
+ assert.deepEqual(result.ted_queue,[item.id]);
+ assert.ok(result.coverage_defects?.includes('item_row:1'));
+ assert.ok(result.coverage_defects?.includes('queue_row:1'));
+ assert.ok(!JSON.stringify(result).includes('do-not-echo-this-row'));
+ assert.equal(result.banner,true);
+});
+
+test('flag-off handler accepts empty or equal key configuration and preserves baseline responses',{skip:!handlerSource},async()=>{
+ const before=process.env.TED_RECONCILER_ENABLED;process.env.TED_RECONCILER_ENABLED='false';
+ try {
+  const {pathToFileURL}=await import('node:url');
+  const {createHandler}=await import(pathToFileURL(handlerSource!).href);
+  const baselineURL=new URL('./legacy-handler-baseline.ts',pathToFileURL(handlerSource!));
+  const legacy=await import(baselineURL.href);
+  const db={from:()=>{throw Error('no read expected')}};
+  for(const [page,worker] of [['',''],['same','same']]){
+   const current=createHandler(db,page,worker,{enabled:false,message:'fixture'});
+   const previous=legacy.createHandler(db,page,worker,{enabled:false,message:'fixture'});
+   for(const request of [new Request('https://fixture.invalid',{method:'OPTIONS'}),new Request('https://fixture.invalid/?key=wrong')]){
+    const a=await current(request.clone()),b=await previous(request.clone());
+    assert.equal(a.status,b.status);assert.equal(await a.text(),await b.text());
+   }
+  }
+ }finally{if(before===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=before;}
 });

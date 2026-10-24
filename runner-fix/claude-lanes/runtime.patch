@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/claude_lanes.py
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,183 @@
 +"""Account-affine Claude lanes. Never read, copy, or exchange credentials."""
 +import json
 +import math
@@ -12,8 +12,7 @@
 +
 +LANES = {'main': (1, '.claude'), 'design': (2, '.claude-acct2'), 'research': (3, '.claude-acct3')}
 +DESIGN_TYPES = {'design', 'mockup', 'art', 'design_review'}
-+RESEARCH_TYPES = {'research', 'analysis', 'review_gate', 'design_review'}
-+JOB_TYPES = DESIGN_TYPES | RESEARCH_TYPES | {'interactive', 'general', 'implementation'}
++JOB_TYPES = DESIGN_TYPES | {'research', 'analysis', 'review_gate', 'interactive'}
 +COUNTERS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
 +
 +
@@ -46,11 +45,9 @@
 +        return value
 +    # Existing callers have titles, but do not all have structured job metadata.
 +    title = card.get('title', '').lower()
-+    if re.search(r'\b(?:review|gate)\b', title):
-+        return 'review_gate'
 +    if re.search(r'\b(?:design|mockups?|art|visuals?|illustration)\b', title):
 +        return 'design'
-+    return 'research' if re.search(r'\b(?:research|analysis|analyze)\b', title) else 'general'
++    return 'research'
 +
 +
 +def environment(session, source):
@@ -69,60 +66,15 @@
 +    return env
 +
 +
-+def verify_account(lane, directory, claude, cwd):
-+    if lane != 'main':
-+        expected = Path.home() / LANES[lane][1]
-+        if Path(directory) != expected or expected.is_symlink() or not expected.is_dir() or expected.resolve() == (Path.home() / '.claude').resolve():
-+            raise Unavailable('waiting for separate claude account setup')
-+    candidate = dict(active_claude_config_dir=directory, active_claude_managed=True)
-+    try:
-+        result = subprocess.run([claude, 'auth', 'status', '--json'], env=environment(candidate, os.environ),
-+                                cwd=cwd, capture_output=True, text=True, timeout=10)
-+        auth = json.loads(result.stdout)
-+        if result.returncode or not isinstance(auth, dict) or auth.get('loggedIn') is not True or auth.get('authMethod') != 'claude.ai' or auth.get('subscriptionType') != 'max' or Path(auth.get('configDirectory', '')).resolve() != Path(directory).resolve():
-+            raise ValueError()
-+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-+        raise Unavailable('waiting for verified claude max login in the ' + lane + ' lane') from None
-+
-+
-+def topology(claude, cwd):
-+    result = dict(enabled=False, account2_ready=False, account3_ready=False, errors={})
-+    try:
-+        result['enabled'] = config()['enabled']
-+    except Unavailable as exc:
-+        result['error'] = str(exc)
-+        return result
-+    if result['enabled']:
-+        for lane, key in (('design', 'account2_ready'), ('research', 'account3_ready')):
-+            if lane == 'research' and not result['account2_ready']:
-+                break
-+            try:
-+                verify_account(lane, str(Path.home() / LANES[lane][1]), claude, cwd)
-+                result[key] = True
-+            except Unavailable as exc:
-+                result['errors'][lane] = str(exc)
-+    return result
-+
-+
-+def execution_engine(session, turn=None):
-+    if (turn and turn.get('veto_proposal_id')) or session.get('active_veto_revision') is not None:
-+        return None
-+    if (turn and turn['kind'] == 'review') or (turn is None and session.get('reviewing')):
-+        return 'claude'
-+    return session.get('engine')
-+
-+
-+def prepare(session, review, data, claude, layout=None):
-+    cfg = layout if layout is not None else topology(claude, session['cwd'])
-+    if cfg.get('error'):
-+        raise Unavailable(cfg['error'])
++def prepare(session, review, data, claude):
++    cfg = config()
 +    key = 'review_claude' if review else 'claude'
 +    lane = session.get(key + '_lane')
 +    directory = session.get(key + '_config_dir')
 +    if lane is None:
 +        legacy = session.get('session_id') and not review
-+        kind = session.get('job_type', 'general')
-+        lane = 'main' if legacy or not cfg['enabled'] else ('research' if cfg['account3_ready'] and (review or kind in RESEARCH_TYPES) else 'design')
++        kind = session.get('job_type', 'research')
++        lane = 'main' if legacy or not cfg['enabled'] or kind == 'interactive' else ('design' if kind in DESIGN_TYPES else 'research')
 +        directory = str(Path.home() / LANES[lane][1])
 +        if lane == 'main' and not cfg['enabled']:
 +            directory = os.environ.get('CLAUDE_CONFIG_DIR', directory)
@@ -131,14 +83,25 @@
 +    if lane != 'main' and not cfg['enabled']:
 +        raise Unavailable('waiting for claude lanes to be enabled')
 +    if lane != 'main':
-+        if not cfg['account2_ready'] or (lane == 'research' and not cfg['account3_ready']):
-+            raise Unavailable(cfg['errors'].get(lane, 'waiting for separate claude account setup'))
++        expected = Path.home() / LANES[lane][1]
++        if Path(directory) != expected or expected.is_symlink() or not expected.is_dir() or expected.resolve() == (Path.home() / '.claude').resolve():
++            raise Unavailable('waiting for separate claude account setup')
++        for other in data['sessions'].values():
++            if other is not session and other.get('status') == 'running' and other.get('active_claude_lane') == lane:
++                raise Unavailable('waiting for the ' + lane + ' lane to finish its current job')
 +    state = data.get('claude_lanes', {}).get(lane, {})
 +    if number(state.get('resets_at')) and state['resets_at'] > time.time():
 +        raise Unavailable('waiting for the ' + lane + ' lane usage limit to reset')
 +    candidate = dict(session, active_claude_lane=lane, active_claude_config_dir=directory, active_claude_managed=cfg['enabled'] or lane != 'main')
 +    if candidate['active_claude_managed']:
-+        verify_account(lane, directory, claude, session['cwd'])
++        try:
++            result = subprocess.run([claude, 'auth', 'status', '--json'], env=environment(candidate, os.environ),
++                                    cwd=session['cwd'], capture_output=True, text=True, timeout=10)
++            auth = json.loads(result.stdout)
++            if result.returncode or auth.get('loggedIn') is not True or auth.get('authMethod') != 'claude.ai' or auth.get('subscriptionType') != 'max' or Path(auth.get('configDirectory', '')).resolve() != Path(directory).resolve():
++                raise ValueError()
++        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
++            raise Unavailable('waiting for verified claude max login in the ' + lane + ' lane') from None
 +    session.update({key + '_lane': lane, key + '_config_dir': directory,
 +                    'active_claude_lane': lane, 'active_claude_config_dir': directory,
 +                    'active_claude_managed': candidate['active_claude_managed']})
@@ -209,216 +172,51 @@
 +        enabled = False
 +        config_error = True
 +    jobs = []
-+    layout = data.get('claude_lane_topology', {})
 +    for lane, (account, _) in LANES.items():
 +        state = data.get('claude_lanes', {}).get(lane, {})
 +        limited = number(state.get('resets_at')) and state['resets_at'] > time.time()
 +        status = 'configuration needed' if config_error else 'disabled' if not enabled else 'limited' if limited else 'reserved for ted and interactive work' if lane == 'main' else 'not yet observed'
 +        if enabled and not limited and state.get('observed_at') and lane != 'main':
 +            status = 'last observed: ' + state.get('limit_status', 'no limit signal')
-+        if enabled and not config_error:
-+            if lane == 'design' and not layout.get('account2_ready'):
-+                status = 'waiting for account 2 login verification'
-+            if lane == 'research' and not layout.get('account3_ready'):
-+                status = 'not configured; new research and review use account 2'
-+        role = 'all_managed' if lane == 'design' and not layout.get('account3_ready') else 'design_workers' if lane == 'design' else 'research_review' if lane == 'research' else 'interactive'
 +        safe_usage = {key: state[key] for key in COUNTERS if number(state.get(key))}
 +        safe_usage.update({key: state[key] for key in ('observed_at', 'resets_at') if number(state.get(key))})
 +        jobs.append(dict(id='claude-lane-' + lane, card_id=None, title='Claude account ' + str(account) + ': ' + lane,
 +                         engine='claude', status='idle', pid=None, identity='', last_line=status,
-+                         lane_summary=True, lane_role=role, lane_usage=safe_usage))
++                         lane_summary=True, lane_usage=safe_usage))
 +    return jobs
---- /dev/null
-+++ b/runner_admission.py
-@@ -0,0 +1,136 @@
-+"""Resource admission for the mini. No provider throughput assumptions are used."""
-+from datetime import datetime
-+import json
-+import math
-+import os
-+from pathlib import Path
-+import re
-+import subprocess
-+
-+GIB = 1024 ** 3
-+
-+
-+def reconciler_enabled(config_path=None):
-+    if os.environ.get('TED_RECONCILER_ENABLED', '').lower() == 'true':
-+        return True
-+    path = Path(config_path) if config_path is not None else Path(__file__).resolve().parent / 'jobs/reconciler-config.json'
-+    try:
-+        value = json.loads(path.read_text())
-+    except FileNotFoundError:
-+        return False
-+    except (OSError, ValueError):
-+        raise RuntimeError('reconciler config is unreadable or invalid') from None
-+    if not isinstance(value, dict) or not isinstance(value.get('enabled'), bool):
-+        raise RuntimeError('reconciler config requires a boolean enabled flag')
-+    return value['enabled']
-+
-+
-+CAPACITY_PATH = Path(__file__).resolve().parent / 'capacity.json'
-+
-+
-+def load_capacity(path=None):
-+    try:
-+        path = Path(path) if path is not None else CAPACITY_PATH
-+        if path.is_symlink():
-+            raise ValueError()
-+        value = json.loads(path.read_text())
-+        for key in ('total_workers', 'urgent_reserved'):
-+            if type(value[key]) is not int or value[key] < 0:
-+                raise ValueError()
-+        if value['total_workers'] < 1 or value['urgent_reserved'] > value['total_workers']:
-+            raise ValueError()
-+        for key in ('load_per_cpu', 'minimum_available_gib'):
-+            if type(value[key]) not in (int, float) or not math.isfinite(value[key]) or value[key] <= 0:
-+                raise ValueError()
-+        for key in ('engines', 'account2_engines'):
-+            if set(value[key]) != {'claude', 'sonnet'} or any(type(v) is not int or v < 1 for v in value[key].values()):
-+                raise ValueError()
-+        if type(value['review_exempt']) is not bool:
-+            raise ValueError()
-+        return value
-+    except (OSError, ValueError, KeyError, TypeError):
-+        raise RuntimeError('capacity config is missing or invalid') from None
-+
-+
-+def stamp(value):
-+    try:
-+        result = float(value) if isinstance(value, (int, float)) else datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
-+        return result if math.isfinite(result) else 0
-+    except (ValueError, TypeError, OverflowError):
-+        return 0
-+
-+
-+def priority_key(session):
-+    metadata = session.get('metadata') if isinstance(session.get('metadata'), dict) else {}
-+    priority = session.get('priority_class', metadata.get('priority_class'))
-+    explicit = session.get('explicit_ask', metadata.get('explicit_ask'))
-+    rank = 0 if priority == 'urgent' or explicit is True else 1 if priority in ('launch', 'revenue', 'client_revenue') else 2
-+    age = stamp(session.get('action_started_at') or session.get('created_at') or session.get('first_enqueued_at'))
-+    return rank, age, str(session.get('card_id', session.get('id', '')))
-+
-+
-+def available_memory():
-+    """Conservative reclaimable bytes from vm_stat, excluding overlapping purgeable pages."""
-+    try:
-+        result = subprocess.run(['/usr/bin/vm_stat'], capture_output=True, text=True, timeout=5)
-+        if result.returncode != 0:
-+            return None
-+        header = re.search(r'page size of (\d+) bytes', result.stdout)
-+        if not header:
-+            return None
-+        pages = {}
-+        for name in ('free', 'inactive', 'speculative'):
-+            match = re.search(r'^Pages ' + name + r':\s+(\d+)\.', result.stdout, re.M)
-+            if not match:
-+                return None
-+            pages[name] = int(match.group(1))
-+        return sum(pages.values()) * int(header.group(1))
-+    except (OSError, ValueError, subprocess.TimeoutExpired):
-+        return None
-+
-+
-+def admission_state():
-+    try:
-+        capacity = load_capacity()
-+        cpus = os.cpu_count()
-+        load = os.getloadavg()[0]
-+        available = available_memory()
-+        if not cpus or not math.isfinite(load) or load < 0 or available is None:
-+            return dict(cap=0, reason='host observation unavailable')
-+        if available < capacity['minimum_available_gib'] * GIB:
-+            return dict(cap=0, reason='available memory below configured minimum')
-+        if load > capacity['load_per_cpu'] * cpus:
-+            return dict(cap=0, reason='host load above admission ceiling')
-+        return dict(cap=capacity['total_workers'], reason='within host budget', capacity=capacity)
-+    except (OSError, ValueError, RuntimeError):
-+        return dict(cap=0, reason='host or capacity observation unavailable')
-+
-+
-+def effective_engine(session, turn=None):
-+    return 'claude' if session.get('reviewing') or (turn or {}).get('kind') == 'review' else session.get('engine', 'codex')
-+
-+
-+def is_review(session, turn=None):
-+    return bool(session.get('reviewing') or (turn or {}).get('kind') == 'review')
-+
-+
-+def can_admit(session, turn, running, cap, capacity=None, account2_ready=False, reserve=True):
-+    try:
-+        capacity = capacity or load_capacity()
-+    except RuntimeError:
-+        return False
-+    cap = min(cap, capacity['total_workers'])
-+    if cap <= 0 or len(running) >= cap:
-+        return False
-+    urgent = priority_key(session)[0] == 0
-+    ordinary = [s for s in running if priority_key(s)[0] != 0]
-+    if reserve and not urgent and len(ordinary) >= max(0, cap - capacity['urgent_reserved']):
-+        return False
-+    if capacity['review_exempt'] and is_review(session, turn):
-+        return True
-+    engine = effective_engine(session, turn)
-+    caps = capacity['account2_engines'] if account2_ready else capacity['engines']
-+    if engine not in caps:
-+        return True
-+    peers = [s for s in running if effective_engine(s) == engine and not (capacity['review_exempt'] and is_review(s))]
-+    return len(peers) < caps[engine]
---- /dev/null
-+++ b/capacity.json
-@@ -0,0 +1,15 @@
-+{
-+  "total_workers": 64,
-+  "load_per_cpu": 2,
-+  "minimum_available_gib": 8,
-+  "urgent_reserved": 2,
-+  "engines": {
-+    "claude": 2,
-+    "sonnet": 8
-+  },
-+  "account2_engines": {
-+    "claude": 4,
-+    "sonnet": 16
-+  },
-+  "review_exempt": true
-+}
 --- a/sessions.py
 +++ b/sessions.py
-@@ -11,6 +11,8 @@
+@@ -11,6 +11,7 @@
  import sys
  import time
  import uuid
 +import claude_lanes as lanes
-+from runner_admission import admission_state, can_admit
- from board_client import BoardConflict, BoardGone, call
+ from board_client import call
  from live_status import instructions, publish_live
 
-@@ -61,10 +63,10 @@
+@@ -60,10 +61,11 @@
 
  def engine_command(s,prompt,prefix,review=False):
   if review:
 -  return [CLAUDE,'-p','--model','opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',s['review_context'],prompt]
 +  return [CLAUDE,'-p','--model','opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',s['review_context']]+(['--resume',s['review_session_id']] if s.get('review_session_id') else [])+[prompt]
   context=RULES+'\n'+instructions(s['card_id'])+'\nCard brief:\n'+s['brief']
-  if s['engine'] in ('claude','sonnet'):
--  cmd=[CLAUDE,'-p']+(['--model','sonnet'] if s['engine']=='sonnet' else [])+['--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',context]
-+  cmd=[CLAUDE,'-p','--model','sonnet' if s['engine']=='sonnet' else 'opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',context]
+  if s['engine']=='claude':
+   cmd=[CLAUDE,'-p','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',context]
++  if s.get('job_type') in lanes.DESIGN_TYPES:cmd+=['--model','opus']
    if s.get('session_id'):cmd+=['--resume',s['session_id']]
    return cmd+[prompt]
   common=['--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','-m','gpt-6.1-sol','-o',str(prefix)+'.last.txt']
-@@ -123,7 +125,7 @@
+@@ -122,7 +124,7 @@
     else:atomic(self.path,data)
   def read(self):
    with self.locked() as data:return json.loads(json.dumps(data))
 - def enqueue(self,card,message,receipt_id,engine='claude',brief=''):
 + def enqueue(self,card,message,receipt_id,engine='codex',brief='',job_type=None):
-   if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude','sonnet'):raise ValueError('Invalid card or engine')
+   if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude'):raise ValueError('Invalid card or engine')
    veto_id=str(receipt_id)[5:] if str(receipt_id).startswith('veto-') else None
    if veto_id and (isinstance(card.get('revision'),bool) or not isinstance(card.get('revision'),int) or card['revision']<1):
-@@ -136,6 +138,7 @@
+@@ -135,6 +137,7 @@
      brief='Card: '+card['title']+'\nProject: '+card.get('project','Ted ops')+'\n'+card.get('body','')+'\nTask: '+brief
      (d/'BRIEF.md').write_text(RULES+'\n'+instructions(cid)+'\n'+brief);(d/'BRIEF.md').chmod(0o600)
      s=dict(id='card-'+cid,card_id=cid,engine=engine,session_id=None,cwd=str(d.resolve()),status='idle',last_line='Queued',started_at=None,last_activity=time.time(),pid=None,identity='',queue=[],title=card['title'],brief=brief or card.get('body',''),thread='',seen_artifacts=[])
@@ -426,7 +224,7 @@
      data['sessions'][cid]=s
     s.update(title=card['title'],thread='\n'.join(m.get('who','')+': '+m.get('text','') for m in card.get('messages',[]))[-30000:])
     if s['status']=='waiting_approval':
-@@ -153,6 +156,7 @@
+@@ -152,6 +155,7 @@
    line='approval artifact is unsafe or over 60 kb; fix it, then reply to retry'
    already_reported=s.get('artifact_error')==line
    s.update(status='failed',queue=[],last_line=line,artifact_error=line,last_activity=time.time())
@@ -434,7 +232,7 @@
    for approval in data['approvals'].values():
     if approval['card_id']==s['card_id'] and approval['status'] in ('pending','approved','reviewing'):
      approval.update(status='superseded',reason='approval artifact failed safety checks',sync_status=True)
-@@ -180,7 +184,17 @@
+@@ -179,7 +183,17 @@
          s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
       s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);continue
      r=json.loads(result.read_text()) if result.exists() else dict(ok=False,text='Worker stopped without a final result. Reply to retry.')
@@ -452,7 +250,7 @@
      veto_revision=s.pop('active_veto_revision',None)
      if veto_revision is not None:
       outcome=r.get('veto_outcome')
-@@ -193,50 +207,62 @@
+@@ -192,6 +206,7 @@
       a['status']='done' if r['ok'] and r.get('text','').strip().splitlines()[-1:] == ['APPLY_OK'] else 'failed'
       a['reason']='' if a['status']=='done' else review_reason(r.get('text',''))
       a['sync_status']=True
@@ -460,21 +258,7 @@
      if s.get('kill_requested_at'):
       s.update(status='failed',last_line='Stopped on request');s.pop('kill_requested_at',None)
      if s['queue']:s['status']='queued'
--   running=sum(s['status']=='running' for s in data['sessions'].values())
--   claude_running=sum(s['status']=='running' and s.get('engine')=='claude' for s in data['sessions'].values())
--   sonnet_running=sum(s['status']=='running' and s.get('engine')=='sonnet' for s in data['sessions'].values())
--   overloaded=os.getloadavg()[0]>2*(os.cpu_count() or 8)
-+   host=admission_state()
-+   layout=lanes.topology(CLAUDE,str(self.root))
-+   data['claude_lane_topology']={key:layout[key] for key in ('enabled','account2_ready','account3_ready')}
-    for s in data['sessions'].values():
--    if running>=64 or overloaded:break
-     if s['status']=='running' or not s['queue']:continue
--    if s.get('engine')=='claude' and s['queue'][0]['kind']!='review' and claude_running>=2:continue
--    if s.get('engine')=='sonnet' and sonnet_running>=8:continue
-     turn=s['queue'][0]
-+    running=[other for other in data['sessions'].values() if other['status']=='running']
-+    if not can_admit(s,turn,running,host['cap'],host.get('capacity'),account2_ready=layout['enabled'] and layout['account2_ready'],reserve=False):continue
+@@ -203,22 +218,31 @@
      if s['status']=='waiting_approval' and turn['kind']!='review':continue
      if turn['kind']=='review':
       a=data['approvals'][turn['approval_id']]
@@ -489,12 +273,10 @@
       if not current or current['digest']!=a['digest']:
 -      a.update(status='superseded',reason='approved artifact changed, prepare a fresh approval',sync_status=True);s['queue'].pop(0);s['status']='failed';self._out(data,s,'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.','changed-'+a['id']);continue
 +      a.update(status='superseded',reason='approved artifact changed, prepare a fresh approval',sync_status=True);s['queue'].pop(0);s['status']='failed';lanes.clear_review(s);self._out(data,s,'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.','changed-'+a['id']);continue
-+    if not turn.get('veto_proposal_id') and (s['engine'] in ('claude','sonnet') or turn['kind']=='review'):
-+     try:lanes.prepare(s,turn['kind']=='review',data,CLAUDE,layout)
++    if not turn.get('veto_proposal_id') and (s['engine']=='claude' or turn['kind']=='review'):
++     try:lanes.prepare(s,turn['kind']=='review',data,CLAUDE)
 +     except lanes.Unavailable as exc:
 +      s.update(status='queued',last_line=str(exc));continue
-+     main=[other for other in running if other.get('active_claude_lane','main')=='main']
-+     if s['active_claude_lane']=='main' and not can_admit(s,turn,main,host['cap'],host.get('capacity'),reserve=False):continue
 +    if turn['kind']=='review':
       s['reviewing']=a['id'];a.update(status='reviewing',sync_status=True)
       s['review_context']='You are the fresh Ted approval reviewer. Sebastian explicitly approved ONLY the exact artifact below. Re-read the actual files in cwd and confirm they match. For DB changes require a usable backup, rollback, and explicit identity guards in apply.sql. Refuse missing or unsafe safeguards. For email/spend require exact recipient, text, amount, and executable instructions; refuse ambiguity. Execute only the approved action. Never broaden the scope, reveal secrets, or send unrelated messages. End with a line exactly APPLY_OK only after verified success, otherwise REVIEW_BLOCKED with the reason. No em dash.\nApproved snapshot:\n'+a['content']
@@ -509,14 +291,11 @@
 +    atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
      env=dict(os.environ,PATH=str(Path.home()/'.local/bin')+':'+str(Path.home()/'.local/node/bin')+':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',DEVELOPER_DIR='/Library/Developer/CommandLineTools')
      env.pop('CLAUDECODE',None)
-+    if not turn.get('veto_proposal_id') and (s['engine'] in ('claude','sonnet') or turn['kind']=='review'):env=lanes.environment(s,env)
++    if not turn.get('veto_proposal_id') and (s['engine']=='claude' or turn['kind']=='review'):env=lanes.environment(s,env)
      try:
       with open(str(prefix)+'.log','a') as log:
        os.chmod(log.name,0o600)
-       p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
--     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=s.get('engine')=='claude';sonnet_running+=s.get('engine')=='sonnet'
-+     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time())
-      line=review_live_line(a['kind']) if turn['kind']=='review' else ('started: '+s['title'].lower().replace(chr(8212),','))[:240]
+@@ -228,9 +252,11 @@
       publish_live(s['card_id'],'running',line,section='ted_doing')
      except OSError:
       s.update(status='failed',pid=None);self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
@@ -529,24 +308,10 @@
   def flush(self):
    with self.locked() as data:
     remaining=[]
-@@ -275,7 +301,9 @@
-        if s:
-         # Do not free a slot while a refusing process is still alive.
-         if killed:s.update(kill_requested_at=time.time(),last_line='Stopping on request',queue=[])
--        elif not alive(pid,expected):s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
-+        elif not alive(pid,expected):
-+         s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
-+         lanes.clear_review(s);s.pop('active_turn',None)
-         for a in data['approvals'].values():
-          if a['card_id']==s['card_id'] and a['status'] in ('pending','approved','reviewing'):a.update(status='failed',reason='job stopped on request',sync_status=True)
-         self._out(data,s,'Job stop requested.' if killed else 'Job is already stopped, or process identity changed.',cmd['id'])
-@@ -312,4 +340,8 @@
+@@ -302,4 +328,5 @@
    data=self.read();jobs=[]
    for s in data['sessions'].values():
     jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})
-+   if s['engine']=='sonnet' or s.get('reviewing'):
-+    jobs[-1]['engine']='claude'
-+    if lanes.execution_engine(s)=='sonnet':jobs[-1]['worker_engine']='sonnet'
 +  jobs+=lanes.summaries(data)
    return jobs,[{k:a[k] for k in ('id','card_id','kind','summary','content','digest')} for a in data['approvals'].values() if a['status']=='pending']
 --- a/session_worker.py
@@ -563,10 +328,10 @@
   try:
    with open(str(prefix)+'.events','w') as out:
     Path(out.name).chmod(0o600)
--   p=subprocess.run(command,cwd=s['cwd'],stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
-+   p=subprocess.run(command,cwd=s['cwd'],env=lanes.environment(s,os.environ),stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
+-   p=subprocess.run(command,cwd=s['cwd'],stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=3*3600)
++   p=subprocess.run(command,cwd=s['cwd'],env=lanes.environment(s,os.environ),stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=3*3600)
    raw=Path(str(prefix)+'.events').read_text();sid=None;text=''
-   if s['engine'] in ('claude','sonnet') or inp.get('review'):
+   if s['engine']=='claude' or inp.get('review'):
 -   payload={}
 +   payload={};events=[]
     for line in raw.splitlines():
@@ -581,7 +346,7 @@
      if event.get('type')=='thread.started':sid=event.get('thread_id')
     last=Path(str(prefix)+'.last.txt');text=last.read_text() if last.exists() else '';ok=p.returncode==0
    result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer. Reply to retry.',session_id=sid)
-+  if s['engine'] in ('claude','sonnet') or inp.get('review'):result['lane_usage']=lanes.observe(events)
-  except subprocess.TimeoutExpired:result=dict(ok=False,text='Worker exceeded the twelve-hour limit.')
++  if s['engine']=='claude' or inp.get('review'):result['lane_usage']=lanes.observe(events)
+  except subprocess.TimeoutExpired:result=dict(ok=False,text='Worker exceeded the three-hour limit. Reply to continue.')
   except Exception as exc:result=dict(ok=False,text='Worker failed: '+type(exc).__name__+'. Reply to retry.')
   atomic(str(prefix)+'.result.json',result)

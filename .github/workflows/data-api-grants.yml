@@ -21,3 +21,4 @@ jobs:
       - run: python3 -m unittest discover -s runner-fix -p 'reconciler_test.py'
       - run: python3 -m unittest discover -s runner-fix -p 'reconciler_runtime_test.py'
       - run: python3 -m unittest discover -s runner-fix -p 'reconciler_packaging_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_review_test.py'
