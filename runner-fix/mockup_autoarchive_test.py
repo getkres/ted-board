@@ -237,6 +237,26 @@ class Policy(unittest.TestCase):
             with self.subTest(newer=newer):
                 self.assertEqual(self.candidates([frame(), newer]), [])
 
+    def test_active_link_blocks_stale_unreviewed_and_needs_work_batches(self):
+        old = (NOW - timedelta(days=10)).isoformat()
+        for verdict in (None, 'needs_work'):
+            for section in ('doing', 'ted_doing', 'up_next', 'needs_you'):
+                for link in ('title', 'explicit', 'reference'):
+                    extra = {'card_id': 'build'} if link == 'explicit' else {}
+                    rows = [frame(batch='Hair v1', verdict=verdict, created_at=old,
+                                  verdict_change=dict(at=old), **extra),
+                            frame('new', batch='Hair v2', created_at=RECENT)]
+                    card = dict(id='build', project='Fictora', section=section,
+                                title='build approved: Hair v1' if link == 'title' else 'Active build',
+                                body='mockup ID: a' if link == 'reference' else None)
+                    self.assertEqual(self.candidates(rows, [card]), [], (verdict, section, link))
+
+    def test_active_cross_project_card_does_not_block_stale_supersession(self):
+        rows = [frame(), frame('new', batch='Home v2', created_at=RECENT)]
+        card = dict(id='build', project='Bookish', section='doing', title='build approved: Home v1',
+                    body='mockup ID: a')
+        self.assertEqual(self.candidates(rows, [card])[0]['reason'], 'stale_superseded')
+
     def test_unversioned_date_round_and_hyphenated_prefixes(self):
         for old, new in [('Home', 'Home v2'), ('Home round 1', 'Home round 2'),
                          ('quote-kit-20261001-a', 'quote-kit-20261002-a'),
@@ -617,6 +637,46 @@ class PersistentOutcomes(unittest.TestCase):
             self.assertEqual(result, [])
             self.assertEqual(state.read_text(), '{invalid')
             self.assertEqual(list(root.iterdir()), [state])
+
+
+class LockContention(unittest.TestCase):
+    def test_busy_lock_times_out_before_transport_or_control_state_change(self):
+        calls = []
+        def transport(*args, **kwargs):
+            calls.append(args)
+            return dict(mockups=[], pins=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp);log = root/'archive.jsonl';state = log.with_suffix('.state.json')
+            state.write_text(json.dumps(dict(heartbeat_at=OLD, batches={})))
+            before = (state.read_bytes(), state.stat().st_mtime_ns)
+            with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), \
+                    patch.object(archive.fcntl, 'flock', side_effect=BlockingIOError()), \
+                    patch('time.monotonic', side_effect=[0.0, 0.0, 1.01]), patch('time.sleep'):
+                with self.assertRaises(TimeoutError):
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda: [],
+                                     log_path=log, now=NOW, heartbeat=True)
+            self.assertEqual(calls, [])
+            self.assertEqual((state.read_bytes(), state.stat().st_mtime_ns), before)
+            self.assertFalse(log.exists())
+
+    def test_transient_lock_contention_retries_then_releases_lock(self):
+        real_flock = archive.fcntl.flock
+        attempts = []
+        def briefly_busy(fd, operation):
+            attempts.append(operation)
+            if len(attempts) == 1:
+                raise BlockingIOError()
+            return real_flock(fd, operation)
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp)/'archive.jsonl'
+            with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), \
+                    patch.object(archive.fcntl, 'flock', side_effect=briefly_busy), patch('time.sleep'):
+                result = archive.run_pass(dry_run=False,
+                    mockup_call=lambda: dict(mockups=[], pins=[]), cards_call=lambda: [], log_path=log, now=NOW)
+            self.assertEqual(result, [])
+            self.assertTrue(all(operation & archive.fcntl.LOCK_NB for operation in attempts))
+            with log.with_suffix('.state.lock').open('a') as lock:
+                real_flock(lock, archive.fcntl.LOCK_EX | archive.fcntl.LOCK_NB)
 
 
 class HeartbeatRate(unittest.TestCase):
