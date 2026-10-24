@@ -24,6 +24,17 @@ if 'TED_RUNTIME_SOURCE' not in os.environ:
                    cwd=ROOT, check=True, capture_output=True)
 
 
+# Reconstruct the exact shared new-file artifact from the steward runtime bundle.
+if 'TED_RUNTIME_SOURCE' not in os.environ:
+    dependency = (HERE / 'inbox-steward/runtime.patch').read_text()
+    shared = dependency[dependency.index('--- /dev/null\n+++ b/board_card_snapshot.py\n'):]
+    subprocess.run(['patch', '-s', '-p1'], input=shared, text=True,
+                   cwd=ROOT, check=True, capture_output=True)
+elif not (ROOT / 'board_card_snapshot.py').is_file():
+    raise SystemExit('Private candidate requires the reviewed board_card_snapshot.py helper.')
+sys.path.insert(0, str(ROOT))
+
+
 def load(name, filename, deps=None):
     spec = importlib.util.spec_from_file_location(name, ROOT / filename)
     module = importlib.util.module_from_spec(spec)
@@ -198,7 +209,7 @@ class Policy(unittest.TestCase):
         for card in (dict(id='x', project='Fictora', section='done', title='build approved: Home v1'),
                      dict(id='x', project='Fictora', section='killed', title='Build', body='mockup ID: a'),
                      dict(id='x', project='Fictora', section='ted_doing', title='Unrelated work'),
-                     dict(id='x', project='Bookish', section='ted_doing', title='build approved: Home v1',
+                     dict(id='x', project='Bookish', section='ted_doing', title='Other work',
                           body='mockup ID: a')):
             self.assertEqual(self.candidates(rows, [card])[0]['reason'], 'all_reviewed')
 
@@ -211,14 +222,39 @@ class Policy(unittest.TestCase):
             card = dict(id='x', project='Fictora', section='done', title='Build', body=body)
             self.assertEqual(self.candidates([frame(verdict='needs_work')], [card]), [])
 
-    def test_missing_active_cross_project_and_fuzzy_links_stay_open(self):
+    def test_missing_active_cross_project_body_and_fuzzy_links_stay_open(self):
         for card in (dict(id='x', project='Fictora', section='up_next', title='build approved: Home v1'),
-                     dict(id='x', project='Bookish', section='done', title='build approved: Home v1'),
+                     dict(id='x', project='Bookish', section='done', title='Other', body='mockup ID: a'),
                      dict(id='x', project='Fictora', section='done', title='Home v1'),
                      dict(id='x', project='Fictora', section='done', title='build approved: Home v10'),
                      dict(id='x', project='Fictora', section='done', title='Other', body='mockup ID: abc')):
             with self.subTest(card=card):
                 self.assertEqual(self.candidates([frame(card_id='missing')], [card]), [])
+
+    def test_authoritative_links_block_active_cards_regardless_of_project(self):
+        for project in ('Fictora', 'Bookish'):
+            for link in ('explicit', 'title', 'batch'):
+                for verdict in (None, 'needs_work', 'approved'):
+                    extra = {'card_id': 'build'} if link == 'explicit' else {}
+                    rows = [frame(verdict=verdict, **extra),
+                            frame('new', batch='Home v2', created_at=RECENT)]
+                    card = dict(id='build', project=project, section='doing',
+                                title='build approved: Home v1' if link == 'title' else 'Other work',
+                                batch='Home v1' if link == 'batch' else None)
+                    self.assertEqual(self.candidates(rows, [card]), [], (project, link, verdict))
+
+    def test_terminal_authoritative_links_match_across_projects(self):
+        for link in ('explicit', 'title'):
+            for section in ('done', 'killed'):
+                card = dict(id='build', project='Bookish', section=section,
+                            title='build approved: Home v1' if link == 'title' else 'Other work',
+                            batch='Home v1' if link == 'batch' else None)
+                result = self.candidates([frame(card_id='build' if link == 'explicit' else None)], [card])
+                self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+
+    def test_terminal_batch_metadata_alone_does_not_archive_unreviewed_frames(self):
+        card = dict(id='build', project='Bookish', section='done', title='Other work', batch='Home v1')
+        self.assertEqual(self.candidates([frame()], [card]), [])
 
     def test_multiple_linked_cards_require_all_to_be_terminal(self):
         cards = [dict(id='done', project='Fictora', section='done', title='build approved: Home v1'),
@@ -251,9 +287,9 @@ class Policy(unittest.TestCase):
                                 body='mockup ID: a' if link == 'reference' else None)
                     self.assertEqual(self.candidates(rows, [card]), [], (verdict, section, link))
 
-    def test_active_cross_project_card_does_not_block_stale_supersession(self):
+    def test_active_cross_project_body_reference_does_not_block_stale_supersession(self):
         rows = [frame(), frame('new', batch='Home v2', created_at=RECENT)]
-        card = dict(id='build', project='Bookish', section='doing', title='build approved: Home v1',
+        card = dict(id='build', project='Bookish', section='doing', title='Other work',
                     body='mockup ID: a')
         self.assertEqual(self.candidates(rows, [card])[0]['reason'], 'stale_superseded')
 
@@ -320,7 +356,7 @@ class Runner(unittest.TestCase):
             log = Path(tmp) / 'archive.jsonl'
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
                 result = archive.run_pass(dry_run=dry_run, mockup_call=transport,
-                    cards_call=lambda: cards or [], log_path=log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=cards or []), log_path=log, now=NOW)
             events = [json.loads(s) for s in log.read_text().splitlines()] if log.exists() else []
         return result, calls, events
 
@@ -421,6 +457,50 @@ class Runner(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_pass(dry_run=False, responder=lambda *args: dict(mockups=[frame(verdict='approved')]))
 
+    def test_invalid_card_envelopes_raise_before_archive_on_initial_read_and_recheck(self):
+        invalid = [None, [], {}, {'ok': True}, {'error': 'unavailable'},
+                   {'cards': [], 'error': None}, {'cards': [], 'pod_pulse_error': True},
+                   {'cards': None}, {'cards': {}}, {'cards': 'invalid'}, {'cards': [None]}]
+        valid_card = dict(id='unrelated', project='Test', section='done', title='Other')
+        invalid += [dict(cards=[valid_card] * size) for size in (500, 501)]
+        for response in invalid:
+            for recheck in (False, True):
+                for dry_run in ((False,) if recheck else (True, False)):
+                    with self.subTest(response_type=type(response).__name__, recheck=recheck,
+                                      dry_run=dry_run), tempfile.TemporaryDirectory() as tmp:
+                        requests = []; mockup_requests = []
+                        def board_call(**payload):
+                            requests.append(payload)
+                            return {'cards': []} if recheck and len(requests) == 1 else response
+                        def mockup_call(action=None, **payload):
+                            mockup_requests.append(action)
+                            return dict(mockups=[frame(verdict='approved')], pins=[])
+                        # The old convenience adapter loses the failed envelope.
+                        deps = dict(board_client=types.SimpleNamespace(call=board_call, cards=lambda: []))
+                        log = Path(tmp) / 'archive.jsonl'
+                        with patch.dict(sys.modules, deps), patch.dict(os.environ,
+                                {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
+                            with self.assertRaises(ValueError):
+                                archive.run_pass(dry_run=dry_run, mockup_call=mockup_call,
+                                                 log_path=log, now=NOW)
+                        self.assertEqual(requests, [{'page': True}] * (2 if recheck else 1))
+                        self.assertNotIn('archive', mockup_requests)
+                        self.assertFalse(log.exists(), 'invalid snapshot reached archive_attempt')
+
+    def test_real_card_get_envelopes_use_unscoped_page_fetch(self):
+        for response in ({'cards': []}, {'cards': [], 'pod_pulse': []},
+                         {'cards': [], 'pod_pulse_error': False}):
+            requests = []
+            def call(**payload):
+                requests.append(payload)
+                return response
+            deps = dict(board_client=types.SimpleNamespace(call=call))
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps):
+                events = archive.run_pass(mockup_call=lambda: dict(mockups=[frame(verdict='approved')], pins=[]),
+                                          log_path=Path(tmp)/'log', now=NOW)
+            self.assertEqual(events[0]['event'], 'would_archive')
+            self.assertEqual(requests, [{'page': True}])
+
     def test_disabled_apply_fails_before_transport_and_heartbeat_does_nothing(self):
         def forbidden(*args, **kwargs):
             self.fail('disabled pass called transport')
@@ -447,7 +527,7 @@ class Runner(unittest.TestCase):
                 calls.append(action)
                 return dict(mockups=[frame()], pins=[])
             result = archive.run_pass(dry_run=False, mockup_call=transport,
-                cards_call=lambda: next(cards), log_path=Path(tmp)/'log', now=NOW)
+                cards_call=lambda **kw: dict(cards=next(cards)), log_path=Path(tmp)/'log', now=NOW)
         self.assertEqual(calls, [None, None])
         self.assertEqual(result[0]['event'], 'skipped_changed')
 
@@ -493,7 +573,7 @@ class Runner(unittest.TestCase):
             bad_log = Path(tmp) / 'directory';bad_log.mkdir()
             with self.assertRaises(OSError):
                 archive.run_pass(dry_run=False, mockup_call=transport,
-                    cards_call=lambda: [], log_path=bad_log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=[]), log_path=bad_log, now=NOW)
         self.assertNotIn('archive', calls)
 
     def test_cli_defaults_to_dry_run(self):
@@ -510,8 +590,8 @@ class Runner(unittest.TestCase):
     def test_cli_reports_invalid_card_body_without_a_type_error(self):
         deps = dict(mockup_client=types.SimpleNamespace(call=lambda: dict(
                         mockups=[frame(verdict='needs_work')], pins=[])),
-                    board_client=types.SimpleNamespace(cards=lambda: [dict(
-                        id='x', project='Fictora', section='done', title='Build', body={'private': 'data'})]))
+                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[dict(
+                        id='x', project='Fictora', section='done', title='Build', body={'private': 'data'})])))
         with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
             result = archive.main(['--dry-run', '--log', str(Path(tmp)/'log.jsonl')])
@@ -533,7 +613,7 @@ class PersistentOutcomes(unittest.TestCase):
                 raise outcome
             return dict(ok=True, archived=len(payload['ids']))
         with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
-            return module.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda: [],
+            return module.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
                                    log_path=log, now=now)
 
     def events(self, log):
@@ -593,7 +673,7 @@ class PersistentOutcomes(unittest.TestCase):
                 return dict(mockups=[], pins=[])
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
                 with self.assertRaises(ValueError):
-                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda: [],
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
                                      log_path=log, now=NOW)
             self.assertEqual(calls, [])
 
@@ -611,7 +691,7 @@ class PersistentOutcomes(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp);log = root / 'archive.jsonl'
                 result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=rows, pins=[]),
-                    cards_call=lambda: [], log_path=log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
                 self.assertEqual(sorted(p.name for p in root.iterdir()), expected_files)
                 self.assertEqual(len(result), len(rows))
 
@@ -622,7 +702,7 @@ class PersistentOutcomes(unittest.TestCase):
             state = log.with_suffix('.state.json');lock = state.with_suffix('.lock')
             before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
             archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
-                             cards_call=lambda: [], log_path=log, now=NOW)
+                             cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
             after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
             self.assertEqual(after, before)
             self.run_pass(log, outcome=RuntimeError(), now=NOW + timedelta(minutes=10))
@@ -633,7 +713,7 @@ class PersistentOutcomes(unittest.TestCase):
             root = Path(tmp);log = root / 'archive.jsonl';state = log.with_suffix('.state.json')
             state.write_text('{invalid')
             result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
-                                      cards_call=lambda: [], log_path=log, now=NOW)
+                                      cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
             self.assertEqual(result, [])
             self.assertEqual(state.read_text(), '{invalid')
             self.assertEqual(list(root.iterdir()), [state])
@@ -653,7 +733,7 @@ class LockContention(unittest.TestCase):
                     patch.object(archive.fcntl, 'flock', side_effect=BlockingIOError()), \
                     patch('time.monotonic', side_effect=[0.0, 0.0, 1.01]), patch('time.sleep'):
                 with self.assertRaises(TimeoutError):
-                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda: [],
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
                                      log_path=log, now=NOW, heartbeat=True)
             self.assertEqual(calls, [])
             self.assertEqual((state.read_bytes(), state.stat().st_mtime_ns), before)
@@ -672,7 +752,7 @@ class LockContention(unittest.TestCase):
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), \
                     patch.object(archive.fcntl, 'flock', side_effect=briefly_busy), patch('time.sleep'):
                 result = archive.run_pass(dry_run=False,
-                    mockup_call=lambda: dict(mockups=[], pins=[]), cards_call=lambda: [], log_path=log, now=NOW)
+                    mockup_call=lambda: dict(mockups=[], pins=[]), cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
             self.assertEqual(result, [])
             self.assertTrue(all(operation & archive.fcntl.LOCK_NB for operation in attempts))
             with log.with_suffix('.state.lock').open('a') as lock:
@@ -682,7 +762,7 @@ class LockContention(unittest.TestCase):
 class HeartbeatRate(unittest.TestCase):
     def run_heartbeat(self, module, log, at, transport):
         deps = dict(mockup_client=types.SimpleNamespace(call=transport),
-                    board_client=types.SimpleNamespace(cards=lambda: []))
+                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[])))
         with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), patch.dict(sys.modules, deps):
             return module.heartbeat_pass(now=at, log_path=log)
 

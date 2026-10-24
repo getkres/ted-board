@@ -1,6 +1,6 @@
 --- /dev/null
 +++ mockup_autoarchive.py
-@@ -0,0 +1,329 @@
+@@ -0,0 +1,331 @@
 +#!/usr/bin/env python3
 +"""Archive reviewed, completed, or stale superseded mockup batches on the mini.
 +
@@ -121,9 +121,10 @@
 +                        total=len(rows), reviewable=len(reviewable), ignored=len(active)-len(reviewable))
 +        explicit = {row.get('card_id') for row in rows if isinstance(row.get('card_id'), str)}
 +        ids = {row['id'] for row in rows}
-+        linked = [card for card in cards if card['project'] == project and (
-+            card['id'] in explicit or card['title'] == 'build approved: ' + batch or
-+            ids.intersection(MOCKUP_LINK.findall(card.get('body') or '')))]
++        linked = [card for card in cards if (
++            card['id'] in explicit or card['title'] == 'build approved: ' + batch
++            or card.get('batch') == batch or (card['project'] == project and
++                ids.intersection(MOCKUP_LINK.findall(card.get('body') or ''))))]
 +        if reviewable and all(_verdict(row) in VERDICTS for row in reviewable):
 +            if any(card['section'] not in ('done', 'killed') for card in linked):
 +                continue
@@ -250,7 +251,8 @@
 +    if mockup_call is None:
 +        from mockup_client import call as mockup_call
 +    if cards_call is None:
-+        from board_client import cards as cards_call
++        from board_client import call as cards_call
++    from board_card_snapshot import fetch_cards
 +    fixed_now = now
 +    now = now or datetime.now(timezone.utc)
 +
@@ -259,7 +261,7 @@
 +        if (not isinstance(snapshot, dict) or not isinstance(snapshot.get('mockups'), list)
 +                or not isinstance(snapshot.get('pins'), list)):
 +            raise ValueError('Invalid mockup response')
-+        return candidates(snapshot['mockups'], cards_call(), at, pins=snapshot['pins'])
++        return candidates(snapshot['mockups'], fetch_cards(call=cards_call), at, pins=snapshot['pins'])
 +
 +    planned = read(now)
 +    if not dry_run:
