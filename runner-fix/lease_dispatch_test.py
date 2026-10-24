@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 SOURCE = Path(os.environ.get('TED_RUNTIME_SOURCE', HERE.parents[1] / 'candidate'))
-sys.path.insert(0, str(HERE))
+sys.path.append(str(SOURCE))
 
 
 def forbidden(*args, **kwargs):
@@ -331,12 +331,32 @@ class LeaseDispatch(unittest.TestCase):
     def test_disabled_mode_keeps_failure_policy_retry(self):
         s = self.running(expiry=time.time() - 1)
         with patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'false'}), patch.object(sessions, 'alive', return_value=False), \
-             patch.object(sessions, 'publish_live', return_value=False):
+             patch.object(sessions, 'publish_live', return_value=False), patch.object(sessions, 'admission_state', return_value=dict(cap=0)):
             self.store.tick(reconcile=True)
         data = self.store.read()
         self.assertEqual(data['sessions']['x']['status'], 'queued')
         self.assertEqual(data['sessions']['x']['queue'][0]['recovery_attempt'], 1)
         self.assertEqual(len(data['outbox']), 1)
+
+    def test_failed_launch_preserves_the_side_effect_recovery_exclusion(self):
+        self.enqueue()
+        with self.store.locked() as data:
+            data['sessions']['x']['queue'][0]['side_effecting'] = True
+        with patch.object(sessions, 'admission_state', return_value=dict(cap=64)), \
+             patch.object(sessions.subprocess, 'Popen', side_effect=OSError):
+            self.store.tick(reconcile=True)
+        saved = self.store.read()['sessions']['x']
+        self.assertEqual(saved['status'], 'failed')
+        self.assertTrue(saved.get('active_turn', {}).get('side_effecting'))
+
+    def test_failed_side_effect_turn_keeps_its_recovery_exclusion(self):
+        s = self.running()
+        with self.store.locked() as data:
+            data['sessions']['x']['active_turn']['side_effecting'] = True
+        self.result(s, ok=False, text='failed after an uncertain effect')
+        self.tick(reconcile=True)
+        saved = self.store.read()['sessions']['x']
+        self.assertTrue(saved.get('active_turn', {}).get('side_effecting'))
 
     def test_enabled_result_failure_leaves_retry_to_reconciler(self):
         s = self.running()
@@ -409,18 +429,53 @@ class LeaseDispatch(unittest.TestCase):
             self.store.tick(reconcile=True)
         return sequence
 
-    def test_priority_dispatch_is_urgent_then_revenue_then_age(self):
+    def test_bounded_dispatch_takes_oldest_first_with_priority_as_tiebreaker(self):
         self.enqueue('ordinary-new', created_at='2026-10-02T00:00:00Z')
         self.enqueue('ordinary-old', created_at='2026-10-01T00:00:00Z')
         self.enqueue('revenue', priority_class='client_revenue', created_at='2026-10-03T00:00:00Z')
         self.enqueue('urgent', priority_class='urgent', created_at='2026-10-04T00:00:00Z')
         self.enqueue('explicit', explicit_ask=True, created_at='2026-10-05T00:00:00Z')
-        self.assertEqual(self.dispatch(), ['urgent', 'explicit', 'revenue', 'ordinary-old', 'ordinary-new'])
+        self.assertEqual(self.dispatch(), ['ordinary-old', 'ordinary-new', 'revenue', 'urgent', 'explicit'])
+
+    def test_managed_capacity_uses_verified_account_two_without_combining_models(self):
+        for engine, count in (('claude', 5), ('sonnet', 17)):
+            for n in range(count):
+                cid = engine + str(n)
+                self.store.enqueue(dict(id=cid, title='Fixture'), 'work', cid, engine=engine)
+        def prepare(session, *args):
+            session['active_claude_lane'] = 'design'
+        with patch.object(sessions.lanes, 'topology', return_value=dict(enabled=True, account2_ready=True, account3_ready=False)), \
+             patch.object(sessions.lanes, 'prepare', side_effect=prepare):
+            self.assertEqual(len(self.dispatch(cap=64)), 10)
+            self.assertEqual(len(self.dispatch(cap=64)), 10)
+            self.assertEqual(self.dispatch(cap=64), [])
+        running = [s for s in self.store.read()['sessions'].values() if s['status'] == 'running']
+        self.assertEqual(sum(s['engine'] == 'claude' for s in running), 4)
+        self.assertEqual(sum(s['engine'] == 'sonnet' for s in running), 16)
+
+    def test_managed_pass_starts_at_most_three_queued_retries(self):
+        for n in range(8):
+            cid = 'retry-' + str(n)
+            self.enqueue(cid)
+            with self.store.locked() as data:
+                data['sessions'][cid]['queue'][0]['id'] = 'reconciler-retry-' + cid
+        self.assertEqual(len(self.dispatch(cap=64)), 3)
+        self.assertEqual(len(self.dispatch(cap=64)), 3)
+        self.assertEqual(len(self.dispatch(cap=64)), 2)
+
+    def test_managed_pass_starts_at_most_ten_workers_and_retains_the_rest(self):
+        for n in range(25):
+            self.enqueue('work-' + str(n))
+        self.assertEqual(len(self.dispatch(cap=64)), 10)
+        self.assertEqual(len(self.dispatch(cap=64)), 10)
+        self.assertEqual(len(self.dispatch(cap=64)), 5)
+        self.assertEqual(len(self.dispatch(cap=64)), 0)
 
     def test_ordinary_work_leaves_two_reserved_slots_and_urgent_can_use_them(self):
         for i in range(15):
             self.enqueue('ordinary-' + str(i))
-        self.assertEqual(len(self.dispatch()), 14)
+        self.assertEqual(len(self.dispatch()), 10)
+        self.assertEqual(len(self.dispatch()), 4)
         self.enqueue('urgent-1', priority_class='urgent')
         self.enqueue('urgent-2', explicit_ask=True)
         self.assertEqual(self.dispatch(), ['urgent-1', 'urgent-2'])
@@ -530,11 +585,11 @@ class AdmissionPressure(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     helper.reconciler_enabled(path)
 
-    def test_load_and_memory_reduce_admission_without_increasing_hard_cap(self):
+    def test_live_total_cap_and_twice_cpu_load_guard(self):
         helper = self.helper()
-        for load, available, expected in ((18, 16, 16), (27, 16, 8), (27.1, 16, 0), (0, 7.9, 0)):
-            with self.subTest(load=load, available=available), patch.dict(os.environ, {'TED_RUNNER_MAX_WORKERS': '99'}), \
-                 patch.object(helper.os, 'cpu_count', return_value=18), patch.object(helper.os, 'getloadavg', return_value=(load, 0, 0)), \
+        for load, available, expected in ((0, 32, 64), (27, 32, 64), (36, 32, 64), (36.1, 32, 0), (0, 7.9, 0)):
+            with self.subTest(load=load, available=available), patch.object(helper.os, 'cpu_count', return_value=18), \
+                 patch.object(helper.os, 'getloadavg', return_value=(load, 0, 0)), \
                  patch.object(helper, 'available_memory', return_value=int(available * 1024 ** 3)):
                 self.assertEqual(helper.admission_state()['cap'], expected)
 
@@ -543,23 +598,33 @@ class AdmissionPressure(unittest.TestCase):
         with patch.object(helper, 'available_memory', return_value=None):
             self.assertEqual(helper.admission_state()['cap'], 0)
 
-    def test_configured_host_cap_is_respected(self):
+    def test_opus_and_sonnet_have_independent_caps_and_reviews_are_exempt(self):
         helper = self.helper()
-        with patch.dict(os.environ, {'TED_RUNNER_MAX_WORKERS': '5'}), patch.object(helper.os, 'cpu_count', return_value=18), \
-             patch.object(helper.os, 'getloadavg', return_value=(1, 0, 0)), patch.object(helper, 'available_memory', return_value=32 * 1024 ** 3):
-            self.assertEqual(helper.admission_state()['cap'], 5)
+        running = [dict(engine='claude') for _ in range(2)] + [dict(engine='sonnet') for _ in range(7)]
+        self.assertFalse(helper.can_admit(dict(engine='claude'), dict(kind='work'), running, 64))
+        self.assertTrue(helper.can_admit(dict(engine='sonnet'), dict(kind='work'), running, 64))
+        running.append(dict(engine='sonnet'))
+        self.assertFalse(helper.can_admit(dict(engine='sonnet'), dict(kind='work'), running, 64))
+        self.assertTrue(helper.can_admit(dict(engine='sonnet'), dict(kind='review'), running, 64))
+        self.assertTrue(helper.can_admit(dict(engine='claude'), dict(kind='work'), [dict(engine='claude', reviewing='approval') for _ in range(8)], 64))
+        self.assertFalse(helper.can_admit(dict(engine='claude'), dict(kind='review'), [dict(engine='codex') for _ in range(64)], 64))
 
-    def test_review_uses_claude_budget_even_for_codex_session(self):
+    def test_one_config_controls_both_base_and_verified_account_two_caps(self):
         helper = self.helper()
-        current = [dict(engine='claude'), dict(engine='codex', reviewing='approval')]
-        with patch.dict(os.environ, {'TED_RUNNER_CLAUDE_CAP': '2'}):
-            self.assertFalse(helper.can_admit(dict(engine='codex', priority_class='urgent'), dict(kind='review'), current, 16))
-
-    def test_engine_cap_cannot_be_configured_above_host_limit(self):
-        helper = self.helper()
-        with patch.dict(os.environ, {'TED_RUNNER_CLAUDE_CAP': '99'}):
-            running = [dict(engine='claude', priority_class='urgent') for _ in range(16)]
-            self.assertFalse(helper.can_admit(dict(engine='claude', priority_class='urgent'), dict(kind='work'), running, 16))
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'capacity.json'
+            config = json.loads((HERE / 'capacity.json').read_text())
+            config['total_workers'] = 7
+            config['engines']['claude'] = 1
+            config['account2_engines']['claude'] = 3
+            path.write_text(json.dumps(config))
+            with patch.object(helper, 'CAPACITY_PATH', path), patch.object(helper.os, 'cpu_count', return_value=18), \
+                 patch.object(helper.os, 'getloadavg', return_value=(1, 0, 0)), patch.object(helper, 'available_memory', return_value=32 * 1024 ** 3):
+                self.assertEqual(helper.admission_state()['cap'], 7)
+                self.assertFalse(helper.can_admit(dict(engine='claude'), dict(kind='work'), [dict(engine='claude')], 7))
+                self.assertTrue(helper.can_admit(dict(engine='claude'), dict(kind='work'), [dict(engine='claude') for _ in range(2)], 7, account2_ready=True))
+                path.write_text('invalid')
+                self.assertEqual(helper.admission_state()['cap'], 0)
 
     def test_vm_stat_page_size_is_used_and_purgeable_is_not_double_counted(self):
         helper = self.helper()

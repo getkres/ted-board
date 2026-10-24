@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,337 @@
+@@ -0,0 +1,398 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -25,6 +25,44 @@
 +PR=re.compile(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)\b')
 +
 +
++INITIAL_DIGEST_ID = digest('initial_escalation_digest', 'v1')
++DIGEST_CARD_ID = 'reconciler-initial-ted-digest'
++ESCALATIONS = {'escalate_2h', 'escalate_12h', 'review_sla', 'sebastian_escalation', 'verification_review'}
++PASS_LIMITS = {'retry': 3, 'route': 5, 'create': 5, 'deploy': 5, 'dispatch': 10, 'escalation': 10}
++
++
++def action_group(action):
++ kind=action['kind']
++ if kind in ('route_ted','dead_letter','detached_worker'):return 'route'
++ if kind in ('create_build','escalation_digest'):return 'create'
++ if kind in ('advance_deploy','advance_verify','close_verified'):return 'deploy'
++ if kind in ESCALATIONS:return 'escalation'
++ return kind
++
++
++def select_pass(result, completed):
++ """Bound effects, while the complete ledger and unreceipted proposals survive."""
++ def rows(action):
++  cid=action['payload'].get('card_id');entity=action['entity']
++  return [x for x in result['items'] if (cid and x.get('card_id')==cid) or x['id']==entity or x['id'].split(':',1)[-1]==entity]
++ def age(action):
++  return min((stamp(x.get('action_started_at')) for x in rows(action)),default=stamp(result['generated_at'])),action['id']
++ actions=sorted((a for a in result['actions'] if a['id'] not in completed),key=age)
++ if INITIAL_DIGEST_ID not in completed:
++  covered=[a for a in actions if a['kind'] in ESCALATIONS]
++  if covered:
++   ranked={x['id']:x for a in covered for x in rows(a)}
++   ranked=sorted(ranked.values(),key=lambda x:(stamp(x.get('action_started_at')),x.get('priority',2),x['id']))
++   actions=[a for a in actions if a['kind'] not in ESCALATIONS]
++   actions.insert(0,dict(id=INITIAL_DIGEST_ID,kind='escalation_digest',entity=DIGEST_CARD_ID,payload=dict(card_id=DIGEST_CARD_ID,covered_ids=[a['id'] for a in covered],items=ranked)))
++ selected=[];deferred=[];counts={}
++ for action in actions:
++  group=action_group(action)
++  if group in PASS_LIMITS and counts.get(group,0)>=PASS_LIMITS[group]:deferred.append(action);continue
++  selected.append(action);counts[group]=counts.get(group,0)+1
++ return selected,deferred
++
++
 +def read_json(path,default):
 + try:
 +  path=Path(path)
@@ -41,6 +79,9 @@
 +  self.db.execute('pragma synchronous=FULL')
 +  self.db.execute('create table if not exists receipts (id text primary key, kind text not null, completed_at real not null)');self.db.commit();return self
 + def __exit__(self,*args):self.db.close()
++ def complete_group(self,entries):
++  with self.db:
++   self.db.executemany('insert or ignore into receipts values (?,?,?)',[(aid,kind,time.time()) for aid,kind in entries])
 + def completed(self):return {row[0] for row in self.db.execute('select id from receipts')}
 + def complete(self,aid,action):
 +  self.db.execute('insert or ignore into receipts values (?,?,?)',(aid,action['kind'],time.time()));self.db.commit()
@@ -155,6 +196,7 @@
 +   if s['coverage'].get('mockups')!='ok' and re.search(r'\b(?:mockup|design|batch|pick|choose|copy)\b',policy.current_text(c),re.I) and not policy.failure_kind(policy.current_text(c)):
 +    c['classification_uncertain']=True
 +   else:c['inbox_decision']=policy.decision(c,mockups=s['mockups'])
++   if policy.routing_hold(c):c['classification_uncertain']=True
 +  s['coverage']['inbox_policy']='ok'
 + except Exception:s['coverage']['inbox_policy']='not_installed'
 + try:
@@ -236,6 +278,17 @@
 +  c=next((c for c in snapshot['cards'] if c['id']==cid),None)
 +  if not c:return False
 +  store.enqueue(c,'Resume the card from REPORT.md and its files. Deliver and verify the requested outcome, and retain an accurate blocked state until it is live.','reconciler-dispatch-'+action['id'],engine='codex');return True
++ if kind=='escalation_digest':
++  if any(c['id']==cid for c in snapshot['cards']):return True
++  import card
++  rows=p['items'];lines=['Ted owns this first-run overdue review digest. Full oldest-first queue: Jobs and jobs/ted-review-queue.json. Full initial snapshot: jobs/ted-initial-escalation-digest.json. Review the queue before starting new work.']
++  for n,row in enumerate(rows,1):
++   line=str(n)+'. '+str(row.get('card_id') or row['id'])+' | '+row.get('action_started_at','')+' | '+row.get('stage','')
++   if len('\n'.join(lines+[line]))>1850:break
++   lines.append(line)
++  lines.append(str(len(rows))+' overdue obligations in the full ranked digest.')
++  card.create('Ted ops','ted review: first-run overdue digest','\n'.join(lines),card_id=cid)
++  return True
 + if kind=='create_build':
 +  # card.create defaults to queued board work and no immediate model launch.
 +  import card
@@ -272,13 +325,21 @@
 + publish={k:result[k] for k in ('generated_at','items','ted_queue','banner','coverage_defects')}
 + response=board.call('reconcile_publish',**publish)
 + if response.get('ok') is not True:raise RuntimeError('Reconciliation publication unconfirmed')
++ selected,limited=select_pass(result,completed)
 + failures=[]
 + with Journal(journal_path) as journal:
-+  for action in result['actions']:
++  for action in selected:
 +   try:
-+    if not execute_recorded(action,journal,lambda a:execute(a,store,snapshot,board)):failures.append(action['id'])
++    if action['kind']=='escalation_digest':
++     write_private(Path(journal_path).parent/'ted-initial-escalation-digest.json',action['payload'])
++     if execute(action,store,snapshot,board) is not True:
++      failures.append(action['id']);continue
++     journal.complete_group([(action['id'],action['kind'])]+[(aid,'initial_digest_member') for aid in action['payload']['covered_ids']])
++    elif not execute_recorded(action,journal,lambda a:execute(a,store,snapshot,board)):failures.append(action['id'])
 +   except Exception:failures.append(action['id'])
-+ result.update(applied=True,deferred=failures)
++  if INITIAL_DIGEST_ID not in completed and not any(a['kind'] in ESCALATIONS for a in result['actions']):
++   journal.complete(INITIAL_DIGEST_ID,dict(kind='initial_scan'))
++ result.update(applied=True,selected_actions=selected,limited=[a['id'] for a in limited],failed=failures,deferred=failures+[a['id'] for a in limited])
 + return result
 +
 +
@@ -331,7 +392,7 @@
 +  counts={}
 +  for action in result['actions']:counts[action['kind']]=counts.get(action['kind'],0)+1
 +  print(json.dumps(dict(mode='apply' if apply else 'dry_run',items=len(result['items']),actions=counts,coverage_defects=result['coverage_defects']),sort_keys=True))
-+  return 0 if not result.get('deferred') else 1
++  return 0 if not result.get('failed') else 1
 + finally:
 +  if lock:lock.close()
 +

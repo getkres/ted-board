@@ -9,6 +9,7 @@ Prepared changes, not installed software. The private SQL packet, production sna
 - `reconciliation-handler.patch` folds the worker-failure handler changes together with the authenticated ledger seam. Install `backend-integration/reconciliation.ts` next to the private handler, never as a replacement handler.
 - `mockup-autoarchive.patch` is the exact helper from PR 41. Its independent enable flag remains off. The combined heartbeat patch runs its hook on the existing heartbeat in legacy mode, or in the sole reconciler pass in reconciler mode.
 - The frozen failure-card policy, worker failure classification, one legacy retry, reaper, and steward fixes are folded into this bundle. Managed mode disables the legacy retry. Do not independently apply those older overlapping patches over this candidate.
+- `reconciler-claude-lanes.patch` folds the current PR 40 account-2-first runtime into the same sessions and worker files. `capacity.json` and `runner_admission.py` are shared by this bundle and the standalone lane patch. Do not stack PR 40 over these files.
 - `reconciler-manifest.json` pins source and result hashes. The current baseline also preserves the installed Chrome-only rule, twelve-hour wrapper ceiling, and steward improvements discovered during integration. The shared failure policy supersedes the old steward's broad protection heuristic.
 
 ## Reconstruct without installation
@@ -26,16 +27,21 @@ python3 runner-fix/reconstruct_reconciler.py \
 RECONCILER_CANDIDATE="$CANDIDATE" python3 -m unittest discover -s runner-fix -p '*reconciler*test.py'
 TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/lease_dispatch_test.py
 TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/failure_routing_test.py
-TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/mockup_autoarchive_test.py
+PYTHONPATH="$CANDIDATE${PYTHONPATH:+:$PYTHONPATH}" TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/mockup_autoarchive_test.py
+TED_LANES_RUNTIME="$CANDIDATE" python3 runner-fix/claude-lanes/test_lanes.py
 RECONCILIATION_HANDLER_SOURCE="$CANDIDATE/backend/handler.ts" node --test backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts
 TED_RUNTIME_SOURCE="$CANDIDATE/backend" node --test runner-fix/failure_handler_test.ts
+# Node-compatible fixtures need runtime permissions and --no-check under Deno.
+# Production TypeScript is checked separately below.
+RECONCILIATION_HANDLER_SOURCE="$CANDIDATE/backend/handler.ts" TED_RUNTIME_SOURCE="$CANDIDATE/backend" deno test --no-check --allow-read --allow-env backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts runner-fix/failure_handler_test.ts
+deno check backend-integration/reconciliation.ts backend-integration/snapshots.ts "$CANDIDATE/backend/handler.ts"
 node --test tests/aging_wip_test.cjs
 PLAYWRIGHT_MODULE="$EXISTING_PLAYWRIGHT" node tests/aging_wip_ui.cjs
 python3 scripts/check_data_api_grants.py
 python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 ```
 
-The Chrome fixture uses installed Google Chrome. Core tests reconstruct the reviewed helper patches in a temporary directory, so uncommitted source cannot substitute for the published artifact. Private integration tests require the reconstructed candidate. Hash drift causes reconstruction to refuse before creating output. Rebase, test, and review a changed source rather than forcing a patch.
+The Chrome fixture uses installed Google Chrome. Core tests reconstruct the reviewed helper patches in a temporary directory, so uncommitted source cannot substitute for the published artifact. Private integration tests require the reconstructed candidate. In CI, missing or invalid RECONCILER_CANDIDATE fails, rather than skipping that suite. Public CI runs the pure planner, driver, packaging, and grants checks; private integration remains an explicit operator check. Hash drift causes reconstruction to refuse before creating output. Rebase, test, and review a changed source rather than forcing a patch.
 
 ## Read-only proof
 
@@ -60,7 +66,7 @@ Default mode is dry-run. It uses board and mockup GETs, bounded GitHub CLI reads
 
 1. Confirm the machine is the mini. Back up the installed runtime, current steward release, hourly skill, existing launchd plists, and sessions store into a private directory. Record the source hashes and current worker identities. Do not install a routine on the MacBook.
 2. Use an explicit maintenance window to pause the existing dispatch producers, including board-jobs and the decisions watcher. Drain or checkpoint and stop old wrappers through existing guarded controls. Confirm no old running worker remains. Old workers lack leases and cannot be silently adopted. The first pre-migration dry-run deliberately reports them as lease defects.
-3. Install the reconstructed helpers and patched sessions.py, session_worker.py, board_live.py, jobs_heartbeat.py, job_watchdog.py, live_status.py, and card.py together. Install the candidate steward using the existing versioned steward release process, and replace the hourly skill only after reviewing its diff. Keep private file modes. Do not apply PR 41 or the failure card's overlapping runtime patches a second time.
+3. Install the reconstructed helpers, including claude_lanes.py, runner_admission.py, and capacity.json, and patched sessions.py, session_worker.py, board_live.py, jobs_heartbeat.py, job_watchdog.py, live_status.py, and card.py together. Install the candidate steward using the existing versioned steward release process, and replace the hourly skill only after reviewing its diff. Keep private file modes. Back up any existing capacity.json, compare it with the reviewed configuration, and preserve approved custom settings. Missing or malformed capacity fails closed. Keep the separate Claude lane flag unchanged and false during this cutover. Do not apply PR 40, PR 41 or the failure card's overlapping runtime patches a second time.
 4. Keep the durable flag absent or false during validation. The existing board-live agent remains at 120 seconds; board-jobs remains at 30 seconds. Do not create another timer. Verify that the private handler and database contract are ready, rerun the candidate tests, and run another live dry-run.
 5. Ted enables the reviewed mode by atomically writing `jobs/reconciler-config.json` with `{"enabled":true}` and mode 0600, then restarts the existing processes so old imported Python modules cannot survive cutover. The shared reader also accepts `TED_RECONCILER_ENABLED=true`. A malformed existing config fails closed. The decisions watcher can still enqueue, but Store.tick and approval collection require the reconciler's explicit argument before doing lifecycle work.
 6. The existing board-live entry point calls `reconciler_runtime.py --apply`. A nonblocking run lock prevents overlapping passes. Heartbeat publishes health without dispatching. The old reaper is bypassed; watchdog enforcement refuses recovery; the steward becomes read-only. Archive writes require the separate reviewed `TED_MOCKUP_AUTOARCHIVE_ENABLED=true` gate and PR 41's authorization. Leave it off during the reconciler soak.
@@ -68,9 +74,19 @@ Default mode is dry-run. It uses board and mockup GETs, bounded GitHub CLI reads
 
 ## Capacity and priority
 
-The measured mini has 18 CPUs and 64 GiB RAM. Admission preserves the current ceiling of 16, reserves two slots for urgent work, lowers capacity to eight above load/CPU 1, pauses above 1.5, and pauses below 8 GiB reclaimable memory or on failed observation. The ordinary Claude family is capped at two, including Sonnet; review turns count as Claude. Caps are ceilings, not a provider-rate benchmark. Record throttles and actual peak memory during the soak before changing them.
+The measured mini has 18 CPUs and 64 GiB RAM. The single reviewed configuration installs at `~/ted-ops/ted-board/capacity.json`. Both runtime patches read it through the same admission helper. Defaults retain the live total cap of 64 and stop admission only when load exceeds `2 * cpu_count`. They also retain the reconciler's fail-closed 8 GiB memory guard and failed-observation guard. Two slots remain reserved for urgent work. A cap is a ceiling, not a provider-throughput benchmark.
 
-Explicit structured priority wins. Unanswered latest Sebastian messages enter the urgent lane; a bounded launch/client-revenue text fallback enters the revenue lane. Ted can correct classification in private `jobs/priority-overrides.json`, for example `{"CARD":{"priority_class":"urgent","explicit_ask":true}}`. Age orders each lane. This classification is routing evidence, not proof of financial value.
+`engines` sets independent worker caps of `claude: 2` and `sonnet: 8`. `account2_engines` sets `claude: 4` and `sonnet: 16`, selected only when the lane flag is enabled and account 2 passes normal authentication verification. Main-account conversations retain the base engine ceilings. With `review_exempt: true`, reviews neither consume nor are blocked by model worker caps. Every review still consumes one global worker slot and obeys host guards. Configuration is read on each pass, and no capacity environment override can silently replace it. Account 2 remains disabled until Ted separately completes the existing setup and activation procedure.
+
+Priority classification remains structured and carries into sessions. Unanswered Sebastian requests reserve urgent capacity, and explicit metadata wins over text heuristics. The mutation budgets take oldest work first. Managed launches also take oldest work first, with priority breaking equal-age ties, and ordinary work cannot fill the urgent reserve. Private `jobs/priority-overrides.json` remains the correction path. This is scheduling evidence, not proof of financial value.
+
+## Bounded first run and later passes
+
+Every apply pass attempts at most three retry mutations, five Ted routings or recovery holds, five new cards, five delivery advances or verified closures, ten dispatch proposals, and ten escalations. Managed Store also attempts at most ten worker launches and at most three queued retry launches, so a backlog cannot bypass the driver limits. Each budget is ordered by action age. Failed attempts consume that pass's budget, retain no success receipt, and remain eligible later. Budget-limited work stays in the full ledger and queue and is planned again on the next existing two-minute pass. A carried backlog is not reported as a pass failure.
+
+On first apply, all existing escalation proposals become one deterministic Ted digest card. Its creation consumes one of the five card slots. Its full oldest-first snapshot is saved at `jobs/ted-initial-escalation-digest.json`; the card shows a bounded preview and directs Ted to the full Jobs queue. The 2,000-character card body limit prevents embedding the whole backlog. A deterministic card ID prevents duplicate creation after a crash, and a single SQLite transaction records both the digest receipt and every covered escalation ID. No individual first-run reminder is emitted. Later new escalations use the ten-item budget. Queue and health publication still covers all obligations in one snapshot.
+
+Review the private `ROUTE-TED-CANDIDATES.md` before enablement. Four of the eight historical candidates are held because spend, Sebastian's copy, or personal authentication may remain involved. An operational progress line cannot clear those holds. Ted must establish current authority or completion before moving them.
 
 ## Delivery, review, and recovery
 

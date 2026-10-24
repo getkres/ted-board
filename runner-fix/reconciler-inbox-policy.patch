@@ -1,6 +1,6 @@
 --- /dev/null
 +++ inbox_policy.py
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,135 @@
 +"""Shared, conservative routing policy for Sebastian's decision inbox."""
 +from datetime import datetime
 +import re
@@ -94,6 +94,16 @@
 +            if any(m.get('status') == 'open' and not m.get('verdict') for m in rows):
 +                return 'approve_design'
 +    return None
++
++
++def routing_hold(card):
++    """An operational update cannot erase sensitive original scope or human auth."""
++    if card.get('section') != 'needs_you':
++        return False
++    scope = '\n'.join(str(card.get(k) or '') for k in ('title', 'body', 'live_status'))
++    return bool(re.search(r'\b(?:you decide|your call|yours to write|type your|write your|flat fee|'
++                          r'one.time (?:sign.in|authentication)|apple verification|'
++                          r'enter (?:the )?(?:code|key))\b', scope, re.I))
 +
 +
 +def approval_line(kind, card):

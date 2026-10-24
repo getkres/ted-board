@@ -15,7 +15,9 @@ def main():
  p=argparse.ArgumentParser(description=__doc__)
  p.add_argument('--baseline',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
  p.add_argument('--hourly-skill',type=Path,required=True);p.add_argument('--steward-source',type=Path,required=True)
- a=p.parse_args();here=Path(__file__).resolve().parent
+ a=p.parse_args()
+ a.baseline=a.baseline.resolve();a.output=a.output.absolute();a.hourly_skill=a.hourly_skill.resolve();a.steward_source=a.steward_source.absolute()
+ here=Path(__file__).resolve().parent
  manifest=json.loads((here/'reconciler-manifest.json').read_text())
  if a.output.exists():p.error('output must be a new private directory')
  sources={name:a.baseline/name for name,row in manifest.items() if row.get('baseline_sha256')}

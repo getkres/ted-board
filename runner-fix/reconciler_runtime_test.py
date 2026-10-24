@@ -108,4 +108,75 @@ class RuntimeTests(unittest.TestCase):
    root=Path(tmp);(root/'jobs').mkdir();p=root/'jobs/sessions.json';p.write_text(json.dumps({'sessions':{},'approvals':{}}));before=p.stat().st_mtime_ns
    result=d.local_snapshot(root,[]);self.assertEqual(p.stat().st_mtime_ns,before);self.assertEqual(result['sessions'],{})
 
+class ConservativeRouting(unittest.TestCase):
+ def test_original_decision_and_auth_scope_cannot_be_routed_by_a_cosmetic_status(self):
+  cards=[dict(id=str(n),section='needs_you',title=title,body=body,live_status='ted review pending') for n,(title,body) in enumerate([
+   ('Creator rate', 'flat fee $2,200, so you decide'),
+   ('Copy', 'yours to write: pin the headline and type your version'),
+   ('Login', 'one-time authentication key, enter the code'),
+   ('Submit', 'sign in to app store connect and complete apple verification')])]
+  board=types.SimpleNamespace(call=lambda **k:dict(jobs=[],reconciliation_error='not_published') if k else dict(cards=cards))
+  mockups=types.SimpleNamespace(call=lambda:dict(mockups=[]))
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);(root/'jobs').mkdir();(root/'jobs/sessions.json').write_text('{"sessions":{}}')
+   snapshot=d.observe(root,board=board,mockups=mockups)
+   result=d.plan(snapshot,now=1800000000)
+  self.assertFalse(any(a['kind']=='route_ted' for a in result['actions']))
+  self.assertTrue(all(c.get('classification_uncertain') for c in snapshot['cards']))
+
+class PassLimits(unittest.TestCase):
+ def fixture(self):
+  actions=[];items=[]
+  for kind in ('retry','route_ted','create_build','advance_deploy','advance_verify','dispatch','escalate_2h'):
+   for n in reversed(range(18)):
+    cid=kind+str(n);items.append(dict(id='card:'+cid,card_id=cid,action_started_at=d.iso(1700000000+n),priority=2))
+    actions.append(dict(id=cid,kind=kind,entity=cid,payload=dict(card_id=cid)))
+  return dict(actions=actions,items=items,ted_queue=[x['id'] for x in items],generated_at=d.iso(1800000000),coverage_defects=[],banner=True)
+ def test_apply_limits_each_mutation_class_oldest_first_and_carries_remainder(self):
+  result=self.fixture();completed={d.INITIAL_DIGEST_ID}
+  selected,deferred=d.select_pass(result,completed)
+  expected={'retry':3,'route_ted':5,'create_build':5,'dispatch':10,'escalate_2h':10}
+  for kind,count in expected.items():
+   self.assertEqual([a['id'] for a in selected if a['kind']==kind],[kind+str(n) for n in range(count)])
+  self.assertEqual(sum(a['kind'].startswith('advance_') for a in selected),5)
+  self.assertEqual(len(selected)+len(deferred),len(result['actions']))
+  first={a['id'] for a in selected};result['actions']=[a for a in result['actions'] if a['id'] not in first]
+  selected,_=d.select_pass(result,completed|first)
+  self.assertEqual([a['id'] for a in selected if a['kind']=='retry'],['retry3','retry4','retry5'])
+ def test_first_run_creates_one_ranked_digest_and_no_individual_escalations(self):
+  result=self.fixture();selected,deferred=d.select_pass(result,set())
+  digest=[a for a in selected if a['kind']=='escalation_digest']
+  self.assertEqual(len(digest),1)
+  self.assertFalse(any(a['kind'].startswith('escalate_') for a in selected))
+  self.assertEqual(len([a for a in selected if a['kind'] in ('escalation_digest','create_build')]),5)
+  self.assertEqual(digest[0]['payload']['covered_ids'],['escalate_2h'+str(n) for n in range(18)])
+  self.assertEqual(digest[0]['payload']['items'][0]['card_id'],'escalate_2h0')
+ def test_digest_replay_creates_one_card_and_receipts_the_covered_backlog(self):
+  result=self.fixture();result['actions']=[a for a in result['actions'] if a['kind']=='escalate_2h']
+  snapshot=dict(cards=[],coverage=dict(backend_ledger='ok',inbox_policy='ok',remote_jobs='ok'))
+  created=[]
+  def create(*args,**kwargs):
+   created.append(kwargs['card_id']);snapshot['cards'].append(dict(id=kwargs['card_id']))
+  board=types.SimpleNamespace(call=lambda *a,**k:dict(ok=True))
+  with tempfile.TemporaryDirectory() as temp,patch.dict(sys.modules,{'card':types.SimpleNamespace(create=create)}),patch.object(d,'plan',return_value=result):
+   path=Path(temp)/'journal.db'
+   first=d.run(snapshot,path,1800000000,False,object(),board)
+   self.assertFalse(first['failed'])
+   self.assertEqual(d.completed_readonly(path),{d.INITIAL_DIGEST_ID}|{'escalate_2h'+str(n) for n in range(18)})
+   d.run(snapshot,path,1800000000,False,object(),board)
+   self.assertEqual(created,['reconciler-initial-ted-digest'])
+ def test_digest_marker_and_members_roll_back_together_on_receipt_failure(self):
+  import sqlite3
+  with tempfile.TemporaryDirectory() as temp,d.Journal(Path(temp)/'journal.db') as journal:
+   journal.db.execute("create trigger receipt_failure before insert on receipts when new.id='member' begin select raise(abort,'fixture'); end")
+   with self.assertRaises(sqlite3.IntegrityError):journal.complete_group([(d.INITIAL_DIGEST_ID,'escalation_digest'),('member','initial_digest_member')])
+   self.assertEqual(journal.completed(),set())
+
+ def test_unexecuted_and_failed_actions_never_receive_receipts(self):
+  result=self.fixture();s={'coverage':dict(backend_ledger='ok',inbox_policy='ok',remote_jobs='ok')}
+  board=types.SimpleNamespace(call=lambda *a,**k:dict(ok=True))
+  with tempfile.TemporaryDirectory() as temp,patch.object(d,'plan',return_value=result),patch.object(d,'execute',return_value=False):
+   path=Path(temp)/'journal.db';out=d.run(s,path,1800000000,False,object(),board)
+   self.assertEqual(d.completed_readonly(path),set());self.assertTrue(out['deferred'])
+
 if __name__=='__main__':unittest.main()

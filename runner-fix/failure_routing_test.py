@@ -103,6 +103,8 @@ class Runner(unittest.TestCase):
     def setUp(self):
         self.load = patch.object(sessions.os, 'getloadavg', return_value=(0, 0, 0))
         self.load.start(); self.addCleanup(self.load.stop)
+        host = patch.object(sessions, 'admission_state', return_value=dict(cap=64))
+        host.start(); self.addCleanup(host.stop)
 
     def session(self, root, **extra):
         store = sessions.Store(root)

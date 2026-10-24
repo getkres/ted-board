@@ -1,12 +1,12 @@
 {
   "sessions.py": {
     "baseline_sha256": "8f6cbb513e136838d167d081e9fbace56a62e8e41af5a4b2b25c4d45482b1527",
-    "candidate_sha256": "55cf3ac76485f823df642a2a042366dbfad713e8322bb2106ee8ee08890b1b67",
+    "candidate_sha256": "0599c1bd00ba68c2ddccd6db3e9d73f119c5791d5852ef4ae51cf9f11efdda5a",
     "patch": "reconciler-sessions.patch"
   },
   "session_worker.py": {
     "baseline_sha256": "ce122789da3344c6ca6ed4f41cc4393c51270a150cfb0c10d73efac286fd6a31",
-    "candidate_sha256": "fcd40f5fda3cbe421d0a5aba936b0d0c8743f31387dd2bfe829a73e847e64a1f",
+    "candidate_sha256": "92684ca184a0ecadb71547d718075a42cc1af46021602ff64ae57bcbdca062ed",
     "patch": "reconciler-session_worker.patch"
   },
   "board_live.py": {
@@ -50,23 +50,31 @@
     "patch": "reconciliation-handler.patch"
   },
   "reconciler.py": {
-    "candidate_sha256": "9b61f40a541c5abb6f22bbcda76aeeabf201cf67d020216357d769cdba1a080f",
+    "candidate_sha256": "ad424fb115977d69fc03345f04b93c2197c14c8acce52379cff4ab190648cda3",
     "patch": "reconciler-core.patch"
   },
   "reconciler_runtime.py": {
-    "candidate_sha256": "45d64d9ba093ade49bd22e6fa6a60d662a12d1095f98022d1cd3ae5319d0fe28",
+    "candidate_sha256": "b66ec0723ff84f5dc6c4ba34fbc9ce8bb571d28b31518848c2fd9e23cfebec9f",
     "patch": "reconciler-runtime.patch"
   },
   "runner_admission.py": {
-    "candidate_sha256": "c11454b80408ce271a6a14f4effee7193dd3d2ddfa1f32ab5225a127b2a8258d",
+    "candidate_sha256": "a137874cf7ae96dfed22d16bc3a839acbd7b1b561f7c2b8981046483b8f5dd13",
     "patch": "reconciler-admission.patch"
   },
   "inbox_policy.py": {
-    "candidate_sha256": "2de35e34ba08d24283b92436fbfdb4a922015564d3591df3a2b4b41c044c1de7",
+    "candidate_sha256": "4e39d9bf59d2e1e6b6c6c1df473a336b2fddb7151a3b0cb0930f6d460fe06f1c",
     "patch": "reconciler-inbox-policy.patch"
   },
   "mockup_autoarchive.py": {
     "candidate_sha256": "4ba8520135c8a0528226687279e5323a2043b0885ec465d1e912e036dbbf1bf2",
     "patch": "mockup-autoarchive.patch"
+  },
+  "claude_lanes.py": {
+    "patch": "reconciler-claude-lanes.patch",
+    "candidate_sha256": "b049b1742e0b90a4f0e3dd95c89a48f07b17993746ff595f80e69766379b4960"
+  },
+  "capacity.json": {
+    "patch": "reconciler-capacity.patch",
+    "candidate_sha256": "1c1b235d7bea1175c71759ac7a7d82c80ede58c949ea53114bfedb49e6506aa6"
   }
 }
