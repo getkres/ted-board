@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler.py
-@@ -0,0 +1,227 @@
+@@ -0,0 +1,240 @@
 +"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
 +import hashlib
 +import json
@@ -53,6 +53,7 @@
 +  if isinstance(override,dict):
 +   if override.get('priority_class') in ('urgent','launch','revenue','client_revenue','ordinary'):c['priority_class']=override['priority_class']
 +   if type(override.get('explicit_ask')) is bool:c['explicit_ask']=override['explicit_ask']
++  c.setdefault('priority_class','ordinary');c.setdefault('explicit_ask',False)
 +
 +
 +def unsafe_session(s):
@@ -65,19 +66,23 @@
 + return min(3600,base+int(digest(entity,attempt)[:4],16)%max(1,base//4))
 +
 +
-+def workflow_stage(snapshot,cid,now=None):
++def evidenced_stage(snapshot,cid,now=None):
 + w=snapshot.get('workflows',{}).get(cid,{})
 + pr=snapshot.get('prs',{}).get(w.get('pr_url'),{})
-+ if not pr and w.get('pr_url'):
-+  c=next((c for c in snapshot['cards'] if c.get('id')==cid),{})
-+  previous=c.get('reconciliation_stage') or w.get('last_stage')
-+  if previous in ('merged','deployed','verified'):return previous
 + if pr.get('state')!='MERGED':return 'pr' if w.get('pr_url') else 'build'
 + d=w.get('deployment',{});v=w.get('verification',{})
 + merged=stamp(pr.get('merged_at'));deployed=stamp(d.get('deployed_at'));verified=stamp(v.get('verified_at'));revision=pr.get('merge_revision')
 + if not (d.get('verified') is True and deployed and revision and d.get('revision')==revision and deployed>=merged and (now is None or deployed<=now)):return 'merged'
 + if v.get('ok') is True and verified>=deployed and (now is None or verified<=now) and v.get('revision')==revision:return 'verified'
 + return 'deployed'
++
++
++def workflow_stage(snapshot,cid,now=None):
++ observed=evidenced_stage(snapshot,cid,now)
++ c=next((c for c in snapshot['cards'] if c.get('id')==cid),{})
++ previous=c.get('reconciliation_stage') or snapshot.get('workflows',{}).get(cid,{}).get('last_stage')
++ rank={'build':0,'pr':1,'merged':2,'deployed':3,'verified':4}
++ return previous if rank.get(previous,-1)>rank[observed] else observed
 +
 +
 +def plan(snapshot,completed=(),now=None):
@@ -100,7 +105,12 @@
 +  cid=c['id'];s=sessions.get(cid,{})
 +  stage=workflow_stage(snapshot,cid,now=now)
 +  # A done build is still open delivery work until deployment and verification evidence exists.
-+  has_chain=bool(snapshot.get('workflows',{}).get(cid))
++  has_chain=bool(snapshot.get('workflows',{}).get(cid)) or c.get('reconciliation_stage') in ('pr','merged','deployed','verified')
++  evidence_gap=stage!=evidenced_stage(snapshot,cid,now)
++  if evidence_gap:
++   source='workflow:'+cid
++   if source not in coverage:coverage.append(source)
++   action('coverage_defect',source,stage,dict(source=source))
 +  if c.get('section') in TERMINAL and (not has_chain or stage=='verified' or c.get('section')=='killed'):continue
 +  started=stamp(c.get('action_started_at') or c.get('created_at')) or stamp(c.get('updated_at')) or now
 +  review=bool(snapshot.get('workflows',{}).get(cid,{}).get('review_required')) or stage in ('pr','merged','deployed') or any(x in str(c.get('live_status','')).lower() for x in ('ted review','ted owns','ted must','waiting on ted','worker stopped','exceeded','could not start'))
@@ -133,8 +143,8 @@
 +   review_ids.append(row)
 +   if age>=6*3600:action('review_sla',cid,[stage,iso(started)],dict(card_id=cid))
 +  if has_chain:
-+   if stage=='merged':action('advance_deploy',cid,snapshot['workflows'][cid].get('pr_url'),dict(card_id=cid,stage='deploy'))
-+   if stage=='deployed':action('advance_verify',cid,snapshot['workflows'][cid]['deployment'],dict(card_id=cid,stage='verify'))
++   if stage=='merged' and not evidence_gap:action('advance_deploy',cid,snapshot['workflows'][cid].get('pr_url'),dict(card_id=cid,stage='deploy'))
++   if stage=='deployed' and not evidence_gap:action('advance_verify',cid,snapshot['workflows'][cid]['deployment'],dict(card_id=cid,stage='verify'))
 +   if stage=='verified':
 +    v=snapshot['workflows'][cid].get('verification',{})
 +    active=s.get('status') in ('running','queued') or bool(s.get('queue'))
@@ -144,14 +154,17 @@
 +     review_ids.append(row)
 +     action('verification_review',cid,v,dict(card_id=cid))
 +  status=s.get('status')
-+  if s and (s.get('status') not in ('done','finished','idle') or s.get('queue')):
++  if s and (s.get('status') not in ('done','finished','idle','stopped') or s.get('queue')):
 +   start=stamp(s.get('started_at')) or started
 +   expires=stamp(s.get('lease_expires_at'))
 +   item('job:'+cid,'job',cid,'worker:'+cid if status=='running' else 'ted',start,expires or start+LEASE_SECONDS,'worker',status='dead_letter' if status=='dead_letter' else 'open',priority=priority_key(c)[0],summary='worker lease' if status=='running' else 'worker '+str(status))
 +   # Result consumption is owned by Store.tick, before planning another retry.
 +   expired=status=='running' and (not expires or expires<=now) and not s.get('result_ready')
 +   failed=status=='failed' and not s.get('queue')
-+   if (expired or failed) and stage!='verified':
++   if s.get('stop_requested'):
++    row['owner']='ted';review_ids.append(row)
++    action('stop_worker',cid,[s.get('turn'),s.get('kill_requested_at') or 'stop'],dict(card_id=cid,expected_turn=s.get('turn'),expected_lease_token=s.get('lease_token')))
++   elif (expired or failed) and stage!='verified':
 +    unsafe=unsafe_session(s)
 +    attempt=int(s.get('retry_count') or 0)
 +    kind='dead_letter' if unsafe or attempt>=RETRY_LIMIT or s.get('artifact_error') else 'retry'

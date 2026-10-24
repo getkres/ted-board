@@ -73,7 +73,7 @@
 +  ok=ok and bool(text.strip())
 +  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer.',session_id=sid)
 +  if not ok:result['failure_kind']='no_result' if p.returncode==0 and not text.strip() else 'crash'
-+ except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the three-hour limit.')
++ except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the twelve-hour limit.')
 + except Exception:result=dict(ok=False,failure_kind='crash',text='Worker failed before returning a result.')
 + if result['ok']:result['completion']=dict(section='up_next',note='ted review')
 + return result

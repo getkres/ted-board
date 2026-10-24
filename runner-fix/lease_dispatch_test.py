@@ -230,6 +230,44 @@ class LeaseDispatch(unittest.TestCase):
                 self.store.tick()
         self.assertEqual(self.store.read(), before)
 
+    def test_matching_user_kill_persists_stop_marker_and_preserves_queue_and_lease(self):
+        for killed, live in ((True, True), (False, False)):
+            cid = 'kill-' + str(killed)
+            s = self.running(cid)
+            fresh = dict(id='fresh', kind='work', message='retain this fresh request')
+            with self.store.locked() as data:
+                data['sessions'][cid]['queue'] = [fresh]
+            command = dict(id='stop-' + cid, card_id=cid, action='kill', payload=dict(pid=s['pid'], identity=s['identity']))
+            with patch.object(sessions, 'safe_kill', return_value=killed), patch.object(sessions, 'alive', return_value=live), patch.object(sessions, 'call', return_value={}):
+                self.store.controls([command])
+            saved = self.store.read()['sessions'][cid]
+            self.assertTrue(saved.get('stop_requested'))
+            self.assertEqual(saved['queue'], [fresh])
+            self.assertEqual(saved['lease'], s['lease'])
+            self.assertEqual(saved['pid'], s['pid'])
+
+    def test_stale_user_kill_does_not_set_stop_marker(self):
+        s = self.running()
+        command = dict(id='stale-stop', card_id='x', action='kill', payload=dict(pid=-1, identity=s['identity']))
+        with patch.object(sessions, 'safe_kill', side_effect=forbidden), patch.object(sessions, 'call', return_value={}):
+            self.store.controls([command])
+        self.assertNotIn('stop_requested', self.store.read()['sessions']['x'])
+
+    def test_stop_marked_turn_cannot_consume_result_or_dispatch_fresh_queue(self):
+        s = self.running();self.result(s)
+        with self.store.locked() as data:
+            data['sessions']['x']['stop_requested'] = True
+        self.store.enqueue(dict(id='x', title='Fresh work'), 'fresh request', 'fresh-after-stop', engine='codex')
+        self.tick(reconcile=True)
+        saved = self.store.read()['sessions']['x']
+        self.assertEqual(saved['status'], 'running')
+        self.assertEqual(saved['lease'], s['lease'])
+        self.assertTrue(saved['stop_requested'])
+        with self.store.locked() as data:
+            data['sessions']['x']['status'] = 'queued'
+        self.assertEqual(self.dispatch(), [])
+        self.assertEqual(self.store.read()['sessions']['x']['queue'][0]['message'], 'fresh request')
+
     def test_completed_result_beats_expired_lease_even_with_live_pid(self):
         # Reverting result-first handling leaves the session stuck running.
         s = self.running(expiry=time.time() - 1)
