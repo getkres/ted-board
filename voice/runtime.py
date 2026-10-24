@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 import subprocess
 import time
@@ -13,6 +14,45 @@ from pathlib import Path
 from core import speech_text
 
 VOICE_ID = "G0yjIg3xY8gEJZkHpjVm"
+
+
+class CaptureDiagnostics:
+    """Five-second aggregate health only, with no audio or text retention."""
+
+    def __init__(self, emit, now=None):
+        self.emit = emit
+        self.started = time.monotonic() if now is None else now
+        self.samples = self.power = self.peak = self.voiced = self.vad_frames = 0
+        self.max_score = 0.0
+
+    def feed(self, pcm, score, vad):
+        samples = memoryview(pcm).cast("h")
+        self.samples += len(samples)
+        self.power += sum(s * s for s in samples)
+        self.peak = max(self.peak, max((abs(s) for s in samples), default=0))
+        self.voiced += sum(vad)
+        self.vad_frames += len(vad)
+        self.max_score = max(self.max_score, score)
+
+    def tick(self, now=None):
+        now = time.monotonic() if now is None else now
+        if now - self.started < 5:
+            return
+        rms = math.sqrt(self.power / self.samples) / 32768 if self.samples else 0
+        self.emit(
+            "audio_debug",
+            window_seconds=round(now - self.started, 3),
+            samples=self.samples,
+            audio_seconds=round(self.samples / 16000, 3),
+            rms=round(rms, 7),
+            rms_dbfs=round(20 * math.log10(max(rms, 1e-6)), 3),
+            peak=round(self.peak / 32768, 7),
+            vad_voiced_ratio=round(self.voiced / self.vad_frames, 5) if self.vad_frames else 0,
+            max_wake_score=round(self.max_score, 6),
+        )
+        self.started = now
+        self.samples = self.power = self.peak = self.voiced = self.vad_frames = 0
+        self.max_score = 0.0
 
 
 def logger(home):
@@ -238,13 +278,15 @@ def write_pcm(path, pcm):
 
 
 class Audio:
-    def __init__(self, helper, emit, output_only=False):
+    def __init__(self, helper, emit, output_only=False, debug=False):
         self.emit = emit
         self.playing = False
         self.echo_clean = False
         self.last_done = 0
         self.process = subprocess.Popen(
-            [str(helper)] + (["--output-only"] if output_only else []),
+            [str(helper)]
+            + (["--output-only"] if output_only else [])
+            + (["--debug-audio"] if debug else []),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

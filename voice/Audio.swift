@@ -90,6 +90,7 @@ func eventError(_ name: String, _ error: Error, _ fields: [String: Any] = [:]) {
     event(name, row)
 }
 let args = CommandLine.arguments
+let debugAudio = args.contains("--debug-audio")
 if args.contains("--devices") {
     let data = try JSONSerialization.data(withJSONObject: ["devices": devices(), "microphone_permission": AVCaptureDevice.authorizationStatus(for: .audio).rawValue])
     print(String(data: data, encoding: .utf8)!); exit(0)
@@ -140,16 +141,49 @@ if capture {
     guard source.sampleRate > 0, source.channelCount > 0,
           let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
           let converter = AVAudioConverter(from: source, to: target) else { event("invalid_input_format"); exit(75) }
+    // The VPIO channel layout has no usable automatic mono downmix on this USB
+    // route. Copy its processed microphone channel explicitly instead.
+    converter.channelMap = [0]
+    var debugStarted = ProcessInfo.processInfo.systemUptime
+    var debugBuffers = 0, debugFrames = 0, debugConverted = 0
+    var debugPower = [Double](repeating: 0, count: Int(source.channelCount))
+    var debugErrors = 0
     node.installTap(onBus: 0, bufferSize: 2048, format: source) { buffer, _ in
+        if debugAudio {
+            debugBuffers += 1; debugFrames += Int(buffer.frameLength)
+            if let channels = buffer.floatChannelData {
+                for channel in 0..<Int(source.channelCount) {
+                    for frame in 0..<Int(buffer.frameLength) {
+                        let sample = Double(source.isInterleaved ? channels[0][frame * Int(source.channelCount) + channel] : channels[channel][frame])
+                        debugPower[channel] += sample * sample
+                    }
+                }
+            }
+        }
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 16000 / source.sampleRate + 16)
         guard let pcm = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
         var provided = false; var error: NSError?
-        converter.convert(to: pcm, error: &error) { _, status in
+        let converted = converter.convert(to: pcm, error: &error) { _, status in
             if provided { status.pointee = .noDataNow; return nil }
             provided = true; status.pointee = .haveData; return buffer
         }
         if error == nil, let ptr = pcm.int16ChannelData?[0], pcm.frameLength > 0 {
             FileHandle.standardOutput.write(Data(bytes: ptr, count: Int(pcm.frameLength) * 2))
+        }
+        if debugAudio {
+            debugConverted += Int(pcm.frameLength)
+            if error != nil { debugErrors += 1 }
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - debugStarted >= 5 {
+                var fields: [String: Any] = ["tap_buffers": debugBuffers, "input_frames": debugFrames,
+                    "converted_frames": debugConverted, "conversion_errors": debugErrors,
+                    "conversion_status": converted.rawValue,
+                    "source_channel_rms": debugPower.map { sqrt($0 / Double(max(debugFrames, 1))) }]
+                if let error = error { fields["error_domain"] = error.domain; fields["error_code"] = error.code }
+                event("native_audio_debug", fields)
+                debugStarted = now; debugBuffers = 0; debugFrames = 0; debugConverted = 0; debugErrors = 0
+                debugPower = [Double](repeating: 0, count: Int(source.channelCount))
+            }
         }
     }
 }
@@ -157,7 +191,12 @@ event("engine_configured", routeFields(engine, inputID, outputID, capture))
 do { try engine.start() } catch { eventError("engine_start_failed", error, routeFields(engine, inputID, outputID, capture)); exit(75) }
 var readyFields = routeFields(engine, inputID, outputID, capture)
 readyFields["capture"] = capture
-readyFields["echo_cancelled"] = capture && engine.inputNode.isVoiceProcessingEnabled
+readyFields["echo_cancelled"] = capture && engine.inputNode.isVoiceProcessingEnabled && !engine.inputNode.isVoiceProcessingBypassed
+if capture {
+    readyFields["capture_channel"] = 0
+    readyFields["voice_processing_bypassed"] = engine.inputNode.isVoiceProcessingBypassed
+    readyFields["voice_processing_input_muted"] = engine.inputNode.isVoiceProcessingInputMuted
+}
 event("audio_ready", readyFields)
 var playbackGeneration = 0
 func play(_ path: String) {

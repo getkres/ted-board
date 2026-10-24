@@ -1,6 +1,18 @@
 # Voice validation, 2026-10-23
 
-Delivery state: blocked pending PR review and Ted's live wake and reply acceptance. The installed KeepAlive agent is running on the Mac mini with the connected Jabra and granted microphone access.
+Delivery state: blocked pending reliable room wake confirmation, PR review, and Ted's live wake and reply acceptance. The installed KeepAlive agent is running on the Mac mini with the connected Jabra and granted microphone access.
+
+## Silent PCM follow-up, late 2026-10-23
+
+- Reproduced the reported failure with the real Jabra and the production launchd daemon. The native tap delivered nonzero samples and the converter reported normal frame counts and zero conversion errors, while the final 16 kHz mono PCM had RMS 0, peak 0, VAD ratio 0, and maximum wake score 0.000203. Startup alone had therefore been an insufficient acceptance check.
+- Set the AVAudioConverter channel map explicitly to `[0]`, copying the processed microphone channel into mono. The implicit three-channel downmix on this route had emitted digital silence. Echo processing stays enabled, bypass stays false, and input mute stays false. The Jabra input and output defaults and the matched 16 kHz graph remain unchanged.
+- Added opt-in five-second PCM health summaries at the daemon boundary and native channel and conversion summaries. Debug wake verification records match booleans and word counts only. No diagnostic PCM or recognized speech is retained. The new behavioral test checks hand-calculated RMS, VAD ratio, maximum score, zero-sample reporting, and window reset.
+- Played locally synthesized clips from the Mac mini Speakers, device 88, into the room while capture and assistant output remained on the Jabra. At 1792820276.376, the recorded “hey Ted, what's open today?” clip produced wake_candidate at 0.99949. At 1792820277.919, local confirmation produced wake and the listen chime. The corresponding five-second PCM RMS was 0.1039602, VAD voiced ratio was 0.9879, and maximum wake score was 0.999925. The test paused capture before sending the synthetic question to Ted.
+- This success is not repeatable acceptance. Multiple short standalone clips failed local confirmation, and a repeat of the wake-and-question clip on the final build also failed confirmation. Some tests produced candidates, while others did not satisfy the existing neural gate. A controlled temporary capture was rejected by both small.en and medium.en. That comparison retained only word counts and match booleans, then deleted its temporary WAV.
+- The standalone source clips pass the wake model offline above 0.9999. This separates the fixed zero-PCM conversion problem from the remaining room playback and confirmation problem. Its cause is not established. Thresholds, the local confirmation requirement, and echo processing were not relaxed to make a test pass.
+- Two diagnostic trials ran before actual audio readiness during launchd warmup and are excluded from acceptance evidence. Subsequent tests waited for audio_ready and flowing PCM before playback. launchd running is not an audio-readiness signal.
+- A near-field spoken check was requested through Ted, with no confirmed spoken response during this run. Ted must ask Sebastian to say “hey Ted” near the Jabra and correlate that exact moment with the debug events. PR review, reliable standalone wake acceptance, live inbox delivery, reply playback, and physical barge-in remain open.
+- Current suite: 39 tests discovered, 38 passed, and one optional two-chime native test skipped. Ruff and formatting pass. The offline Data API guard checks zero future migrations, and its 17 regression tests pass. The native helper was rebuilt, ad hoc signed, and installed under the unchanged approved app launcher. No security settings, paid calls, or database SQL were used.
 
 ## Jabra startup repair, 2026-10-23
 

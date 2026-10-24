@@ -1,5 +1,6 @@
 """Voice state machine. Audio capture and wake inference keep running during speech."""
 
+import re
 import time
 import uuid
 from collections import deque
@@ -13,13 +14,23 @@ from session import Offline
 
 class VoiceLoop:
     def __init__(
-        self, home, audio, whisper, bridge, emit, executor=None, verifier=None, verify_executor=None
+        self,
+        home,
+        audio,
+        whisper,
+        bridge,
+        emit,
+        executor=None,
+        verifier=None,
+        verify_executor=None,
+        debug=False,
     ):
         self.home = Path(home)
         self.audio = audio
         self.whisper = whisper
         self.bridge = bridge
         self.emit = emit
+        self.debug = debug
         self.executor = executor or ThreadPoolExecutor(max_workers=1)
         self.verifier = verifier or whisper
         self.verify_executor = verify_executor or ThreadPoolExecutor(max_workers=1)
@@ -80,6 +91,16 @@ class VoiceLoop:
     def feed(self, pcm, score, voiced):
         self.preroll.append(pcm)
         self.voiced_recent.append(voiced)
+        if self.debug and score >= 0.9:
+            self.emit(
+                "wake_score_debug",
+                score=round(score, 6),
+                voiced=voiced,
+                recent_voice=any(self.voiced_recent),
+                gate_hits=self.gate.count,
+                playing=self.audio.playing,
+                state=self.state,
+            )
         if self.candidate:
             self.candidate["extra"].append(pcm)
             if len(self.candidate["extra"]) >= 8 and self.verify_future is None:
@@ -180,6 +201,16 @@ class VoiceLoop:
             try:
                 text = future.result()
                 command = wake_command(text)
+                if self.debug:
+                    self.emit(
+                        "wake_verification_debug",
+                        words=len(text.split()),
+                        wake_prefix=command is not None,
+                        contains_wake=bool(re.search(r"\bhey[ ,.!]*ted\b", text, re.I)),
+                        audio_seconds=round(
+                            (len(candidate["preroll"]) + len(candidate["extra"])) * 0.08, 3
+                        ),
+                    )
             except Exception:
                 command = None
             if command is None:

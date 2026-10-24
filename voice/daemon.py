@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core import Pause
 from loop import VoiceLoop
-from runtime import Audio, Whisper, logger
+from runtime import Audio, CaptureDiagnostics, Whisper, logger
 from session import SessionBridge
 
 
@@ -18,10 +18,13 @@ def main():
     os.umask(0o077)
     p = argparse.ArgumentParser()
     p.add_argument("--home", type=Path, default=Path.home() / "ted-ops/voice")
+    p.add_argument("--debug-audio", action="store_true")
     a = p.parse_args()
     home = a.home
     home.mkdir(parents=True, exist_ok=True)
     emit = logger(home)
+    debug = a.debug_audio or (home / "debug-audio").exists()
+    health = CaptureDiagnostics(emit) if debug else None
     with (home / "service.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -63,7 +66,7 @@ def main():
                     time.sleep(0.25)
                     continue
                 if audio is None:
-                    audio = Audio(home / "bin/TedVoiceAudio", emit)
+                    audio = Audio(home / "bin/TedVoiceAudio", emit, debug=debug)
                     wake.reset()
                     loop = VoiceLoop(
                         home,
@@ -71,6 +74,7 @@ def main():
                         whisper,
                         bridge,
                         emit,
+                        debug=debug,
                         verifier=Whisper(
                             "/opt/homebrew/bin/whisper-cli",
                             Path.home() / ".cache/whisper/ggml-small.en.bin",
@@ -81,10 +85,14 @@ def main():
                     for pcm in frames:
                         sample = np.frombuffer(pcm, dtype=np.int16)
                         score = float(next(iter(wake.predict(sample).values())))
-                        voiced = any(
+                        voiced_frames = [
                             vad.is_speech(pcm[i : i + 640], 16000) for i in range(0, len(pcm), 640)
-                        )
-                        loop.feed(pcm, score, voiced)
+                        ]
+                        if health:
+                            health.feed(pcm, score, voiced_frames)
+                        loop.feed(pcm, score, any(voiced_frames))
+                    if health:
+                        health.tick()
                     loop.tick()
                 except RuntimeError:
                     audio.close()

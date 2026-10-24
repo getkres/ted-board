@@ -181,3 +181,31 @@ class AudioDiagnosticsTests(unittest.TestCase):
                 audio.emit.assert_called_once_with(
                     row["event"], **{k: v for k, v in row.items() if k != "event"}
                 )
+
+
+class CaptureHealthTests(unittest.TestCase):
+    def test_energy_vad_and_score_window_resets_without_retaining_pcm(self):
+        import struct
+
+        from runtime import CaptureDiagnostics
+
+        rows = []
+        d = CaptureDiagnostics(
+            lambda event, **fields: rows.append(dict(event=event, **fields)), now=0
+        )
+        d.feed(struct.pack("<4h", 16384, -16384, 16384, -16384), 0.75, [True, False])
+        d.feed(struct.pack("<4h", 16384, -16384, 16384, -16384), 0.25, [False, False])
+        d.tick(now=4.99)
+        self.assertEqual(rows, [])
+        d.tick(now=5)
+        self.assertEqual(rows[0]["samples"], 8)
+        self.assertAlmostEqual(rows[0]["rms"], 0.5)
+        self.assertAlmostEqual(rows[0]["rms_dbfs"], -6.021, places=2)
+        self.assertEqual(rows[0]["vad_voiced_ratio"], 0.25)
+        self.assertEqual(rows[0]["max_wake_score"], 0.75)
+        self.assertNotIn("pcm", rows[0])
+        d.tick(now=10)
+        self.assertEqual(rows[1]["samples"], 0)
+        self.assertEqual(rows[1]["rms"], 0)
+        self.assertEqual(rows[1]["vad_voiced_ratio"], 0)
+        self.assertEqual(rows[1]["max_wake_score"], 0)
