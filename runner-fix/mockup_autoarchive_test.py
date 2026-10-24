@@ -56,6 +56,10 @@ def frame(id='a', batch='Home v1', project='Fictora', **extra):
     return {**row, **extra}
 
 
+def unrelated_card():
+    return dict(id='unrelated', project='Other', section='done', title='Unrelated work')
+
+
 class Policy(unittest.TestCase):
     def candidates(self, rows, cards=None, pins=None):
         if pins is not None:
@@ -356,7 +360,7 @@ class Runner(unittest.TestCase):
             log = Path(tmp) / 'archive.jsonl'
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
                 result = archive.run_pass(dry_run=dry_run, mockup_call=transport,
-                    cards_call=lambda **kw: dict(cards=cards or []), log_path=log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=cards if cards is not None else [unrelated_card()]), log_path=log, now=NOW)
             events = [json.loads(s) for s in log.read_text().splitlines()] if log.exists() else []
         return result, calls, events
 
@@ -471,7 +475,7 @@ class Runner(unittest.TestCase):
                         requests = []; mockup_requests = []
                         def board_call(**payload):
                             requests.append(payload)
-                            return {'cards': []} if recheck and len(requests) == 1 else response
+                            return {'cards': [unrelated_card()]} if recheck and len(requests) == 1 else response
                         def mockup_call(action=None, **payload):
                             mockup_requests.append(action)
                             return dict(mockups=[frame(verdict='approved')], pins=[])
@@ -487,7 +491,7 @@ class Runner(unittest.TestCase):
                         self.assertNotIn('archive', mockup_requests)
                         self.assertFalse(log.exists(), 'invalid snapshot reached archive_attempt')
 
-    def test_real_card_get_envelopes_use_unscoped_page_fetch(self):
+    def test_empty_card_get_envelopes_are_rejected(self):
         for response in ({'cards': []}, {'cards': [], 'pod_pulse': []},
                          {'cards': [], 'pod_pulse_error': False}):
             requests = []
@@ -496,10 +500,31 @@ class Runner(unittest.TestCase):
                 return response
             deps = dict(board_client=types.SimpleNamespace(call=call))
             with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps):
-                events = archive.run_pass(mockup_call=lambda: dict(mockups=[frame(verdict='approved')], pins=[]),
-                                          log_path=Path(tmp)/'log', now=NOW)
-            self.assertEqual(events[0]['event'], 'would_archive')
+                with self.assertRaisesRegex(ValueError, 'Card snapshot incomplete'):
+                    archive.run_pass(mockup_call=lambda: dict(mockups=[frame(verdict='approved')], pins=[]),
+                                     log_path=Path(tmp)/'log', now=NOW)
             self.assertEqual(requests, [{'page': True}])
+
+    def test_empty_card_feed_never_archives_a_reviewed_batch(self):
+        for empty_on_recheck in (False, True):
+            mockup_requests = []; card_requests = []
+            def mockup_call(action=None, **payload):
+                mockup_requests.append(action)
+                return dict(mockups=[frame(verdict='approved')], pins=[])
+            def card_call(**payload):
+                card_requests.append(payload)
+                if empty_on_recheck and len(card_requests) == 1:
+                    return dict(cards=[dict(id='other', project='Other', section='done', title='Unrelated')])
+                return dict(cards=[])
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,
+                    {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
+                log = Path(tmp)/'archive.jsonl'
+                with self.assertRaisesRegex(ValueError, 'Card snapshot incomplete'):
+                    archive.run_pass(dry_run=False, mockup_call=mockup_call, cards_call=card_call,
+                                     log_path=log, now=NOW)
+                self.assertNotIn('archive', mockup_requests)
+                self.assertFalse(log.exists(), 'empty feed reached archive_attempt')
+            self.assertEqual(card_requests, [{'page': True}] * (2 if empty_on_recheck else 1))
 
     def test_disabled_apply_fails_before_transport_and_heartbeat_does_nothing(self):
         def forbidden(*args, **kwargs):
@@ -573,7 +598,7 @@ class Runner(unittest.TestCase):
             bad_log = Path(tmp) / 'directory';bad_log.mkdir()
             with self.assertRaises(OSError):
                 archive.run_pass(dry_run=False, mockup_call=transport,
-                    cards_call=lambda **kw: dict(cards=[]), log_path=bad_log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=[unrelated_card()]), log_path=bad_log, now=NOW)
         self.assertNotIn('archive', calls)
 
     def test_cli_defaults_to_dry_run(self):
@@ -586,6 +611,18 @@ class Runner(unittest.TestCase):
             self.assertEqual(archive.main(['--dry-run']), 0)
             self.assertEqual(archive.main(['--apply']), 0)
         self.assertEqual(calls, [True, True, False])
+
+    def test_cli_reports_missing_snapshot_helper_without_a_traceback(self):
+        deps = dict(board_card_snapshot=None,
+                    mockup_client=types.SimpleNamespace(call=lambda: dict(mockups=[], pins=[])),
+                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[unrelated_card()])))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            result = archive.main(['--dry-run', '--log', str(Path(tmp)/'log.jsonl')])
+        self.assertEqual(result, 1)
+        self.assertNotIn('Traceback', err.getvalue())
+        self.assertNotIn('board_card_snapshot', err.getvalue())
+        self.assertIn('Mockup auto-archive failed.', err.getvalue())
 
     def test_cli_reports_invalid_card_body_without_a_type_error(self):
         deps = dict(mockup_client=types.SimpleNamespace(call=lambda: dict(
@@ -613,7 +650,7 @@ class PersistentOutcomes(unittest.TestCase):
                 raise outcome
             return dict(ok=True, archived=len(payload['ids']))
         with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
-            return module.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
+            return module.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[unrelated_card()]),
                                    log_path=log, now=now)
 
     def events(self, log):
@@ -673,7 +710,7 @@ class PersistentOutcomes(unittest.TestCase):
                 return dict(mockups=[], pins=[])
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
                 with self.assertRaises(ValueError):
-                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[unrelated_card()]),
                                      log_path=log, now=NOW)
             self.assertEqual(calls, [])
 
@@ -691,7 +728,7 @@ class PersistentOutcomes(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp);log = root / 'archive.jsonl'
                 result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=rows, pins=[]),
-                    cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=[unrelated_card()]), log_path=log, now=NOW)
                 self.assertEqual(sorted(p.name for p in root.iterdir()), expected_files)
                 self.assertEqual(len(result), len(rows))
 
@@ -702,7 +739,7 @@ class PersistentOutcomes(unittest.TestCase):
             state = log.with_suffix('.state.json');lock = state.with_suffix('.lock')
             before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
             archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
-                             cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+                             cards_call=lambda **kw: dict(cards=[unrelated_card()]), log_path=log, now=NOW)
             after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
             self.assertEqual(after, before)
             self.run_pass(log, outcome=RuntimeError(), now=NOW + timedelta(minutes=10))
@@ -713,7 +750,7 @@ class PersistentOutcomes(unittest.TestCase):
             root = Path(tmp);log = root / 'archive.jsonl';state = log.with_suffix('.state.json')
             state.write_text('{invalid')
             result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
-                                      cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+                                      cards_call=lambda **kw: dict(cards=[unrelated_card()]), log_path=log, now=NOW)
             self.assertEqual(result, [])
             self.assertEqual(state.read_text(), '{invalid')
             self.assertEqual(list(root.iterdir()), [state])
@@ -733,7 +770,7 @@ class LockContention(unittest.TestCase):
                     patch.object(archive.fcntl, 'flock', side_effect=BlockingIOError()), \
                     patch('time.monotonic', side_effect=[0.0, 0.0, 1.01]), patch('time.sleep'):
                 with self.assertRaises(TimeoutError):
-                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[unrelated_card()]),
                                      log_path=log, now=NOW, heartbeat=True)
             self.assertEqual(calls, [])
             self.assertEqual((state.read_bytes(), state.stat().st_mtime_ns), before)
@@ -752,7 +789,7 @@ class LockContention(unittest.TestCase):
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), \
                     patch.object(archive.fcntl, 'flock', side_effect=briefly_busy), patch('time.sleep'):
                 result = archive.run_pass(dry_run=False,
-                    mockup_call=lambda: dict(mockups=[], pins=[]), cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+                    mockup_call=lambda: dict(mockups=[], pins=[]), cards_call=lambda **kw: dict(cards=[unrelated_card()]), log_path=log, now=NOW)
             self.assertEqual(result, [])
             self.assertTrue(all(operation & archive.fcntl.LOCK_NB for operation in attempts))
             with log.with_suffix('.state.lock').open('a') as lock:
@@ -762,7 +799,7 @@ class LockContention(unittest.TestCase):
 class HeartbeatRate(unittest.TestCase):
     def run_heartbeat(self, module, log, at, transport):
         deps = dict(mockup_client=types.SimpleNamespace(call=transport),
-                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[])))
+                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[unrelated_card()])))
         with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), patch.dict(sys.modules, deps):
             return module.heartbeat_pass(now=at, log_path=log)
 

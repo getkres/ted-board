@@ -250,7 +250,7 @@
 -    return result
 +    from board_card_snapshot import fetch_cards as validated_fetch
 +    try:
-+        return validated_fetch(section='needs_you')
++        return validated_fetch(section='needs_you', allow_empty=True)
 +    except ValueError:
 +        raise RuntimeError('Card snapshot incomplete') from None
 +
@@ -491,11 +491,11 @@
 +    rows = steward.plan(steward.fetch_cards(), time.time() if now is None else now)['review']
 --- /dev/null
 +++ b/board_card_snapshot.py
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,19 @@
 +"""Shared fail-closed board GET fetch, extracted from the inbox steward."""
 +
 +
-+def fetch_cards(*, call=None, **filters):
++def fetch_cards(*, call=None, allow_empty=False, **filters):
 +    # cards() discards the envelope and defaults a missing cards key to [].
 +    if call is None:
 +        from board_client import call
@@ -503,6 +503,7 @@
 +    if (not isinstance(response, dict) or 'error' in response
 +            or response.get('pod_pulse_error') is True
 +            or 'cards' not in response or not isinstance(response['cards'], list)
++            or (not response['cards'] and not allow_empty)
 +            or len(response['cards']) >= 500
 +            or any(not isinstance(c, dict) or not isinstance(c.get('id'), str)
 +                   or not c['id'] or not isinstance(c.get('project'), str)
