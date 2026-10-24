@@ -12,7 +12,8 @@ class ControlCenterV3 {
   return 'inbox';
  }
  constructor(deps){Object.assign(this,deps);this.reset();}
- reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.linesFallback=false;this.lineCards=[];this.lineSnapshots=[];this.linePulse=[];this.lineDirectory=null;ControlCenterV3.order=[];ControlCenterV3.names={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();}
+ reset(){this.generation=(this.generation||0)+1;this.snapshots=[];this.capabilities={};this.linesFallback=false;this.lineCards=[];this.lineSnapshots=[];this.linePulse=[];this.lineDirectory=null;ControlCenterV3.order=[];ControlCenterV3.names={};this.split='yours';this.item=null;this.focusIndex=0;this.snapshotLoading=false;this.reviewBusy=new Set();this.skipped=new Set();this.skipOrder=[];try{const saved=JSON.parse(sessionStorage.getItem(this.skipAccount())||'[]');if(Array.isArray(saved))this.skipOrder=[...new Set(saved.filter(id=>typeof id==='string'))].slice(-500);}catch{}}
+ skipAccount(){let hash=2166136261;for(const c of this.getKey())hash=Math.imul(hash^c.charCodeAt(0),16777619);return 'ted-board-skipped:'+String(hash>>>0);}
  accept(data){this.acceptLines(data);this.capabilities=data.capabilities||{};if(Array.isArray(data.snapshots))this.snapshots=data.snapshots;else if(this.capabilities.snapshots)this.loadSnapshots();else if(Array.isArray(data.cards))this.snapshots=[];}
  // The authenticated feed owns line identity, order, and display names.
  acceptLines(data){
@@ -90,7 +91,7 @@ class ControlCenterV3 {
    for(const c of this.getState().cards.filter(c=>c.title.toLowerCase().includes(q)).slice(0,8))results.append(this.button(c.title,'',()=>{command.value='';results.hidden=true;this.item=c.id;this.split='yours';this.select('inbox')}));
    if(!results.children.length)results.append(this.el('p',null,'No matching view, space, or card.'));
   };command.addEventListener('input',search);command.addEventListener('keydown',e=>{if(e.key==='Escape'){results.hidden=true;command.blur()}if(e.key==='Enter')results.querySelector('button')?.click()});
-  document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();command.focus();return}if(e.target.closest('input,textarea,select,[contenteditable=true]')||document.querySelector('dialog[open]')||e.metaKey||e.ctrlKey||e.altKey)return;this.keydown?.(e)});
+  document.addEventListener('keydown',e=>{if(this.deciding?.())return;if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();command.focus();return}if(e.target.closest('input,textarea,select,[contenteditable=true]')||document.querySelector('dialog[open]')||e.metaKey||e.ctrlKey||e.altKey)return;this.keydown?.(e)});
  }
  tabs(){
   const tabs=document.getElementById('tabs'),state=this.getState();tabs.replaceChildren();
@@ -110,6 +111,27 @@ class ControlCenterV3 {
  tools(parent){const details=this.el('details','v3-tools'),summary=this.el('summary',null,'Rules, sprint, batches, and jobs');details.append(summary);const row=this.el('div','v3-actions');for(const name of ['Veto','Rules','Sprint','Batches'])row.append(this.button(name,'',()=>controlCenter.open(name)));row.append(this.button('Jobs','',()=>this.select('Jobs')));details.append(row);const all=this.el('details','v3-all-cards');all.append(this.el('summary',null,'All project cards'));const list=this.el('div','v3-card-directory');for(const card of this.getState().cards){const open=this.button(card.project+' / '+card.title,'',()=>{this.item=card.id;this.split='yours';this.select('inbox');});list.append(open);}all.append(list);details.append(all);parent.append(details);}
  needsYou(card){return !['done','killed'].includes(card.section)&&(['yours','needs_you'].includes(card.section)||this.pendingApprovals(card).length>0);}
  needs(){return this.getState().cards.filter(c=>this.needsYou(c));}
+ inboxGroups(){
+  const groups=new Map();
+  for(const card of this.needs()){
+   const line=this.lineOf(card),name=ControlCenterV3.names[line]||String(card.project||card.line||'Ted ops').trim()||'Ted ops',id=line||name.toLowerCase();
+   if(!groups.has(id))groups.set(id,{id,name,cards:[]});groups.get(id).cards.push(card);
+  }
+  return [...groups.values()].sort((a,b)=>b.cards.length-a.cards.length);
+ }
+ inboxQueue(){
+  const cards=this.inboxGroups().flatMap(group=>group.cards),byId=new Map(cards.map(card=>[card.id,card])),skipped=new Set(this.skipOrder);
+  return [...cards.filter(card=>!skipped.has(card.id)),...this.skipOrder.map(id=>byId.get(id)).filter(Boolean)];
+ }
+ skipCard(card){
+  if(!this.needsYou(card))return;
+  const queue=this.inboxQueue(),index=queue.findIndex(c=>c.id===card.id);if(index<0)return;
+  const next=queue[(index+1)%queue.length];
+  this.skipOrder=this.skipOrder.filter(id=>id!==card.id&&queue.some(c=>c.id===id));this.skipOrder.push(card.id);this.skipped.add(card.id);
+  try{sessionStorage.setItem(this.skipAccount(),JSON.stringify(this.skipOrder));}catch{}
+  this.item=null;this.focusIndex=this.inboxQueue().findIndex(c=>c.id===next.id);this.redraw();
+  requestAnimationFrame(()=>{const target=[...document.querySelectorAll('[data-ticket]')].find(node=>node.dataset.ticket===next.id);target?.focus();});
+ }
  cardsForLine(which){
   const number=(value,fallback)=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))?Number(value):fallback;
   return this.getState().cards.filter(c=>this.lineOf(c)===which).sort((a,b)=>number(b.priority_value,0)-number(a.priority_value,0)||number(a.sort,Infinity)-number(b.sort,Infinity));
@@ -139,14 +161,19 @@ class ControlCenterV3 {
   const paper=this.paper(main),splits=this.el('nav','v3-splits');splits.setAttribute('aria-label','Inbox splits');
   const routines=this.feed('routines'),woke=this.payloads('decisions').flatMap(p=>Array.isArray(p.woke)?p.woke:[]);
   for(const [id,label,count] of [['yours','Yours',n],['decided','Ted decided',calls.length],['routines','Routines',routines.filter(r=>!['fine','ok'].includes(r.state||r.status||r.ok)).length],['woke','Woke',woke.length]]){const b=this.button(label,'',()=>{this.split=id;this.item=null;this.redraw()});b.dataset.split=id;b.setAttribute('aria-pressed',String(this.split===id));b.append(this.el('span','v3-count',count));splits.append(b);}paper.append(splits);
-  const keys=this.el('p','v3-keys','1 yes · 2 not yet · H snooze · J / K move · U undo · Tab next split');paper.append(keys);
+  const keys=this.el('p','v3-keys','1 yes · 2 not yet · H snooze · S skip · J / K move · U undo · Tab next split');paper.append(keys);
   if(this.split==='decided'){const grid=this.el('div','v3-inbox-grid');grid.append(this.decisionList(calls));grid.append(this.say(TedTheme.lines.decided,'sign:VETO?'));paper.append(grid);}
   else if(this.split==='routines')this.routines(paper,routines);
   else if(this.split==='woke'){if(!woke.length)this.empty(paper,'No wake-up status logged. Approvals stay on their cards.');for(const w of woke){const row=this.el('article','v3-row');row.append(this.el('span','v3-status',w.state||'not logged'),this.el('h3',null,w.title||w.t||'Approval'),this.el('p',null,w.why||w.now||w.s||'Not logged.'));paper.append(row);}}
   else{
-   const grid=this.el('div','v3-inbox-grid'),list=this.el('div','v3-yours'),cards=this.needs();
+   const grid=this.el('div','v3-inbox-grid v3-project-layout'),list=this.el('div','v3-yours v3-projects'),cards=this.inboxQueue(),positions=new Map(cards.map((card,i)=>[card.id,i]));
    if(!cards.length)this.empty(list,'Nothing on you right now. Go live a little.');
-   for(const [i,card] of cards.entries())list.append(this.ticket(card,i));
+   for(const [i,group] of this.inboxGroups().entries()){
+    const section=this.el('section','v3-project-group'),heading=this.el('h2','v3-project-heading');heading.id='inbox-project-'+i;section.setAttribute('aria-labelledby',heading.id);
+    heading.append(this.el('span','v3-project-name',group.name),this.el('span','v3-project-count',String(group.cards.length)));section.append(heading);
+    for(const card of group.cards.sort((a,b)=>positions.get(a.id)-positions.get(b.id)))section.append(this.ticket(card,positions.get(card.id)));
+    list.append(section);
+   }
    grid.append(list);
    const selected=this.getState().cards.find(c=>c.id===this.item);if(selected)grid.append(this.itemDetail(selected,cards));else {const side=this.el('aside','v3-stream');side.append(this.el('h2',null,'Ted decided'),this.decisionList(calls));grid.append(side);}paper.append(grid);
   }
@@ -155,12 +182,12 @@ class ControlCenterV3 {
  }
  ticket(card,i){
   const row=this.el('article','v3-ticket'+(i===0?' v3-ticket-hero':''));row.dataset.cardId=card.id;row.dataset.ticket=card.id;row.tabIndex=0;row.addEventListener('focusin',()=>this.focusIndex=i);
-  const meta=this.el('div','v3-meta');meta.append(this.el('span','v3-tag',this.kind(card)),this.el('strong',null,ControlCenterV3.names[this.lineOf(card)]||card.line||card.project));if(this.unreadCount(card))meta.append(replyDot());this.attentionBadges(meta,this.unreadCount(card),this.pendingApprovals(card).length);row.append(meta);
+  const meta=this.el('div','v3-meta');meta.append(this.el('span','v3-tag',this.kind(card)),this.el('strong',null,ControlCenterV3.names[this.lineOf(card)]||card.line||card.project));if(this.skipped.has(card.id))meta.append(this.el('span','v3-tag v3-skipped','skipped'));if(this.unreadCount(card))meta.append(replyDot());this.attentionBadges(meta,this.unreadCount(card),this.pendingApprovals(card).length);row.append(meta);
   const open=this.button(card.title,'v3-ticket-title',()=>{this.item=card.id;this.redraw();document.querySelector('.v3-detail')?.scrollIntoView({block:'nearest'});});open.dataset.openCard=card.id;row.append(open,this.el('p','v3-why',card.why||String(card.body||'').split('\n')[0]||'Open this card to read the details.'));
   const actions=this.el('div','v3-actions');for(const o of options(card))actions.append(this.button(o.label,'primary',()=>this.answerCard(card,o)));
   if(this.kind(card)==='database write')actions.append(this.button('Read the SQL','',()=>{this.item=card.id;this.redraw();document.querySelector('.v3-detail')?.scrollIntoView({block:'nearest'});}));
   else this.swipe(row,()=>this.quick(card,0),()=>this.quick(card,1));
-  row.append(actions);return row;
+  actions.append(this.button('Skip','v3-skip',()=>this.skipCard(card)));row.append(actions);return row;
  }
  async answerCard(card,option){const ok=await act(card,'choice',option.value);if(ok){this.lastAnswer={id:card.id};this.item=null;this.redraw();}}
  quick(card,index){const option=options(card)[index];if(option){const ks=[card.decision_kind,card.kind].filter(Boolean);if((!ks.length||ks.some(k=>TedDecisionKinds.isReserved(k)))&&!confirm(option.label+': '+card.title+'?'))return;return this.answerCard(card,option);}this.notice('Open the card and choose one of its recorded actions.');}
@@ -170,7 +197,7 @@ class ControlCenterV3 {
   if(card.ted_call)detail.append(this.el('p','v3-call',card.ted_call));
   const original=this.renderCard(card);original.querySelector('h3')?.remove();detail.append(original);
   if(this.kind(card)==='database write'){const sql=this.el('details','v3-sql');sql.open=true;sql.append(this.el('summary',null,'Read the SQL'));const url=safeURL(card.sql_url);if(url){const a=this.el('a',null,'Open the SQL');a.href=url;a.target='_blank';a.rel='noopener noreferrer';sql.append(a);}else sql.append(this.el('pre',null,card.sql||card.sql_text||card.body||'SQL attachment not logged. Ask Ted for apply.sql before approving.'));detail.append(sql);}
-  const verbs=this.el('div','v3-actions');verbs.append(this.button('Snooze','',()=>act(card,'move','up_next')));detail.append(verbs);return detail;
+  const verbs=this.el('div','v3-actions');verbs.append(this.button('Snooze','',()=>act(card,'move','up_next')));if(this.needsYou(card))verbs.append(this.button('Skip','v3-skip',()=>this.skipCard(card)));detail.append(verbs);return detail;
  }
  decisionList(calls){
   const list=this.el('div','v3-decisions');if(!calls.length)this.empty(list,'No calls logged.');
@@ -190,7 +217,7 @@ class ControlCenterV3 {
   for(const r of rows){const row=this.el('article','v3-routine'),state=r.state||r.status||({ok:'fine',warn:'look',fail:'broke'})[r.ok]||'not logged';row.append(this.el('span','v3-status',state),this.el('h3',null,r.name||r.n),this.el('p',null,r.last_output||r.out||'Output not logged.'),this.el('small',null,'Last run: '+(r.last_run||r.last||'not logged')+' · '+(r.schedule||r.sched||'Schedule not logged')));(['fine','ok'].includes(state)?fine:list).append(row);}list.append(fine);grid.append(reviews,list);parent.append(grid,this.say(TedTheme.lines.routines,'glass'));
  }
  async reviewChoice(item,choice){if(!this.capabilities.review_choice)return;this.reviewBusy||=new Set();if(this.reviewBusy.has(item.id))return;this.reviewBusy.add(item.id);const generation=this.generation;this.redraw();try{const result=await this.api('POST',{action:'review_choice',item_id:item.id,choice,operation_id:crypto.randomUUID()});if(generation!==this.generation)return;if(!result.ok)throw Error('Review choice was not confirmed.');for(const p of this.payloads('routines'))if(Array.isArray(p.review_items))p.review_items=p.review_items.filter(i=>i.id!==item.id);this.notice(choice==='card'?'Card requested.':'Review choice saved.');}catch(e){if(generation===this.generation)this.notice(e.message,true);}finally{if(generation===this.generation){this.reviewBusy.delete(item.id);this.redraw();}}}
- keydown(e){if(ControlCenterV3.isMockups(this.getState().project)){this.mockups.keydown?.(e);return;}if(this.spacesKeydown?.(e))return;if(this.getState().project!=='inbox')return;if(e.key==='Tab'&&['BODY','MAIN'].includes(e.target.tagName)){e.preventDefault();const splits=['yours','decided','routines','woke'];this.split=splits[(splits.indexOf(this.split)+1)%4];this.redraw();return;}if(this.split==='routines'){const choice=({k:'keep',s:'skip',c:'card'})[e.key.toLowerCase()];if(choice){const items=this.payloads('routines').flatMap(p=>Array.isArray(p.review_items)?p.review_items:[]);const id=e.target.closest('[data-review-id]')?.dataset.reviewId,item=items.find(i=>i.id===id)||items[0];if(item){e.preventDefault();this.reviewChoice(item,choice);}}return;}if(this.split!=='yours'){if(e.key.toLowerCase()==='u')document.querySelector('.v3-decisions button:not(:disabled)')?.textContent==='Undo'&&document.querySelector('.v3-decisions button:not(:disabled)').click();return;}const cards=this.needs();if(['j','k'].includes(e.key.toLowerCase())){e.preventDefault();this.focusIndex=Math.max(0,Math.min(cards.length-1,this.focusIndex+(e.key.toLowerCase()==='j'?1:-1)));document.querySelectorAll('[data-ticket]')[this.focusIndex]?.focus();return;}const card=cards.find(c=>c.id===this.item)||cards[this.focusIndex];if(card&&['1','2'].includes(e.key)){e.preventDefault();this.quick(card,Number(e.key)-1);}if(card&&e.key.toLowerCase()==='h'){e.preventDefault();act(card,'move','up_next');}if(e.key.toLowerCase()==='u'){this.notice('Use the recorded Undo action in Ted decided or Mockups.');}if(e.key==='Tab'&&['BODY','MAIN'].includes(e.target.tagName)){e.preventDefault();const splits=['yours','decided','routines','woke'];this.split=splits[(splits.indexOf(this.split)+1)%4];this.redraw();}}
+ keydown(e){if(ControlCenterV3.isMockups(this.getState().project)){this.mockups.keydown?.(e);return;}if(this.spacesKeydown?.(e))return;if(this.getState().project!=='inbox')return;if(e.key==='Tab'&&['BODY','MAIN'].includes(e.target.tagName)){e.preventDefault();const splits=['yours','decided','routines','woke'];this.split=splits[(splits.indexOf(this.split)+1)%4];this.redraw();return;}if(this.split==='routines'){const choice=({k:'keep',s:'skip',c:'card'})[e.key.toLowerCase()];if(choice){const items=this.payloads('routines').flatMap(p=>Array.isArray(p.review_items)?p.review_items:[]);const id=e.target.closest('[data-review-id]')?.dataset.reviewId,item=items.find(i=>i.id===id)||items[0];if(item){e.preventDefault();this.reviewChoice(item,choice);}}return;}if(this.split!=='yours'){if(e.key.toLowerCase()==='u')document.querySelector('.v3-decisions button:not(:disabled)')?.textContent==='Undo'&&document.querySelector('.v3-decisions button:not(:disabled)').click();return;}const cards=this.inboxQueue();if(['j','k'].includes(e.key.toLowerCase())){e.preventDefault();this.focusIndex=Math.max(0,Math.min(cards.length-1,this.focusIndex+(e.key.toLowerCase()==='j'?1:-1)));const next=cards[this.focusIndex];[...document.querySelectorAll('[data-ticket]')].find(node=>node.dataset.ticket===next?.id)?.focus();return;}const focused=e.target.closest('[data-ticket]')?.dataset.ticket;const card=cards.find(c=>c.id===(focused||this.item))||cards[this.focusIndex];if(card&&e.key.toLowerCase()==='s'){e.preventDefault();this.skipCard(card);return;}if(card&&['1','2'].includes(e.key)){e.preventDefault();this.quick(card,Number(e.key)-1);}if(card&&e.key.toLowerCase()==='h'){e.preventDefault();act(card,'move','up_next');}if(e.key.toLowerCase()==='u'){this.notice('Use the recorded Undo action in Ted decided or Mockups.');}if(e.key==='Tab'&&['BODY','MAIN'].includes(e.target.tagName)){e.preventDefault();const splits=['yours','decided','routines','woke'];this.split=splits[(splits.indexOf(this.split)+1)%4];this.redraw();}}
 
  render(main,route){
   if(!['inbox','spaces','roadmap'].includes(route)&&!route.includes(':')&&!ControlCenterV3.isMockups(route))return false;
