@@ -24,6 +24,17 @@ if 'TED_RUNTIME_SOURCE' not in os.environ:
                    cwd=ROOT, check=True, capture_output=True)
 
 
+# Reconstruct the exact shared new-file artifact from the steward runtime bundle.
+if 'TED_RUNTIME_SOURCE' not in os.environ:
+    dependency = (HERE / 'inbox-steward/runtime.patch').read_text()
+    shared = dependency[dependency.index('--- /dev/null\n+++ b/board_card_snapshot.py\n'):]
+    subprocess.run(['patch', '-s', '-p1'], input=shared, text=True,
+                   cwd=ROOT, check=True, capture_output=True)
+elif not (ROOT / 'board_card_snapshot.py').is_file():
+    raise SystemExit('Private candidate requires the reviewed board_card_snapshot.py helper.')
+sys.path.insert(0, str(ROOT))
+
+
 def load(name, filename, deps=None):
     spec = importlib.util.spec_from_file_location(name, ROOT / filename)
     module = importlib.util.module_from_spec(spec)
@@ -151,18 +162,99 @@ class Policy(unittest.TestCase):
     def test_existing_build_title_and_mockup_id_links_are_supported(self):
         for title, body in [('build approved: Home v1', ''),
                             ('Finished work', 'Home (mockup ID: a)')]:
-            result = self.candidates([frame()], [dict(id='card-a', project='Fictora',
+            result = self.candidates([frame(verdict='needs_work')], [dict(id='card-a', project='Fictora',
                 section='done', title=title, body=body)])
             self.assertEqual(result[0]['reason'], 'linked_card_done')
 
-    def test_missing_active_cross_project_and_fuzzy_links_stay_open(self):
+    def test_id_reference_in_terminal_card_cannot_hide_unreviewed_frames(self):
+        for section in ('done', 'killed'):
+            card = dict(id='card-a', project='Fictora', section=section,
+                        title='Finished one frame', body='Home (mockup ID: a)')
+            for rows in ([frame()], [frame(verdict='approved'), frame('pending')],
+                         [frame(verdict='unknown')], [frame(title='Notes')]):
+                self.assertEqual(self.candidates(rows, [card]), [])
+
+    def test_id_reference_terminal_card_requires_all_active_reviewable_verdicts(self):
+        for section in ('done', 'killed'):
+            rows = [frame(verdict='needs_work'), frame('b', verdict='approved'),
+                    frame('note', title='Notes'), frame('who', title='Who made and checked this')]
+            card = dict(id='card-a', project='Fictora', section=section,
+                        title='Finished work', body='Home (mockup ID: a)')
+            result = self.candidates(rows, [card])
+            self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+            self.assertEqual(result[0]['ids'], ['a', 'b', 'note', 'who'])
+
+    def test_exact_build_title_link_still_archives_unreviewed_batch(self):
+        for section in ('done', 'killed'):
+            card = dict(id='card-a', project='Fictora', section=section,
+                        title='build approved: Home v1', body='')
+            result = self.candidates([frame(), frame('b')], [card])
+            self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+
+    def test_all_reviewed_waits_for_every_same_project_linked_card(self):
+        for section in ('up_next', 'ted_doing', 'needs_you'):
+            for link in ('explicit', 'title', 'reference'):
+                row = frame(verdict='approved', **({'card_id': 'work'} if link == 'explicit' else {}))
+                card = dict(id='work', project='Fictora', section=section,
+                            title='build approved: Home v1' if link == 'title' else 'Build work',
+                            body='mockup ID: a' if link == 'reference' else None)
+                terminal = dict(id='finished', project='Fictora', section='done',
+                                title='Finished frame', body='mockup ID: a')
+                # A newer round must not turn this blocked all-reviewed batch into a stale archive.
+                rows = [row, frame('new', batch='Home v2', created_at=RECENT)]
+                self.assertEqual(self.candidates(rows, [terminal, card]), [], (section, link))
+
+    def test_all_reviewed_allows_terminal_unlinked_and_cross_project_cards(self):
+        rows = [frame(verdict='approved')]
+        for card in (dict(id='x', project='Fictora', section='done', title='build approved: Home v1'),
+                     dict(id='x', project='Fictora', section='killed', title='Build', body='mockup ID: a'),
+                     dict(id='x', project='Fictora', section='ted_doing', title='Unrelated work'),
+                     dict(id='x', project='Bookish', section='ted_doing', title='Other work',
+                          body='mockup ID: a')):
+            self.assertEqual(self.candidates(rows, [card])[0]['reason'], 'all_reviewed')
+
+    def test_card_body_requires_string_or_none(self):
+        for body in (True, False, 1, 0, ['mockup ID: a'], {'text': 'mockup ID: a'}):
+            card = dict(id='x', project='Fictora', section='done', title='Build', body=body)
+            with self.assertRaises(ValueError):
+                self.candidates([frame(verdict='needs_work')], [card])
+        for body in (None, '', 'ordinary text'):
+            card = dict(id='x', project='Fictora', section='done', title='Build', body=body)
+            self.assertEqual(self.candidates([frame(verdict='needs_work')], [card]), [])
+
+    def test_missing_active_cross_project_body_and_fuzzy_links_stay_open(self):
         for card in (dict(id='x', project='Fictora', section='up_next', title='build approved: Home v1'),
-                     dict(id='x', project='Bookish', section='done', title='build approved: Home v1'),
+                     dict(id='x', project='Bookish', section='done', title='Other', body='mockup ID: a'),
                      dict(id='x', project='Fictora', section='done', title='Home v1'),
                      dict(id='x', project='Fictora', section='done', title='build approved: Home v10'),
                      dict(id='x', project='Fictora', section='done', title='Other', body='mockup ID: abc')):
             with self.subTest(card=card):
                 self.assertEqual(self.candidates([frame(card_id='missing')], [card]), [])
+
+    def test_authoritative_links_block_active_cards_regardless_of_project(self):
+        for project in ('Fictora', 'Bookish'):
+            for link in ('explicit', 'title', 'batch'):
+                for verdict in (None, 'needs_work', 'approved'):
+                    extra = {'card_id': 'build'} if link == 'explicit' else {}
+                    rows = [frame(verdict=verdict, **extra),
+                            frame('new', batch='Home v2', created_at=RECENT)]
+                    card = dict(id='build', project=project, section='doing',
+                                title='build approved: Home v1' if link == 'title' else 'Other work',
+                                batch='Home v1' if link == 'batch' else None)
+                    self.assertEqual(self.candidates(rows, [card]), [], (project, link, verdict))
+
+    def test_terminal_authoritative_links_match_across_projects(self):
+        for link in ('explicit', 'title'):
+            for section in ('done', 'killed'):
+                card = dict(id='build', project='Bookish', section=section,
+                            title='build approved: Home v1' if link == 'title' else 'Other work',
+                            batch='Home v1' if link == 'batch' else None)
+                result = self.candidates([frame(card_id='build' if link == 'explicit' else None)], [card])
+                self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+
+    def test_terminal_batch_metadata_alone_does_not_archive_unreviewed_frames(self):
+        card = dict(id='build', project='Bookish', section='done', title='Other work', batch='Home v1')
+        self.assertEqual(self.candidates([frame()], [card]), [])
 
     def test_multiple_linked_cards_require_all_to_be_terminal(self):
         cards = [dict(id='done', project='Fictora', section='done', title='build approved: Home v1'),
@@ -180,6 +272,26 @@ class Policy(unittest.TestCase):
                       frame('b', batch='Home v2'), frame('b', batch='Unrelated', created_at=RECENT)):
             with self.subTest(newer=newer):
                 self.assertEqual(self.candidates([frame(), newer]), [])
+
+    def test_active_link_blocks_stale_unreviewed_and_needs_work_batches(self):
+        old = (NOW - timedelta(days=10)).isoformat()
+        for verdict in (None, 'needs_work'):
+            for section in ('doing', 'ted_doing', 'up_next', 'needs_you'):
+                for link in ('title', 'explicit', 'reference'):
+                    extra = {'card_id': 'build'} if link == 'explicit' else {}
+                    rows = [frame(batch='Hair v1', verdict=verdict, created_at=old,
+                                  verdict_change=dict(at=old), **extra),
+                            frame('new', batch='Hair v2', created_at=RECENT)]
+                    card = dict(id='build', project='Fictora', section=section,
+                                title='build approved: Hair v1' if link == 'title' else 'Active build',
+                                body='mockup ID: a' if link == 'reference' else None)
+                    self.assertEqual(self.candidates(rows, [card]), [], (verdict, section, link))
+
+    def test_active_cross_project_body_reference_does_not_block_stale_supersession(self):
+        rows = [frame(), frame('new', batch='Home v2', created_at=RECENT)]
+        card = dict(id='build', project='Bookish', section='doing', title='Other work',
+                    body='mockup ID: a')
+        self.assertEqual(self.candidates(rows, [card])[0]['reason'], 'stale_superseded')
 
     def test_unversioned_date_round_and_hyphenated_prefixes(self):
         for old, new in [('Home', 'Home v2'), ('Home round 1', 'Home round 2'),
@@ -244,7 +356,7 @@ class Runner(unittest.TestCase):
             log = Path(tmp) / 'archive.jsonl'
             with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
                 result = archive.run_pass(dry_run=dry_run, mockup_call=transport,
-                    cards_call=lambda: cards or [], log_path=log, now=NOW)
+                    cards_call=lambda **kw: dict(cards=cards or []), log_path=log, now=NOW)
             events = [json.loads(s) for s in log.read_text().splitlines()] if log.exists() else []
         return result, calls, events
 
@@ -345,6 +457,50 @@ class Runner(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_pass(dry_run=False, responder=lambda *args: dict(mockups=[frame(verdict='approved')]))
 
+    def test_invalid_card_envelopes_raise_before_archive_on_initial_read_and_recheck(self):
+        invalid = [None, [], {}, {'ok': True}, {'error': 'unavailable'},
+                   {'cards': [], 'error': None}, {'cards': [], 'pod_pulse_error': True},
+                   {'cards': None}, {'cards': {}}, {'cards': 'invalid'}, {'cards': [None]}]
+        valid_card = dict(id='unrelated', project='Test', section='done', title='Other')
+        invalid += [dict(cards=[valid_card] * size) for size in (500, 501)]
+        for response in invalid:
+            for recheck in (False, True):
+                for dry_run in ((False,) if recheck else (True, False)):
+                    with self.subTest(response_type=type(response).__name__, recheck=recheck,
+                                      dry_run=dry_run), tempfile.TemporaryDirectory() as tmp:
+                        requests = []; mockup_requests = []
+                        def board_call(**payload):
+                            requests.append(payload)
+                            return {'cards': []} if recheck and len(requests) == 1 else response
+                        def mockup_call(action=None, **payload):
+                            mockup_requests.append(action)
+                            return dict(mockups=[frame(verdict='approved')], pins=[])
+                        # The old convenience adapter loses the failed envelope.
+                        deps = dict(board_client=types.SimpleNamespace(call=board_call, cards=lambda: []))
+                        log = Path(tmp) / 'archive.jsonl'
+                        with patch.dict(sys.modules, deps), patch.dict(os.environ,
+                                {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
+                            with self.assertRaises(ValueError):
+                                archive.run_pass(dry_run=dry_run, mockup_call=mockup_call,
+                                                 log_path=log, now=NOW)
+                        self.assertEqual(requests, [{'page': True}] * (2 if recheck else 1))
+                        self.assertNotIn('archive', mockup_requests)
+                        self.assertFalse(log.exists(), 'invalid snapshot reached archive_attempt')
+
+    def test_real_card_get_envelopes_use_unscoped_page_fetch(self):
+        for response in ({'cards': []}, {'cards': [], 'pod_pulse': []},
+                         {'cards': [], 'pod_pulse_error': False}):
+            requests = []
+            def call(**payload):
+                requests.append(payload)
+                return response
+            deps = dict(board_client=types.SimpleNamespace(call=call))
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps):
+                events = archive.run_pass(mockup_call=lambda: dict(mockups=[frame(verdict='approved')], pins=[]),
+                                          log_path=Path(tmp)/'log', now=NOW)
+            self.assertEqual(events[0]['event'], 'would_archive')
+            self.assertEqual(requests, [{'page': True}])
+
     def test_disabled_apply_fails_before_transport_and_heartbeat_does_nothing(self):
         def forbidden(*args, **kwargs):
             self.fail('disabled pass called transport')
@@ -371,7 +527,7 @@ class Runner(unittest.TestCase):
                 calls.append(action)
                 return dict(mockups=[frame()], pins=[])
             result = archive.run_pass(dry_run=False, mockup_call=transport,
-                cards_call=lambda: next(cards), log_path=Path(tmp)/'log', now=NOW)
+                cards_call=lambda **kw: dict(cards=next(cards)), log_path=Path(tmp)/'log', now=NOW)
         self.assertEqual(calls, [None, None])
         self.assertEqual(result[0]['event'], 'skipped_changed')
 
@@ -414,9 +570,10 @@ class Runner(unittest.TestCase):
             return dict(mockups=[frame(verdict='approved')], pins=[])
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,
                 {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
+            bad_log = Path(tmp) / 'directory';bad_log.mkdir()
             with self.assertRaises(OSError):
                 archive.run_pass(dry_run=False, mockup_call=transport,
-                    cards_call=lambda: [], log_path=Path(tmp), now=NOW)
+                    cards_call=lambda **kw: dict(cards=[]), log_path=bad_log, now=NOW)
         self.assertNotIn('archive', calls)
 
     def test_cli_defaults_to_dry_run(self):
@@ -429,6 +586,241 @@ class Runner(unittest.TestCase):
             self.assertEqual(archive.main(['--dry-run']), 0)
             self.assertEqual(archive.main(['--apply']), 0)
         self.assertEqual(calls, [True, True, False])
+
+    def test_cli_reports_invalid_card_body_without_a_type_error(self):
+        deps = dict(mockup_client=types.SimpleNamespace(call=lambda: dict(
+                        mockups=[frame(verdict='needs_work')], pins=[])),
+                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[dict(
+                        id='x', project='Fictora', section='done', title='Build', body={'private': 'data'})])))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            result = archive.main(['--dry-run', '--log', str(Path(tmp)/'log.jsonl')])
+        self.assertEqual(result, 1)
+        self.assertNotIn('Traceback', err.getvalue())
+        self.assertNotIn('private', err.getvalue())
+
+
+class PersistentOutcomes(unittest.TestCase):
+    def run_pass(self, log, *, outcome=None, rows=None, fresh=None, module=archive, now=NOW):
+        initial = [frame(verdict='approved')] if rows is None else rows
+        reads = 0
+        def transport(action=None, **payload):
+            nonlocal reads
+            if action is None:
+                reads += 1
+                return dict(mockups=fresh if reads > 1 and fresh is not None else initial, pins=[])
+            if isinstance(outcome, Exception):
+                raise outcome
+            return dict(ok=True, archived=len(payload['ids']))
+        with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
+            return module.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
+                                   log_path=log, now=now)
+
+    def events(self, log):
+        return [json.loads(line) for line in log.read_text().splitlines()]
+
+    def test_repeated_failure_logs_once_across_module_reloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            first = self.run_pass(log, outcome=RuntimeError('first private message'))
+            reloaded = load('reloaded_outcomes', 'mockup_autoarchive.py')
+            second = self.run_pass(log, outcome=RuntimeError('different private message'), module=reloaded,
+                                   now=NOW + timedelta(minutes=10))
+            self.assertEqual(first[0]['event'], 'archive_failed')
+            self.assertEqual(second[0]['event'], 'archive_failed')
+            names = [event['event'] for event in self.events(log)]
+            self.assertEqual(names.count('archive_failed'), 1)
+            self.assertEqual(names.count('archive_attempt'), 2)
+
+    def test_failure_logs_again_when_error_or_batch_ids_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            self.run_pass(log, outcome=RuntimeError())
+            self.run_pass(log, outcome=TimeoutError())
+            self.run_pass(log, outcome=TimeoutError(), rows=[frame('b', verdict='approved')])
+            self.assertEqual([e['error_type'] for e in self.events(log) if e['event'] == 'archive_failed'],
+                             ['RuntimeError', 'TimeoutError', 'TimeoutError'])
+
+    def test_repeated_skipped_change_logs_once_until_observed_state_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            changed = [frame(verdict='approved'), frame('b', verdict='approved')]
+            for i in range(2):
+                result = self.run_pass(log, fresh=changed, now=NOW + timedelta(minutes=10*i))
+                self.assertEqual(result[0]['event'], 'skipped_changed')
+            self.run_pass(log, fresh=[frame(verdict='approved'), frame('c', verdict='approved')])
+            self.assertEqual([e['event'] for e in self.events(log)], ['skipped_changed', 'skipped_changed'])
+
+    def test_changed_outcome_and_loss_of_eligibility_reset_backoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            self.run_pass(log, outcome=RuntimeError())
+            self.run_pass(log)
+            self.run_pass(log, outcome=RuntimeError())
+            self.run_pass(log, rows=[])
+            self.run_pass(log, outcome=RuntimeError())
+            names = [e['event'] for e in self.events(log)]
+            self.assertEqual(names.count('archive_failed'), 3)
+            self.assertEqual(names.count('archived'), 1)
+
+    def test_corrupt_outcome_state_fails_closed_before_transport(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            log.with_suffix('.state.json').write_text('{invalid')
+            calls = []
+            def transport(*args, **kwargs):
+                calls.append(args)
+                return dict(mockups=[], pins=[])
+            with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
+                with self.assertRaises(ValueError):
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
+                                     log_path=log, now=NOW)
+            self.assertEqual(calls, [])
+
+    def test_invalid_persisted_cadence_or_outcome_map_fails_closed(self):
+        for state in (dict(heartbeat_at='invalid', batches={}), dict(heartbeat_at=None, batches=[]),
+                      dict(heartbeat_at=None, batches={'batch': None})):
+            with tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp) / 'archive.jsonl'
+                log.with_suffix('.state.json').write_text(json.dumps(state))
+                with self.assertRaises(ValueError):
+                    self.run_pass(log)
+
+    def test_dry_run_creates_only_its_requested_audit_log(self):
+        for rows, expected_files in (([], []), ([frame(verdict='approved')], ['archive.jsonl'])):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp);log = root / 'archive.jsonl'
+                result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=rows, pins=[]),
+                    cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+                self.assertEqual(sorted(p.name for p in root.iterdir()), expected_files)
+                self.assertEqual(len(result), len(rows))
+
+    def test_dry_run_preserves_existing_throttle_and_backoff_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp);log = root / 'archive.jsonl'
+            self.run_pass(log, outcome=RuntimeError())
+            state = log.with_suffix('.state.json');lock = state.with_suffix('.lock')
+            before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
+            archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
+                             cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+            after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
+            self.assertEqual(after, before)
+            self.run_pass(log, outcome=RuntimeError(), now=NOW + timedelta(minutes=10))
+            self.assertEqual([e['event'] for e in self.events(log)].count('archive_failed'), 1)
+
+    def test_dry_run_does_not_read_corrupt_control_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp);log = root / 'archive.jsonl';state = log.with_suffix('.state.json')
+            state.write_text('{invalid')
+            result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
+                                      cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+            self.assertEqual(result, [])
+            self.assertEqual(state.read_text(), '{invalid')
+            self.assertEqual(list(root.iterdir()), [state])
+
+
+class LockContention(unittest.TestCase):
+    def test_busy_lock_times_out_before_transport_or_control_state_change(self):
+        calls = []
+        def transport(*args, **kwargs):
+            calls.append(args)
+            return dict(mockups=[], pins=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp);log = root/'archive.jsonl';state = log.with_suffix('.state.json')
+            state.write_text(json.dumps(dict(heartbeat_at=OLD, batches={})))
+            before = (state.read_bytes(), state.stat().st_mtime_ns)
+            with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), \
+                    patch.object(archive.fcntl, 'flock', side_effect=BlockingIOError()), \
+                    patch('time.monotonic', side_effect=[0.0, 0.0, 1.01]), patch('time.sleep'):
+                with self.assertRaises(TimeoutError):
+                    archive.run_pass(dry_run=False, mockup_call=transport, cards_call=lambda **kw: dict(cards=[]),
+                                     log_path=log, now=NOW, heartbeat=True)
+            self.assertEqual(calls, [])
+            self.assertEqual((state.read_bytes(), state.stat().st_mtime_ns), before)
+            self.assertFalse(log.exists())
+
+    def test_transient_lock_contention_retries_then_releases_lock(self):
+        real_flock = archive.fcntl.flock
+        attempts = []
+        def briefly_busy(fd, operation):
+            attempts.append(operation)
+            if len(attempts) == 1:
+                raise BlockingIOError()
+            return real_flock(fd, operation)
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp)/'archive.jsonl'
+            with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), \
+                    patch.object(archive.fcntl, 'flock', side_effect=briefly_busy), patch('time.sleep'):
+                result = archive.run_pass(dry_run=False,
+                    mockup_call=lambda: dict(mockups=[], pins=[]), cards_call=lambda **kw: dict(cards=[]), log_path=log, now=NOW)
+            self.assertEqual(result, [])
+            self.assertTrue(all(operation & archive.fcntl.LOCK_NB for operation in attempts))
+            with log.with_suffix('.state.lock').open('a') as lock:
+                real_flock(lock, archive.fcntl.LOCK_EX | archive.fcntl.LOCK_NB)
+
+
+class HeartbeatRate(unittest.TestCase):
+    def run_heartbeat(self, module, log, at, transport):
+        deps = dict(mockup_client=types.SimpleNamespace(call=transport),
+                    board_client=types.SimpleNamespace(call=lambda **kw: dict(cards=[])))
+        with patch.dict(os.environ, {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}), patch.dict(sys.modules, deps):
+            return module.heartbeat_pass(now=at, log_path=log)
+
+    def test_ten_minute_limit_persists_across_reloads_and_allows_boundary(self):
+        reads = []
+        def transport(action=None, **payload):
+            self.assertIsNone(action)
+            reads.append(action)
+            return dict(mockups=[], pins=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            self.run_heartbeat(archive, log, NOW, transport)
+            reloaded = load('reloaded_heartbeat', 'mockup_autoarchive.py')
+            self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=9, seconds=59), transport)
+            self.assertEqual(len(reads), 1)
+            self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=10), transport)
+            self.assertEqual(len(reads), 2)
+            self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=10, seconds=30), transport)
+            self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=9), transport)
+            self.assertEqual(len(reads), 2)
+
+    def test_failed_pass_is_rate_limited_before_the_network_read(self):
+        reads = []
+        def transport(*args, **kwargs):
+            reads.append('read')
+            raise RuntimeError('network unavailable')
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'archive.jsonl'
+            with self.assertRaises(RuntimeError):
+                self.run_heartbeat(archive, log, NOW, transport)
+            self.assertEqual(self.run_heartbeat(archive, log, NOW + timedelta(seconds=30), transport), [])
+            self.assertEqual(len(reads), 1)
+            with self.assertRaises(RuntimeError):
+                self.run_heartbeat(archive, log, NOW + timedelta(minutes=10), transport)
+            self.assertEqual(len(reads), 2)
+
+    def test_future_saved_heartbeat_resets_only_beyond_ten_minutes(self):
+        for ahead, resets in ((timedelta(minutes=10), False),
+                              (timedelta(minutes=10, microseconds=1), True),
+                              (timedelta(days=1), True)):
+            reads = []
+            def transport(action=None, **payload):
+                self.assertIsNone(action)
+                reads.append(action)
+                return dict(mockups=[], pins=[])
+            with tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp) / 'archive.jsonl'
+                self.run_heartbeat(archive, log, NOW + ahead, transport)
+                self.run_heartbeat(archive, log, NOW, transport)
+                self.assertEqual(len(reads), 2 if resets else 1, ahead)
+                self.run_heartbeat(archive, log, NOW + timedelta(seconds=30), transport)
+                self.assertEqual(len(reads), 2 if resets else 1)
+
+    def test_disabled_heartbeat_creates_no_state_or_log(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,
+                {'TED_MOCKUP_AUTOARCHIVE_ENABLED': ''}):
+            self.assertEqual(archive.heartbeat_pass(now=NOW, log_path=Path(tmp)/'log.jsonl'), [])
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
 
 @unittest.skipUnless((ROOT / 'jobs_heartbeat.py').exists(), 'private heartbeat candidate required')
