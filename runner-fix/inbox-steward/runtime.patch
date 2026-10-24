@@ -234,20 +234,21 @@
 +    return state
 +
 +
-@@ -226,3 +249,9 @@
+@@ -226,3 +249,10 @@
 -    from board_client import cards
 -    result = cards()
 -    if not isinstance(result, list) or len(result) >= 500:
 +    # cards() discards the envelope and defaults a missing cards key to [].
 +    from board_client import call
-+    response = call(page=True)
-+    if (not isinstance(response, dict) or response.get('ok') is not True
++    response = call(page=True, section='needs_you')
++    if (not isinstance(response, dict) or 'error' in response
++            or response.get('pod_pulse_error') is True
 +            or 'cards' not in response or not isinstance(response['cards'], list)
 +            or len(response['cards']) >= 500
 +            or any(not isinstance(c, dict) or not isinstance(c.get('id'), str)
 +                   or not c['id'] or not isinstance(c.get('project'), str)
 +                   or not isinstance(c.get('section'), str) for c in response['cards'])):
-@@ -230,9 +259,12 @@
+@@ -230,9 +260,12 @@
 -    return result
 -
 -
@@ -269,11 +270,11 @@
 +    if disabled(state.root):
 +        raise WritesDisabled('Steward disabled')
 +    return cards
-@@ -242,0 +275,3 @@
+@@ -242,0 +276,3 @@
 +    state = RUN.get()
 +    root = state.root if state is not None else ROOT
 +    can_write(root)
-@@ -244,10 +278,0 @@
+@@ -244,10 +279,0 @@
 -
 -
 -def archive_batch(project, batch):
@@ -284,15 +285,15 @@
 -def snapshot():
 -    cards, payload = fetch_cards(), fetch_mockups()
 -    return cards, payload['mockups'], payload['pins']
-@@ -258,2 +282,0 @@
+@@ -258,2 +283,0 @@
 -    if action.get('batch'):
 -        row['batch'] = clean(action['batch'], 300)
-@@ -261 +284,3 @@
+@@ -261 +285,3 @@
 -    path = root / 'steward-log.jsonl'
 +    data = (json.dumps(row, sort_keys=True)+'\n').encode()
 +    path = Path(root) / 'steward-log.jsonl'
 +    can_write(root)
-@@ -263,4 +288,7 @@
+@@ -263,4 +289,7 @@
 -    with os.fdopen(fd, 'a') as stream:
 -        stream.write(json.dumps(row, sort_keys=True)+'\n')
 -        stream.flush()
@@ -304,13 +305,13 @@
 +        os.fsync(fd)
 +    finally:
 +        os.close(fd)
-@@ -270,2 +298,3 @@
+@@ -270,2 +299,3 @@
 -    ranked = sorted((review_row(c, now, 'keep', classify_card(c, now)[1]) for c in cards
 -                     if c.get('section') == 'needs_you'), key=lambda r: (-r['age_hours'], r['id']))
 +    remaining = sorted((c for c in cards if c.get('section') == 'needs_you'),
 +                       key=lambda c: (activity(c), c.get('id', '')))
 +    ranked = [review_row(c, now, 'keep', classify_card(c, now)[1]) for c in remaining]
-@@ -274 +303,15 @@
+@@ -274 +304,15 @@
 -                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked if excess else [])
 +                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked,
 +                   ambiguous=[row for c, row in zip(remaining, ranked) if classify_card(c, now)[0] is None])
@@ -327,9 +328,9 @@
 +    data = (json.dumps(payload, indent=2)+'\n').encode()
 +    can_write(root, stale_only=stale_only)
 +    root.mkdir(parents=True, exist_ok=True)
-@@ -276,0 +320 @@
+@@ -276,0 +321 @@
 +    can_write(root, stale_only=stale_only)
-@@ -278,5 +322,10 @@
+@@ -278,5 +323,10 @@
 -    with os.fdopen(fd, 'w') as stream:
 -        json.dump(payload, stream, indent=2)
 -        stream.write('\n')
@@ -345,7 +346,7 @@
 +    finally:
 +        os.close(fd)
 +    can_write(root, stale_only=stale_only)
-@@ -284 +333,52 @@
+@@ -284 +334,52 @@
 -    return len(ranked), excess
 +
 +
@@ -399,7 +400,7 @@
 +        counts['needs_you_after'], counts['overflow'] = write_overflow(root, cards, now)
 +    finally:
 +        os.close(fd)
-@@ -289,12 +389,5 @@
+@@ -289,12 +390,5 @@
 -    fixed_now = now
 -    now = time.time() if now is None else now
 -    cards, mockups, pins = snapshot()
@@ -417,7 +418,7 @@
 +                  needs_you_after=None, overflow=None, actions=[])
 +    if disabled(root):
 +        counts['disabled'] = True
-@@ -302,9 +395,15 @@
+@@ -302,9 +396,15 @@
 -    root.mkdir(parents=True, exist_ok=True)
 -    for action in proposed['actions']:
 -        current_cards, current_mockups, current_pins = snapshot()
@@ -442,7 +443,7 @@
 +            state.cards = None
 +            state.observed_at = None
 +            state.failed_at = time.monotonic()
-@@ -312,6 +411,3 @@
+@@ -312,6 +412,3 @@
 -            if action['kind'] == 'move':
 -                result = move_card(action['card_id'], action['to'], action['reason'])
 -            else:
@@ -452,7 +453,7 @@
 +            mark_stale(root, time.time() if now is None else now)
 +        except WritesDisabled:
 +            counts['disabled'] = True
-@@ -319,11 +415,7 @@
+@@ -319,11 +416,7 @@
 -            journal(root, action, 'uncertain, refresh before retry', now)
 -            counts['failed'] += 1
 -            continue
@@ -471,11 +472,11 @@
 +    finally:
 +        if token is not None:
 +            RUN.reset(token)
-@@ -343,0 +436,3 @@
+@@ -343,0 +437,3 @@
 +    if disabled(args.root):
 +        print(json.dumps(dict(disabled=True, moved=0, failed=0)))
 +        return 0
-@@ -345,9 +440 @@
+@@ -345,9 +441 @@
 -    args.root.mkdir(parents=True, exist_ok=True)
 -    with (args.root / '.steward.lock').open('a') as lock:
 -        os.chmod(lock.name, 0o600)

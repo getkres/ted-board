@@ -271,7 +271,7 @@ class Runner(unittest.TestCase):
         def call(action=None, **kw):
             requests.append((action, kw))
             if action is None:
-                return {'ok': True, 'cards': rows}
+                return {'cards': rows, 'pod_pulse': []}
             rows[0]['section'] = kw['value']
             return {'ok': True}
         with tempfile.TemporaryDirectory() as tmp, \
@@ -280,7 +280,7 @@ class Runner(unittest.TestCase):
         self.assertEqual(result['moved'], 1)
         self.assertEqual([r for r in requests if r[0] == 'move'],
                          [('move', dict(page=True, card_id='worker', value='up_next', note='Ted review'))])
-        self.assertTrue(all(kw == {'page': True} for action, kw in requests if action is None))
+        self.assertTrue(all(kw == {'page': True, 'section': 'needs_you'} for action, kw in requests if action is None))
 
     def test_empty_overflow_replaces_a_previous_overflow(self):
         with tempfile.TemporaryDirectory() as root:
@@ -292,7 +292,7 @@ class Runner(unittest.TestCase):
 
     def test_incomplete_snapshots_are_refused(self):
         import types
-        board = types.SimpleNamespace(call=lambda **kw: {'ok': True, 'cards': [card()]*500})
+        board = types.SimpleNamespace(call=lambda **kw: {'cards': [card()]*500, 'pod_pulse': []})
         with patch.dict(sys.modules, board_client=board):
             with self.assertRaises(RuntimeError):
                 steward.fetch_cards()
@@ -561,8 +561,10 @@ class StructuralBoundary(unittest.TestCase):
 
     def test_incomplete_raw_envelopes_preserve_cached_count_and_mark_stale(self):
         import types
-        for response in [None, [], {'ok': True, 'cards': [None]}, {}, {'ok': False}, {'ok': True}, {'ok': True, 'cards': None},
-                         {'ok': True, 'cards': {}}, {'cards': []}, {'ok': 1, 'cards': []}]:
+        for response in [None, [], {'cards': [None]}, {}, {'ok': False},
+                         {'error': 'unavailable'}, {'error': None, 'cards': []},
+                         {'cards': [], 'pod_pulse_error': True}, {'cards': None},
+                         {'cards': {}}, {'cards': 'not a list'}, {'cards': [card()]*500}]:
             with self.subTest(response=response), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp); path = root/'steward-overflow.json'
                 path.write_text(json.dumps({'at': OLD, 'needs_you': 7, 'ranked': [{'id': 'keep'}]}))
@@ -580,13 +582,39 @@ class StructuralBoundary(unittest.TestCase):
         import types
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            board = types.SimpleNamespace(call=lambda *a, **kw: {'ok': True, 'cards': []})
+            board = types.SimpleNamespace(call=lambda *a, **kw: {'cards': [], 'pod_pulse': []})
             with patch.dict(sys.modules, board_client=board):
                 result = steward.run_once(root, now=NOW)
             self.assertEqual(result['failed'], 0)
             cached = json.loads((root/'steward-overflow.json').read_text())
             self.assertEqual(cached['needs_you'], 0)
             self.assertFalse(cached['stale'])
+
+    def test_real_get_envelopes_are_accepted_without_a_post_success_field(self):
+        import types
+        for response in [{'cards': []}, {'cards': [card()]},
+                         {'cards': [card()], 'pod_pulse': []}]:
+            with self.subTest(response=response), \
+                 patch.dict(sys.modules, board_client=types.SimpleNamespace(call=lambda **kw: response)):
+                self.assertEqual(steward.fetch_cards(), response['cards'])
+
+    def test_scoped_request_does_not_count_done_history_against_the_feed_cap(self):
+        import types
+        rows = [dict(card('done-'+str(i)), section='done') for i in range(600)] + [card('report')]
+        requests = []
+        def call(**kw):
+            requests.append(kw)
+            selected = [c for c in rows if c['section'] == kw.get('section')] if kw.get('section') else rows
+            return {'cards': selected[:500], 'pod_pulse': []}
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(sys.modules, board_client=types.SimpleNamespace(call=call)):
+            result = steward.run_once(Path(tmp), dry_run=True, now=NOW)
+        self.assertEqual(requests, [{'page': True, 'section': 'needs_you'}])
+        self.assertEqual(result['failed'], 0)
+        self.assertFalse(result['stale'])
+        self.assertEqual(result['planned_moves'], 1)
+        self.assertEqual(result['needs_you_before'], 1)
+        self.assertEqual(result['actions'][0]['card_id'], 'report')
 
     def test_null_messages_remain_ambiguous_without_crashing_activity(self):
         row = card(); row['messages'] = None
