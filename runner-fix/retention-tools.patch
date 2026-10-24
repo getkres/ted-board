@@ -4,11 +4,10 @@
 +"""Reviewed local operational tools."""
 --- /dev/null
 +++ b/scripts/ops_retention.py
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,432 @@
 +#!/usr/bin/env python3
 +"""Bounded, read-only retention candidates. There is no apply or deletion mode."""
 +import argparse
-+import fcntl
 +import json
 +import os
 +from pathlib import Path
@@ -20,18 +19,26 @@
 +
 +DAY = 86400
 +ID = re.compile(r'^[A-Za-z0-9._-]{1,100}$')
-+ARTIFACTS = {'apply.sql', 'draft-email.json', 'spend.json'}
++TERMINAL = {'done', 'killed'}
++JOB_SUFFIXES = {'.events', '.log', '.jsonl', '.claim'}
 +
 +
 +def safe_path(value):
-+    path = Path(os.path.abspath(os.path.expanduser(str(value))))
++    if not isinstance(value, (str, os.PathLike)) or not str(value).strip():
++        raise ValueError('explicit absolute path required')
++    path = Path(value)
++    if not path.is_absolute() or path in (Path('/'), Path.home()):
++        raise ValueError('narrow absolute path required')
 +    if any(part.casefold() == 'documents' for part in path.parts):
 +        raise ValueError('protected path')
 +    for part in [*reversed(path.parents), path]:
 +        alias = part in (Path('/var'), Path('/tmp')) and part.resolve() == Path('/private') / part.name
 +        if part.is_symlink() and not alias:
 +            raise ValueError('symlink path')
-+    return path.resolve()
++    resolved = path.resolve()
++    if resolved in (Path('/'), Path.home()) or any(part.casefold() == 'documents' for part in resolved.parts):
++        raise ValueError('protected root')
++    return resolved
 +
 +
 +def open_path(path):
@@ -69,10 +76,12 @@
 +    with os.fdopen(descriptor, 'rb') as stream:
 +        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
 +            return False
-+        return stream.read(4096).splitlines()[:1] == [b'LIVE_STATE: done']
++        return stream.read(4096).splitlines()[:1] in ([b'LIVE_STATE: done'], [b'LIVE_STATE: killed'])
 +
 +
 +def ownership(state):
++    if not isinstance(state, dict):
++        raise ValueError('unknown session store')
 +    sessions, approvals = state.get('sessions'), state.get('approvals', {})
 +    if not isinstance(sessions, dict) or not isinstance(approvals, dict):
 +        raise ValueError('unknown ownership')
@@ -102,12 +111,13 @@
 +            raise ValueError('scan budget exceeded')
 +
 +
-+def scan_tree(path, budget, skip=()):
++def scan_tree(path, budget, skip=(), *, registered_worktree=False):
 +    pending = [path]
 +    size = 0
 +    newest = 0
 +    safe = True
 +    files = []
++    directories = []
 +    while pending:
 +        current = pending.pop()
 +        budget.take()
@@ -125,11 +135,19 @@
 +                size += info.st_size
 +                files.append((current, info.st_size, info.st_mtime))
 +            elif stat.S_ISDIR(info.st_mode):
++                if current != path:
++                    directories.append(current)
 +                with os.scandir(fd) as children:
 +                    for child in children:
 +                        # Bound the pending list too; do not open a descriptor per child.
 +                        if len(pending) >= budget.remaining:
 +                            raise ValueError('scan budget exceeded')
++                        if child.name.casefold() == '.git':
++                            budget.take()
++                            # Only a verified registration's own pointer is metadata.
++                            if not (registered_worktree and current == path and child.name == '.git'):
++                                safe = False
++                            continue
 +                        if child.is_symlink() or child.name.casefold() == 'documents':
 +                            budget.take()
 +                            safe = False
@@ -139,7 +157,39 @@
 +                safe = False
 +        finally:
 +            os.close(fd)
-+    return dict(bytes=size, newest=newest, safe=safe, files=files)
++    return dict(bytes=size, newest=newest, safe=safe, files=files, directories=directories)
++
++
++def load_cards():
++    """Read current cards through the existing private board client, without writes."""
++    runtime = str(Path(__file__).resolve().parents[1])
++    if runtime not in sys.path:
++        sys.path.insert(0, runtime)
++    from board_client import cards
++    return cards()
++
++
++def card_snapshot(rows):
++    if not isinstance(rows, list):
++        raise ValueError('unknown card evidence')
++    result = {}
++    for row in rows:
++        if not isinstance(row, dict) or not isinstance(row.get('id'), str) or not ID.fullmatch(row['id']) or row['id'] in result:
++            raise ValueError('unknown or duplicate card identity')
++        result[row['id']] = {k:row[k] for k in ('section','status') if k in row}
++    return result
++
++
++def terminal_card(row):
++    if not isinstance(row, dict):
++        return False
++    values = [row[k] for k in ('section','status') if k in row and row[k] is not None]
++    return bool(values) and all(isinstance(v, str) and v in TERMINAL for v in values)
++
++
++def allowed_job_file(path):
++    return bool(ID.fullmatch(path.name)) and (path.name.casefold() in ('report.md','brief.md') or
++                                             path.suffix.casefold() in JOB_SUFFIXES)
 +
 +
 +def process_cwds():
@@ -160,18 +210,46 @@
 +
 +def worktrees(repos):
 +    rows = []
-+    for repo in repos:
++    seen_common, seen_paths = set(), set()
++    for repo in dict.fromkeys(safe_path(p) for p in repos):
++        common = Path(git(repo, 'rev-parse', '--git-common-dir').stdout.decode().strip())
++        common = safe_path(common if common.is_absolute() else repo/common)
++        if common in seen_common:
++            continue
++        seen_common.add(common)
 +        output = git(repo, 'worktree', 'list', '--porcelain', '-z').stdout.decode()
 +        current = None
++        first = True
++        main_checkout = None
 +        for field in output.split('\x00'):
 +            if field.startswith('worktree '):
-+                current = dict(path=safe_path(field[9:]), repo=repo, main=not any(r['repo']==repo for r in rows))
++                path = safe_path(field[9:])
++                if path in seen_paths:
++                    raise ValueError('conflicting worktree registrations')
++                seen_paths.add(path)
++                if first:
++                    main_checkout = common.parent if common.name=='.git' else path
++                current = dict(path=path, repo=repo, common=common,
++                               main=first or path==main_checkout,
++                               main_checkout=main_checkout)
++                first = False
 +                rows.append(current)
 +                if len(rows) > 1000:
 +                    raise ValueError('worktree budget exceeded')
 +            elif current is not None and (field.startswith('locked') or field.startswith('prunable')):
 +                current['protected'] = True
 +    return rows
++
++
++def verified_merge_refs(repos, merged_ref):
++    if not isinstance(merged_ref, str) or not merged_ref.startswith('refs/remotes/') or \
++            not re.fullmatch(r'refs/remotes/[A-Za-z0-9._/-]+', merged_ref):
++        raise ValueError('remote tracking reference required')
++    result = {}
++    for repo in repos:
++        git(repo, 'check-ref-format', merged_ref)
++        result[repo] = git(repo, 'rev-parse', '--verify', '--end-of-options', merged_ref+'^{commit}').stdout.decode().strip()
++    return result
 +
 +
 +def inventory(jobs_root, sessions_path, *, now=None, cwds=None, repos=(), worktree_roots=(),
@@ -181,140 +259,176 @@
 +    if any(type(x) is not int or x < 1 for x in (job_days, event_days, worktree_days)):
 +        raise ValueError('positive retention ages required')
 +    jobs_root, sessions_path = safe_path(jobs_root), safe_path(sessions_path)
-+    roots = [safe_path(p) for p in worktree_roots]
-+    repos = [safe_path(p) for p in repos]
++    roots = list(dict.fromkeys(safe_path(p) for p in worktree_roots))
++    repos = list(dict.fromkeys(safe_path(p) for p in repos))
++    if roots and not repos:
++        raise ValueError('worktree scope requires repository evidence')
++    refs = verified_merge_refs(repos, merged_ref)
++    trees = worktrees(repos)
++    mains = {t['path'] for t in trees if t['main']} | {t['main_checkout'] for t in trees}
++    if any(within(main, root) for main in mains for root in roots):
++        raise ValueError('worktree scope contains main checkout')
 +    raw = read_regular(sessions_path, 8_388_608)
 +    state = json.loads(raw)
 +    snapshot = ownership(state)
-+    sessions, approvals = state.get('sessions'), state.get('approvals', {})
-+    if not isinstance(sessions, dict) or not isinstance(approvals, dict):
-+        raise ValueError('unknown ownership')
-+    cwds = process_cwds() if cwds is None else [Path(p) for p in cwds]
++    sessions, approvals = state['sessions'], state.get('approvals', {})
++    cards = card_snapshot(load_cards())
++    cwds = process_cwds() if cwds is None else [safe_path(p) for p in cwds]
 +    if not isinstance(cwds, list):
 +        raise ValueError('unknown process evidence')
-+    trees = worktrees(repos)
 +    budget = Budget(max_entries, max_seconds)
 +    candidates, kept = [], []
 +    complete = True
-+    active = [Path(s['cwd']) for s in sessions.values() if isinstance(s, dict) and s.get('cwd') and
-+              (s.get('status') not in ('done', 'failed') or s.get('queue') or s.get('pid'))]
++    active = [Path(s['cwd']) for s in sessions.values() if s.get('cwd') and
++              (s.get('status') not in ('done', 'failed', 'killed') or s.get('queue') or s.get('pid'))]
 +    def keep(path, reason):
 +        kept.append(dict(path=str(path.relative_to(jobs_root)) if within(path, jobs_root) else path.name,
 +                         reason=reason))
-+    directory_fd = open_path(jobs_root)
-+    try:
-+        with os.scandir(directory_fd) as entries:
-+            names = []
-+            for entry in entries:
-+                budget.take()
-+                if entry.name.startswith('card-') and ID.fullmatch(entry.name) and not entry.is_symlink():
-+                    names.append(entry.name)
-+    finally:
-+        os.close(directory_fd)
-+    for name in sorted(names):
-+        directory = jobs_root / name
-+        session = sessions.get(name[5:])
-+        if not isinstance(session, dict) or session.get('cwd') != str(directory):
-+            keep(directory, 'unknown owner')
-+            continue
-+        if session.get('status') not in ('done', 'failed') or session.get('queue') or session.get('pid'):
-+            keep(directory, 'active or queued')
-+            continue
-+        if any(isinstance(a, dict) and a.get('card_id')==name[5:] and a.get('status') not in ('done', 'superseded')
-+               for a in approvals.values()):
-+            keep(directory, 'approval unresolved')
-+            continue
-+        if any(within(p, directory) for p in cwds):
-+            keep(directory, 'live process cwd')
-+            continue
++    def names_in(path):
++        descriptor = open_path(path)
 +        try:
-+            if not report_done(directory / 'REPORT.md'):
-+                keep(directory, 'report pending or unknown')
++            with os.scandir(descriptor) as entries:
++                names = []
++                for entry in entries:
++                    budget.take()
++                    names.append((entry.name, entry.is_symlink()))
++                return names
++        finally:
++            os.close(descriptor)
++    gate_cache = {}
++    def job_state(name):
++        if name in gate_cache:
++            return gate_cache[name]
++        directory = jobs_root/name
++        session = sessions.get(name[5:]) if name.startswith('card-') and ID.fullmatch(name) else None
++        reason = None
++        if not isinstance(session, dict) or session.get('cwd') != str(directory):
++            reason = 'unknown owner'
++        elif session.get('status') not in ('done', 'failed', 'killed') or session.get('queue') or \
++                'pid' not in session or session['pid'] is not None:
++            reason = 'active or queued'
++        elif not terminal_card(cards.get(name[5:])):
++            reason = 'card missing or nonterminal'
++        elif any(a.get('card_id')==name[5:] and a.get('status') not in ('done','superseded') for a in approvals.values()):
++            reason = 'approval unresolved'
++        elif any(within(p, directory) for p in cwds):
++            reason = 'live process cwd'
++        else:
++            entries = names_in(directory)
++            if any(n.casefold().endswith('.claim') for n,link in entries):
++                reason = 'claim present'
++            else:
++                reports = [directory/n for n,link in entries if n.casefold()=='report.md' and not link]
++                if len(reports)!=1 or not report_done(reports[0]):
++                    reason = 'report pending or unknown'
++        gate_cache[name] = reason
++        return reason
++    names = [name for name,link in names_in(jobs_root)
++             if name.startswith('card-') and ID.fullmatch(name) and not link]
++    for name in sorted(names):
++        directory = jobs_root/name
++        try:
++            reason = job_state(name)
++            if reason:
++                keep(directory, reason)
 +                continue
 +            scan = scan_tree(directory, budget, skip=[t['path'] for t in trees])
-+            if any(p.name in ARTIFACTS for p, size, modified in scan['files']):
-+                keep(directory, 'approval artifact retained')
++            if scan['directories'] or any(not allowed_job_file(p) for p,size,modified in scan['files']):
++                keep(directory, 'unrecognized artifact')
 +                continue
-+            for path, size, modified in scan['files']:
-+                if path.suffix == '.claim':
-+                    with os.fdopen(open_path(path), 'rb') as stream:
-+                        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-+            if scan['safe'] and now - scan['newest'] >= job_days * DAY:
-+                candidates.append(dict(kind='job_directory', root='jobs', path=name, bytes=scan['bytes'],
-+                                       requires_archive=True))
++            if not scan['safe']:
++                keep(directory, 'excluded subtree or registration')
++                continue
++            if any(p.name.casefold().endswith('.claim') for p,size,modified in scan['files']):
++                keep(directory, 'claim present')
++                continue
++            if now-scan['newest'] >= job_days*DAY:
++                candidates.append(dict(kind='job_directory',root='jobs',path=name,bytes=scan['bytes'],requires_archive=True))
 +            else:
-+                for path, size, modified in scan['files']:
-+                    if path.parent == directory and ID.fullmatch(path.name) and path.suffix in ('.events', '.log', '.jsonl') \
-+                            and now - modified >= event_days * DAY:
-+                        candidates.append(dict(kind='event_file', root='jobs', path=str(path.relative_to(jobs_root)),
-+                                               bytes=size, requires_archive=False))
-+                keep(directory, 'directory retained by age or excluded subtree')
-+        except BlockingIOError:
-+            keep(directory, 'active claim lock')
-+        except (OSError, ValueError):
-+            keep(directory, 'incomplete or unreadable scan')
++                for path,size,modified in scan['files']:
++                    if path.parent==directory and path.suffix.casefold() in ('.events','.log','.jsonl') and \
++                            now-modified>=event_days*DAY:
++                        candidates.append(dict(kind='event_file',root='jobs',path=str(path.relative_to(jobs_root)),
++                                               bytes=size,requires_archive=False))
++                keep(directory,'directory retained by age')
++        except (OSError, ValueError, IndexError):
++            keep(directory,'incomplete or unreadable scan')
 +            complete = False
 +    for tree in trees:
 +        path = tree['path']
-+        matching = next((i for i, root in enumerate(roots) if within(path, root)), None)
++        matching = next((i for i,root in enumerate(roots) if within(path,root)),None)
 +        if tree['main'] or tree.get('protected') or matching is None:
 +            continue
-+        if any(within(cwd, path) for cwd in cwds) or any(within(p, path) or within(path, p) for p in active):
-+            keep(path, 'active worktree')
++        if any(within(cwd,path) for cwd in cwds) or any(within(p,path) or within(path,p) for p in active):
++            keep(path,'active worktree')
 +            continue
 +        try:
-+            if within(path, jobs_root):
-+                owner_dir = jobs_root / path.relative_to(jobs_root).parts[0]
-+                owner = sessions.get(owner_dir.name.removeprefix('card-'))
-+                if not owner or not report_done(owner_dir/'REPORT.md') or any(
-+                        a.get('card_id') == owner_dir.name.removeprefix('card-') and a.get('status') not in ('done','superseded')
-+                        for a in approvals.values()):
-+                    keep(path, 'job outcome or approval pending')
++            if within(path,jobs_root):
++                parts = path.relative_to(jobs_root).parts
++                if not parts:
++                    keep(path,'jobs root is not a job')
 +                    continue
-+            if git(path, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching').stdout:
-+                keep(path, 'dirty untracked or ignored files')
++                reason = job_state(parts[0])
++                if reason:
++                    keep(path,reason)
++                    continue
++            common = Path(git(path,'rev-parse','--git-common-dir').stdout.decode().strip())
++            common = safe_path(common if common.is_absolute() else path/common)
++            top = safe_path(git(path,'rev-parse','--show-toplevel').stdout.decode().strip())
++            if common!=tree['common'] or top!=path:
++                keep(path,'worktree registration mismatch')
 +                continue
-+            if git(path, 'merge-base', '--is-ancestor', 'HEAD', merged_ref, check=False).returncode:
-+                keep(path, 'unmerged or unknown base')
++            if git(path,'status','--porcelain=v1','-z','--untracked-files=all','--ignored=matching').stdout:
++                keep(path,'dirty untracked or ignored files')
 +                continue
-+            scan = scan_tree(path, budget)
-+            if not scan['safe'] or now - scan['newest'] < worktree_days * DAY:
-+                keep(path, 'recent or excluded subtree')
++            if git(path,'merge-base','--is-ancestor','HEAD',refs[tree['repo']],check=False).returncode:
++                keep(path,'unmerged base')
 +                continue
-+            candidates.append(dict(kind='worktree', root='worktree_'+str(matching),
-+                                   path=str(path.relative_to(roots[matching])), bytes=scan['bytes'], requires_archive=False))
-+        except (OSError, ValueError, subprocess.SubprocessError):
-+            keep(path, 'incomplete worktree evidence')
++            scan = scan_tree(path,budget,registered_worktree=True)
++            if any(p.name.casefold().endswith('.claim') for p,size,modified in scan['files']):
++                keep(path,'claim present')
++                continue
++            if not scan['safe'] or now-scan['newest']<worktree_days*DAY:
++                keep(path,'recent or excluded subtree')
++                continue
++            candidates.append(dict(kind='worktree',root='worktree_'+str(matching),
++                                   path=str(path.relative_to(roots[matching])),bytes=scan['bytes'],requires_archive=False))
++        except (OSError,ValueError,IndexError,subprocess.SubprocessError):
++            keep(path,'incomplete worktree evidence')
 +            complete = False
-+    if ownership(json.loads(read_regular(sessions_path, 8_388_608))) != snapshot:
-+        candidates = []
++    if ownership(json.loads(read_regular(sessions_path,8_388_608)))!=snapshot:
 +        complete = False
-+        kept.append(dict(path='sessions', reason='ownership changed during scan; rerun'))
++        kept.append(dict(path='sessions',reason='ownership changed during scan; rerun'))
++    if card_snapshot(load_cards())!=cards:
++        complete = False
++        kept.append(dict(path='cards',reason='card state changed during scan; rerun'))
++    if verified_merge_refs(repos,merged_ref)!=refs:
++        complete = False
++        kept.append(dict(path='refs',reason='merge reference changed during scan; rerun'))
 +    if not complete:
-+        # Do not offer deletion candidates from an incomplete ownership/scan snapshot.
 +        candidates = []
-+    return dict(dry_run=True, complete=complete, candidates=candidates, kept=kept,
-+                roots=dict(jobs=str(jobs_root), **{'worktree_'+str(i):str(p) for i,p in enumerate(roots)}),
-+                policy_days=dict(jobs=job_days, events=event_days, worktrees=worktree_days),
++    return dict(dry_run=True,complete=complete,candidates=candidates,kept=kept,
++                roots=dict(jobs=str(jobs_root),**{'worktree_'+str(i):str(p) for i,p in enumerate(roots)}),
++                policy_days=dict(jobs=job_days,events=event_days,worktrees=worktree_days),
 +                candidate_logical_bytes=sum(c['bytes'] for c in candidates),
-+                entries_examined=max_entries - budget.remaining)
++                entries_examined=max_entries-budget.remaining)
 +
 +
 +def main(argv=None):
 +    parser = argparse.ArgumentParser(description=__doc__)
-+    parser.add_argument('--jobs-root', required=True, type=Path)
-+    parser.add_argument('--sessions', type=Path)
-+    parser.add_argument('--repo', action='append', default=[], type=Path)
-+    parser.add_argument('--worktree-root', action='append', default=[], type=Path)
++    parser.add_argument('--jobs-root', required=True)
++    parser.add_argument('--sessions')
++    parser.add_argument('--repo', action='append', default=[])
++    parser.add_argument('--worktree-root', action='append', default=[])
 +    parser.add_argument('--merged-ref', default='refs/remotes/origin/main')
 +    parser.add_argument('--max-entries', type=int, default=100_000)
 +    parser.add_argument('--max-seconds', type=float, default=20)
 +    args = parser.parse_args(argv)
 +    try:
-+        report = inventory(args.jobs_root, args.sessions or args.jobs_root/'sessions.json', repos=args.repo,
++        report = inventory(args.jobs_root, args.sessions if args.sessions is not None else Path(args.jobs_root)/'sessions.json', repos=args.repo,
 +                           worktree_roots=args.worktree_root, merged_ref=args.merged_ref,
 +                           max_entries=args.max_entries, max_seconds=args.max_seconds)
-+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
++    except (OSError, ValueError, TypeError, KeyError, IndexError, ImportError, RuntimeError, subprocess.SubprocessError):
 +        print('Retention evidence unavailable; no changes made.', file=sys.stderr)
 +        return 2
 +    print(json.dumps(report, sort_keys=True))
@@ -325,14 +439,18 @@
 +    sys.exit(main())
 --- /dev/null
 +++ b/tests/test_ops_retention.py
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,388 @@
 +import json
++import contextlib
++import io
 +import os
 +from pathlib import Path
 +import subprocess
 +import tempfile
 +import time
 +import unittest
++import sys
++import types
 +from unittest import mock
 +
 +try:
@@ -355,6 +473,7 @@
 +        self.state = self.jobs / 'sessions.json'
 +        self.data = dict(sessions={}, approvals={})
 +        self.state.write_text(json.dumps(self.data))
++        self.cards = []
 +
 +    def job(self, cid='sample', status='done', age=100):
 +        directory = self.jobs / ('card-' + cid)
@@ -363,13 +482,15 @@
 +        (directory / 'BRIEF.md').write_text('synthetic')
 +        (directory / 'turn.events').write_bytes(b'x' * 20)
 +        self.data['sessions'][cid] = dict(status=status, cwd=str(directory), queue=[], pid=None)
++        self.cards.append(dict(id=cid, section='done'))
 +        self.state.write_text(json.dumps(self.data))
 +        for path in [*directory.iterdir(), directory]:
 +            os.utime(path, (NOW-age*DAY, NOW-age*DAY))
 +        return directory
 +
 +    def report(self, **kwargs):
-+        return ops_retention.inventory(self.jobs, self.state, now=NOW, cwds=[], **kwargs)
++        with mock.patch.object(ops_retention, 'load_cards', return_value=self.cards, create=True):
++            return ops_retention.inventory(self.jobs, self.state, now=NOW, cwds=[], **kwargs)
 +
 +    def test_old_terminal_directory_is_only_a_review_candidate(self):
 +        directory = self.job()
@@ -406,8 +527,9 @@
 +
 +    def test_unknown_owner_and_live_cwd_are_preserved(self):
 +        directory = self.job()
-+        self.assertEqual(ops_retention.inventory(self.jobs, self.state, now=NOW,
-+                                                cwds=[directory])['candidates'], [])
++        with mock.patch.object(ops_retention, 'load_cards', return_value=self.cards, create=True):
++            self.assertEqual(ops_retention.inventory(self.jobs, self.state, now=NOW,
++                                                    cwds=[directory])['candidates'], [])
 +        self.data['sessions'] = {}
 +        self.state.write_text(json.dumps(self.data))
 +        self.assertEqual(self.report()['candidates'], [])
@@ -440,16 +562,17 @@
 +        (repo / 'source').write_text('baseline')
 +        git('add', 'source')
 +        git('commit', '-m', 'fixture')
++        git('update-ref', 'refs/remotes/origin/main', 'HEAD')
 +        tree = self.root / 'trees/old'
 +        tree.parent.mkdir()
 +        git('worktree', 'add', '-b', 'completed', str(tree))
 +        for path in [*tree.iterdir(), tree]:
 +            os.utime(path, (NOW-100*DAY, NOW-100*DAY))
-+        report = self.report(repos=[repo], worktree_roots=[tree.parent], merged_ref='refs/heads/main')
++        report = self.report(repos=[repo], worktree_roots=[tree.parent], merged_ref='refs/remotes/origin/main')
 +        self.assertEqual([r['kind'] for r in report['candidates']], ['worktree'])
 +        (tree / 'source').write_text('uncommitted work')
 +        self.assertEqual(self.report(repos=[repo], worktree_roots=[tree.parent],
-+                                     merged_ref='refs/heads/main')['candidates'], [])
++                                     merged_ref='refs/remotes/origin/main')['candidates'], [])
 +
 +    def test_claim_lock_prevents_retention(self):
 +        import fcntl
@@ -507,6 +630,200 @@
 +        report = self.report()
 +        self.assertTrue(report['complete'])
 +        self.assertEqual(report['candidates'], [])
++
++    def age(self, *paths):
++        for path in paths:
++            os.utime(path, (NOW-100*DAY,NOW-100*DAY))
++
++    def make_repo(self):
++        repo=self.root/'repo'
++        repo.mkdir()
++        def git(*args):
++            return subprocess.run(['git','-C',str(repo),*args],check=True,capture_output=True)
++        git('init','-b','main')
++        git('config','user.name','Fixture')
++        git('config','user.email','fixture@example.invalid')
++        (repo/'source').write_text('baseline')
++        git('add','source')
++        git('commit','-m','fixture')
++        git('update-ref','refs/remotes/origin/main','HEAD')
++        return repo,git
++
++    def make_tree(self, git, path):
++        path.parent.mkdir(parents=True,exist_ok=True)
++        git('worktree','add','--detach',str(path))
++        self.age(*path.iterdir(),path)
++        return path
++
++    def test_unknown_artifacts_and_backup_directories_keep_every_candidate(self):
++        names=['backup.sql','database.bak','database.dump','apply-2.sql','Apply.SQL','backup']
++        for number,name in enumerate(names):
++            directory=self.job('unknown'+str(number))
++            path=directory/name
++            if name=='backup':path.mkdir()
++            else:path.write_text('private-sentinel')
++            self.age(path,directory)
++        report=self.report()
++        self.assertEqual(report['candidates'],[])
++        self.assertEqual(sum(row['reason']=='unrecognized artifact' for row in report['kept']),6)
++        self.assertNotIn('private-sentinel',json.dumps(report))
++
++    def test_allowlist_and_report_lookup_are_case_insensitive(self):
++        directory=self.job()
++        (directory/'REPORT.md').rename(directory/'rEpOrT.Md')
++        (directory/'turn.events').rename(directory/'turn.EVENTS')
++        self.age(*directory.iterdir(),directory)
++        self.assertEqual([r['kind'] for r in self.report()['candidates']],['job_directory'])
++
++    def test_unregistered_git_child_is_unsafe_without_traversal(self):
++        directory=self.job()
++        nested=directory/'unregistered'
++        nested.mkdir()
++        (nested/'.git').mkdir()
++        (nested/'.git/keep').write_text('private-sentinel')
++        scan=ops_retention.scan_tree(directory,ops_retention.Budget(1000,20))
++        self.assertFalse(scan['safe'])
++        self.assertFalse(any('.git' in path.parts for path,_,_ in scan['files']))
++        self.assertEqual(self.report()['candidates'],[])
++
++    def test_worktree_scope_requires_repository_evidence(self):
++        with self.assertRaises(ValueError):
++            self.report(worktree_roots=[self.root/'trees'])
++
++    def test_open_missing_unknown_or_conflicting_card_keeps_terminal_session(self):
++        self.job()
++        for cards in ([dict(id='sample',section='up_next')],[],
++                      [dict(id='sample',section='unknown')],
++                      [dict(id='sample',section='done',status='running')]):
++            with self.subTest(cards=cards):
++                self.cards=cards
++                self.assertEqual(self.report()['candidates'],[])
++
++    def test_killed_card_session_and_report_are_eligible(self):
++        directory=self.job(status='killed')
++        self.cards=[dict(id='sample',section='killed',status='killed')]
++        (directory/'REPORT.md').write_text('LIVE_STATE: killed\n')
++        self.age(directory/'REPORT.md',directory)
++        self.assertEqual([r['kind'] for r in self.report()['candidates']],['job_directory'])
++
++    def test_card_reopened_during_scan_invalidates_candidates(self):
++        self.job()
++        with mock.patch.object(ops_retention,'load_cards',side_effect=[self.cards,[dict(id='sample',section='up_next')]],create=True):
++            report=ops_retention.inventory(self.jobs,self.state,now=NOW,cwds=[])
++        self.assertFalse(report['complete'])
++        self.assertEqual(report['candidates'],[])
++
++    def test_owned_worktree_requires_the_same_cwd_and_card_gate(self):
++        directory=self.job()
++        repo,git=self.make_repo()
++        tree=self.make_tree(git,directory/'worktree')
++        with self.data_owner(cwd=str(self.root/'wrong-owner')):
++            self.assertEqual(self.report(repos=[repo],worktree_roots=[self.jobs])['candidates'],[])
++        self.cards=[dict(id='sample',section='up_next')]
++        self.assertEqual(self.report(repos=[repo],worktree_roots=[self.jobs])['candidates'],[])
++
++    @contextlib.contextmanager
++    def data_owner(self, **values):
++        old=dict(self.data['sessions']['sample'])
++        self.data['sessions']['sample'].update(values)
++        self.state.write_text(json.dumps(self.data))
++        try:yield
++        finally:
++            self.data['sessions']['sample']=old
++            self.state.write_text(json.dumps(self.data))
++
++    def test_worktree_equal_to_jobs_root_is_kept_without_index_error(self):
++        repo,git=self.make_repo()
++        root=self.make_tree(git,self.root/'linked-jobs')
++        state=root/'sessions.json'
++        state.write_text(json.dumps(dict(sessions={},approvals={})))
++        with mock.patch.object(ops_retention,'load_cards',return_value=[],create=True):
++            report=ops_retention.inventory(root,state,now=NOW,cwds=[],repos=[repo],worktree_roots=[root])
++        self.assertEqual(report['candidates'],[])
++
++    def test_any_claim_keeps_without_taking_flock_or_lockf(self):
++        import fcntl
++        directory=self.job()
++        claim=directory/'turn.CLAIM'
++        claim.write_text('')
++        self.age(claim,directory)
++        with mock.patch.object(fcntl,'flock',side_effect=AssertionError('must not flock')), \
++             mock.patch.object(fcntl,'lockf',side_effect=AssertionError('must not lockf')):
++            report=self.report()
++        self.assertEqual(report['candidates'],[])
++
++    def test_lockf_claim_is_kept_without_probe(self):
++        import fcntl
++        directory=self.job()
++        claim=directory/'turn.claim'
++        claim.touch()
++        self.age(claim,directory)
++        with claim.open('r+') as stream:
++            fcntl.lockf(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)
++            self.assertEqual(self.report()['candidates'],[])
++
++    def test_roots_must_be_absolute_nonempty_and_narrow(self):
++        for value in ('','.', 'relative/path','/',str(Path.home())):
++            with self.subTest(root=value),self.assertRaises(ValueError):
++                ops_retention.safe_path(value)
++
++    def test_duplicate_repositories_do_not_unmark_main_checkout(self):
++        repo,git=self.make_repo()
++        tree=self.make_tree(git,self.root/'trees/old')
++        rows=ops_retention.worktrees([repo,repo,tree])
++        self.assertEqual(len(rows),2)
++        self.assertTrue(next(row['main'] for row in rows if row['path']==repo))
++
++    def test_worktree_scope_cannot_equal_or_contain_main_checkout(self):
++        repo,git=self.make_repo()
++        for root in (repo,self.root):
++            with self.subTest(root=root),self.assertRaises(ValueError):
++                self.report(repos=[repo],worktree_roots=[root])
++
++    def test_bad_merge_refs_fail_closed_with_exit_two(self):
++        repo,git=self.make_repo()
++        for ref in ('HEAD','refs/heads/main','--help','refs/remotes/origin/absent'):
++            out,error=io.StringIO(),io.StringIO()
++            with self.subTest(ref=ref),contextlib.redirect_stdout(out),contextlib.redirect_stderr(error), \
++                 mock.patch.object(ops_retention,'process_cwds',return_value=[]), \
++                 mock.patch.object(ops_retention,'load_cards',return_value=[],create=True):
++                code=ops_retention.main(['--jobs-root',str(self.jobs),'--repo',str(repo),'--merged-ref='+ref])
++                self.assertEqual(code,2)
++                self.assertEqual(out.getvalue(),'')
++
++    def test_default_card_loader_uses_read_only_client_and_omits_card_body(self):
++        self.job()
++        client=types.ModuleType('board_client')
++        client.cards=lambda:[dict(id='sample',section='done',body='private-sentinel')]
++        with mock.patch.dict(sys.modules,board_client=client):
++            report=ops_retention.inventory(self.jobs,self.state,now=NOW,cwds=[])
++        self.assertEqual([r['kind'] for r in report['candidates']],['job_directory'])
++        self.assertNotIn('private-sentinel',json.dumps(report))
++
++    def test_nested_git_marker_keeps_registered_tree_unsafe(self):
++        root=self.root/'synthetic-tree'
++        root.mkdir()
++        (root/'.git').write_text('registration pointer')
++        (root/'nested').mkdir()
++        (root/'nested/.git').write_text('private-sentinel')
++        scan=ops_retention.scan_tree(root,ops_retention.Budget(1000,20),registered_worktree=True)
++        self.assertFalse(scan['safe'])
++        self.assertFalse(any('.git' in path.parts for path,_,_ in scan['files']))
++
++    def test_separate_git_directory_preserves_only_the_actual_main_checkout(self):
++        repo=self.root/'repo'
++        subprocess.run(['git','init','-b','main','--separate-git-dir',str(self.root/'metadata'),str(repo)],
++                       check=True,capture_output=True)
++        def git(*args):
++            return subprocess.run(['git','-C',str(repo),*args],check=True,capture_output=True)
++        git('config','user.name','Fixture')
++        git('config','user.email','fixture@example.invalid')
++        (repo/'source').write_text('baseline')
++        git('add','source');git('commit','-m','fixture')
++        git('update-ref','refs/remotes/origin/main','HEAD')
++        tree=self.make_tree(git,self.root/'trees/old')
++        report=self.report(repos=[repo],worktree_roots=[tree.parent])
++        self.assertEqual([r['kind'] for r in report['candidates']],['worktree'])
 +
 +
 +if __name__ == '__main__':
