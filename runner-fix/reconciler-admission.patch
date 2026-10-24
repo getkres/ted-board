@@ -1,6 +1,6 @@
 --- /dev/null
 +++ runner_admission.py
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,124 @@
 +"""Resource admission for the mini. No provider throughput assumptions are used."""
 +from datetime import datetime
 +import json
@@ -13,19 +13,7 @@
 +GIB = 1024 ** 3
 +
 +
-+def reconciler_enabled(config_path=None):
-+    if os.environ.get('TED_RECONCILER_ENABLED', '').lower() == 'true':
-+        return True
-+    path = Path(config_path) if config_path is not None else Path(__file__).resolve().parent / 'jobs/reconciler-config.json'
-+    try:
-+        value = json.loads(path.read_text())
-+    except FileNotFoundError:
-+        return False
-+    except (OSError, ValueError):
-+        raise RuntimeError('reconciler config is unreadable or invalid') from None
-+    if not isinstance(value, dict) or not isinstance(value.get('enabled'), bool):
-+        raise RuntimeError('reconciler config requires a boolean enabled flag')
-+    return value['enabled']
++from reconciler_gate import reconciler_enabled
 +
 +
 +CAPACITY_PATH = Path(__file__).resolve().parent / 'capacity.json'

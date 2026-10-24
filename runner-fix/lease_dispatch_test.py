@@ -33,8 +33,8 @@ def load(name, filename, deps):
 
 client = types.SimpleNamespace(BoardConflict=RuntimeError, BoardGone=LookupError, call=forbidden)
 live = types.SimpleNamespace(instructions=lambda cid: 'fixture instructions', publish_live=forbidden)
-sessions = load('lease_sessions', 'sessions.py', {'board_client': client, 'live_status': live})
-worker = load('lease_worker', 'session_worker.py', {'board_client': client, 'sessions': sessions})
+sessions = load('lease_sessions', 'reconciler_sessions.py', {'board_client': client, 'live_status': live})
+worker = load('lease_worker', 'reconciler_worker.py', {'board_client': client, 'reconciler_sessions': sessions})
 
 
 class LeaseDispatch(unittest.TestCase):
@@ -226,7 +226,7 @@ class LeaseDispatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp);(directory / 'jobs').mkdir()
             (directory / 'jobs/reconciler-config.json').write_text('{"enabled":true}')
-            with patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'false'}), patch.dict(sessions.reconciler_enabled.__globals__, {'__file__': str(directory / 'runner_admission.py')}):
+            with patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'false'}), patch.dict(sessions.reconciler_enabled.__globals__, {'CONFIG_PATH': directory / 'jobs/reconciler-config.json'}):
                 self.store.tick()
         self.assertEqual(self.store.read(), before)
 
@@ -365,7 +365,8 @@ class LeaseDispatch(unittest.TestCase):
         saved = self.store.read()
         self.assertEqual(saved['sessions']['x']['status'], 'failed')
         self.assertEqual(saved['sessions']['x']['queue'], [])
-        self.assertEqual(len(saved['outbox']), 1)
+        self.assertEqual(saved['outbox'], [])
+        self.assertEqual(len(saved['ted_outbox']), 1)
 
     def test_stale_token_result_cannot_complete_replacement(self):
         s = self.running(expiry=time.time() - 1)
@@ -462,6 +463,25 @@ class LeaseDispatch(unittest.TestCase):
         self.assertEqual(len(self.dispatch(cap=64)), 3)
         self.assertEqual(len(self.dispatch(cap=64)), 3)
         self.assertEqual(len(self.dispatch(cap=64)), 2)
+
+    def test_cosmetic_dispatch_replay_does_not_reset_retry_or_create_a_turn(self):
+        self.enqueue()
+        with self.store.locked() as data:
+            data['sessions']['x'].update(status='done', turn='previous', retry_count=2)
+        result = self.store.enqueue(dict(id='x', title='Cosmetic change'), 'work', 'reconciler-dispatch-new', engine='codex')
+        self.assertFalse(result)
+        saved = self.store.read()['sessions']['x']
+        self.assertEqual(saved['retry_count'], 2)
+        self.assertEqual(len(saved['queue']), 1)
+
+    def test_automatic_lifetime_dispatch_limit_dead_letters_without_starting(self):
+        self.enqueue()
+        with self.store.locked() as data:
+            session = data['sessions']['x']
+            session['automatic_dispatch_count'] = 3
+            session['queue'][0]['automatic'] = True
+        self.assertEqual(self.dispatch(cap=64), [])
+        self.assertEqual(self.store.read()['sessions']['x']['status'], 'dead_letter')
 
     def test_managed_pass_starts_at_most_ten_workers_and_retains_the_rest(self):
         for n in range(25):
@@ -576,14 +596,15 @@ class AdmissionPressure(unittest.TestCase):
             with patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'true'}):
                 self.assertTrue(helper.reconciler_enabled(path))
 
-    def test_invalid_durable_flag_never_silently_restores_legacy_dispatch(self):
+    def test_invalid_flag_warns_legacy_and_refuses_apply(self):
         helper = self.helper()
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'false'}):
             path = Path(temp) / 'reconciler-config.json'
             for content in ('not json', '{"enabled":"true"}', '[]'):
                 path.write_text(content)
+                self.assertFalse(helper.reconciler_enabled(path))
                 with self.assertRaises(RuntimeError):
-                    helper.reconciler_enabled(path)
+                    helper.reconciler_enabled(path, strict=True)
 
     def test_live_total_cap_and_twice_cpu_load_guard(self):
         helper = self.helper()

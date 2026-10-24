@@ -1,99 +1,12 @@
 --- a/session_worker.py
 +++ b/session_worker.py
-@@ -5,8 +5,12 @@
- from pathlib import Path
- import subprocess
- import sys
-+import threading
- from board_client import BoardConflict,BoardGone
--from sessions import atomic,engine_command,Store,identity
-+from sessions import atomic,engine_command,Store,identity,lease_matches,reconciler_enabled
-+
-+LEASE_RENEW_SECONDS=30
-+import claude_lanes as lanes
+@@ -58,4 +58,9 @@
+  atomic(str(prefix)+'.result.json',result)
+  claim.close()
  
- 
- def run(prefix):
-@@ -17,10 +21,37 @@
-  try:fcntl.flock(claim,fcntl.LOCK_EX|fcntl.LOCK_NB)
-  except BlockingIOError:claim.close();return
-  store=Store(Path(s['cwd']).parent)
-+ managed=reconciler_enabled();pid=os.getpid();expected=identity(pid);token=s.get('lease_token')
-  with store.locked() as data:
-   owner=data['sessions'].get(s['card_id'],{})
--  if owner.get('status')!='running' or owner.get('pid')!=os.getpid() or owner.get('turn')!=prefix.name or owner.get('identity')!=identity(os.getpid()):
-+  if owner.get('status')!='running' or owner.get('pid')!=pid or owner.get('turn')!=prefix.name or owner.get('identity')!=expected or (managed and not lease_matches(owner,prefix.name,pid,expected,token)):
-    claim.close();return
-+ stop=threading.Event();renewer=None
-+ if managed:
-+  if not store.renew_lease(s['card_id'],prefix.name,pid,expected,token):claim.close();return
-+  def renew():
-+   while not stop.wait(LEASE_RENEW_SECONDS):
-+    try:
-+     if not store.renew_lease(s['card_id'],prefix.name,pid,expected,token):return
-+    except (OSError,ValueError):return
-+  renewer=threading.Thread(target=renew,name='turn-lease',daemon=True);renewer.start()
-+ try:
-+  result=execute(prefix,inp,s)
-+  if managed:
-+   # Serialize the final fence with recovery. Expiry alone does not discard a
-+   # completed result, but a replacement token or turn can never publish one.
-+   with store.locked() as data:
-+    if lease_matches(data['sessions'].get(s['card_id'],{}),prefix.name,pid,expected,token):
-+     result.update(lease_token=token,turn=prefix.name,pid=pid,identity=expected)
-+     atomic(str(prefix)+'.result.json',result)
-+  else:atomic(str(prefix)+'.result.json',result)
-+ finally:
-+  stop.set()
-+  if renewer:renewer.join(timeout=5)
-+  claim.close()
-+
-+
-+def execute(prefix,inp,s):
-  if inp.get('veto_proposal_id'):
-   try:
-    from veto_worker import send
-@@ -30,19 +61,21 @@
-    result=dict(ok=False,veto_outcome='failed',text='Timed send was refused before Gmail send. Review the proposal before retrying.')
-   except Exception:
-    result=dict(ok=False,veto_outcome='uncertain',text='Timed send result is uncertain. Check the proposal and Gmail Sent before retrying.')
--  atomic(str(prefix)+'.result.json',result);claim.close();return
-+  return result
-  command=engine_command(s,inp['prompt'],prefix,inp.get('review',False))
-  result=dict(ok=False,text='Worker failed before returning an answer.')
-  try:
-   with open(str(prefix)+'.events','w') as out:
-    Path(out.name).chmod(0o600)
--   p=subprocess.run(command,cwd=s['cwd'],stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
-+   p=subprocess.run(command,cwd=s['cwd'],env=lanes.environment(s,os.environ),stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
-   raw=Path(str(prefix)+'.events').read_text();sid=None;text=''
-   if s['engine'] in ('claude','sonnet') or inp.get('review'):
--   payload={}
-+   payload={};events=[]
-    for line in raw.splitlines():
-     try:event=json.loads(line)
-     except ValueError:continue
-+    if not isinstance(event,dict):continue
-+    events.append(event)
-     if event.get('session_id'):sid=event['session_id']
-     if event.get('type')=='result':payload=event
-    text=payload.get('result','');ok=p.returncode==0 and bool(payload) and not payload.get('is_error',False)
-@@ -52,10 +85,13 @@
-     except ValueError:continue
-     if event.get('type')=='thread.started':sid=event.get('thread_id')
-    last=Path(str(prefix)+'.last.txt');text=last.read_text() if last.exists() else '';ok=p.returncode==0
--  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer. Reply to retry.',session_id=sid)
-- except subprocess.TimeoutExpired:result=dict(ok=False,text='Worker exceeded the twelve-hour limit.')
-- except Exception as exc:result=dict(ok=False,text='Worker failed: '+type(exc).__name__+'. Reply to retry.')
-- atomic(str(prefix)+'.result.json',result)
-- claim.close()
-+  ok=ok and bool(text.strip())
-+  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer.',session_id=sid)
-+  if s['engine'] in ('claude','sonnet') or inp.get('review'):result['lane_usage']=lanes.observe(events)
-+  if not ok:result['failure_kind']='no_result' if p.returncode==0 and not text.strip() else 'crash'
-+ except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the twelve-hour limit.')
-+ except Exception:result=dict(ok=False,failure_kind='crash',text='Worker failed before returning a result.')
-+ if result['ok']:result['completion']=dict(section='up_next',note='ted review')
-+ return result
- 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_worker import run
++# END RECONCILER ROUTE
  if __name__=='__main__':run(sys.argv[1])

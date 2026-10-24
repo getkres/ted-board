@@ -20,10 +20,9 @@ class PlannerTests(unittest.TestCase):
   self.assertEqual(a['items'][0]['owner'],'ted')
   self.assertEqual(a['items'][0]['next_action_due'],b['items'][0]['next_action_due'])
   self.assertIn('repair_metadata',[x['kind'] for x in a['actions']])
- def test_expired_lease_is_dead_even_with_live_pid(self):
+ def test_expired_lease_with_unconfirmed_pid_is_a_hold(self):
   s=snapshot();s['sessions']={'c-one':dict(status='running',turn='t',pid=123,identity='identity',lease_expires_at=NOW-1,lease_token='fence',retry_count=0)}
-  actions=r.plan(s,now=NOW)['actions'];retry=next(x for x in actions if x['kind']=='retry')
-  self.assertEqual(retry['payload']['expected_lease_token'],'fence')
+  self.assertNotIn('retry',[x['kind'] for x in r.plan(s,now=NOW)['actions']])
  def test_result_wins_over_lease_expiry(self):
   s=snapshot();s['sessions']={'c-one':dict(status='running',turn='t',lease_expires_at=0,result_ready=True)}
   self.assertNotIn('retry',[x['kind'] for x in r.plan(s,now=NOW)['actions']])
@@ -143,5 +142,59 @@ class PlannerTests(unittest.TestCase):
   row=r.plan(s,now=NOW)['items'][0];self.assertEqual(row['action_started_at'],r.iso(NOW-10));self.assertGreater(r.stamp(row['next_action_due']),NOW)
  def test_backoff_is_bounded_and_deterministic(self):
   self.assertEqual(r.backoff('c-one',1),r.backoff('c-one',1));self.assertGreaterEqual(r.backoff('c-one',2),120);self.assertLessEqual(r.backoff('c-one',10),3600)
+
+class FreshReview(unittest.TestCase):
+ def test_only_ted_rows_enter_the_queue_even_for_active_delivery_or_stop(self):
+  for extra in ({'stop_requested':True},{'status':'running'}):
+   s=snapshot([card(owner='worker:c-one')]);s['sessions']={'c-one':dict(status='running',turn='t',lease_token='f',lease_expires_at=NOW+100,**extra)} if 'status' not in extra else {'c-one':dict(status='running',turn='t',lease_token='f',lease_expires_at=NOW+100)}
+   s['workflows']={'c-one':dict(pr_url='https://github.com/example/test/pull/1')}
+   result=r.plan(s,now=NOW);rows={x['id']:x for x in result['items']}
+   self.assertTrue(all(rows[i]['owner']=='ted' for i in result['ted_queue']))
+ def test_active_verified_source_decision_is_excluded_from_ted_queue(self):
+  c=card(owner='sebastian',section='needs_you',decision_kind='spend_money',revision=1)
+  s=snapshot([c]);s['sessions']={'c-one':dict(status='running',turn='t',lease_token='f',lease_expires_at=NOW+100)}
+  url='https://github.com/example/test/pull/1'
+  s['workflows']={'c-one':dict(pr_url=url,deployment=dict(verified=True,deployed_at=r.iso(NOW-5),revision='sha'),verification=dict(ok=True,verified_at=r.iso(NOW-1),revision='sha',card_revision=1))}
+  s['prs']={url:dict(state='MERGED',merged_at=r.iso(NOW-10),merge_revision='sha')}
+  result=r.plan(s,now=NOW);rows={x['id']:x for x in result['items']}
+  self.assertTrue(all(rows[i]['owner']=='ted' for i in result['ted_queue']))
+ def test_external_ids_are_bounded_safe_and_starts_never_exceed_now(self):
+  s=snapshot([card(created_at=r.iso(NOW+1000),action_started_at=r.iso(NOW+1000))])
+  s['external_jobs']=[dict(id='bad job?'+('x'*300),started_at=NOW+1000)]
+  result=r.plan(s,now=NOW)
+  import re
+  self.assertTrue(all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}',x['id']) for x in result['items']))
+  self.assertTrue(all(r.stamp(x['action_started_at'])<=NOW for x in result['items']))
+ def test_completed_session_cannot_be_dispatched_again_after_card_cosmetic_change(self):
+  s=snapshot();s['sessions']={'c-one':dict(status='done',turn='already-ran',first_enqueued_at=NOW-200,started_at=NOW-200)}
+  for n in range(4):
+   s['cards'][0]['updated_at']=r.iso(NOW+n)
+   self.assertNotIn('dispatch',[x['kind'] for x in r.plan(s,now=NOW+n)['actions']])
+ def test_dispatch_generation_uses_first_enqueue_not_card_updated_at(self):
+  s=snapshot();s['sessions']={'c-one':dict(status='idle',first_enqueued_at=NOW-200,queue=[])}
+  a=next(x['id'] for x in r.plan(s,now=NOW)['actions'] if x['kind']=='dispatch')
+  s['cards'][0]['updated_at']=r.iso(NOW)
+  b=next(x['id'] for x in r.plan(s,now=NOW)['actions'] if x['kind']=='dispatch')
+  self.assertEqual(a,b)
+ def test_lease_less_running_worker_is_coverage_not_a_recovery_target(self):
+  s=snapshot();s['sessions']={'c-one':dict(status='running',turn='t',pid=123,identity='i')}
+  result=r.plan(s,now=NOW)
+  self.assertFalse(any(x['kind'] in ('retry','dead_letter','stop_worker') for x in result['actions']))
+  self.assertIn('lease_missing:c-one',result['coverage_defects'])
+ def test_live_or_recently_active_worker_survives_expiry_and_missed_counts(self):
+  for extra in (dict(pid_dead=False,activity_quiet=True),dict(pid_dead=True,activity_quiet=False)):
+   s=snapshot();s['sessions']={'c-one':dict(status='running',turn='t',lease_token='f',lease_expires_at=NOW-500,missed_renewals=3,**extra)}
+   self.assertFalse(any(x['kind'] in ('retry','dead_letter') for x in r.plan(s,now=NOW)['actions']))
+ def test_failed_legacy_attempt_is_held_for_ted_without_an_automatic_retry(self):
+  s=snapshot();s['sessions']={'c-one':dict(status='failed',turn='old-legacy',pid=None,queue=[],retry_count=0)}
+  actions=r.plan(s,now=NOW)['actions']
+  self.assertNotIn('retry',[a['kind'] for a in actions])
+  self.assertIn('dead_letter',[a['kind'] for a in actions])
+ def test_three_confirmed_missed_renewals_are_required(self):
+  s=snapshot();job=dict(status='running',turn='t',lease_token='f',lease_expires_at=NOW-500,pid_dead=True,activity_quiet=True)
+  s['sessions']={'c-one':job}
+  for count,want in ((0,False),(1,False),(2,False),(3,True)):
+   job['missed_renewals']=count
+   self.assertEqual(any(x['kind']=='retry' for x in r.plan(s,now=NOW)['actions']),want)
 
 if __name__=='__main__':unittest.main()

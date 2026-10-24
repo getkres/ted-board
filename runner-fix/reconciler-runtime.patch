@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,398 @@
+@@ -0,0 +1,467 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -20,7 +20,7 @@
 +import time
 +import uuid
 +
-+from reconciler import classify_priorities, digest, iso, plan, stamp, unsafe_session
++from reconciler import classify_priorities, digest, iso, plan, stamp, unsafe_session, MISSED_RENEWALS
 +
 +PR=re.compile(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)\b')
 +
@@ -120,7 +120,7 @@
 +  session.update(status='dead_letter',last_line='retry exhausted or unsafe to repeat, ted review required',dead_letter_at=time.time())
 +  return True
 + session['retry_count']=p['attempt'];session['retry_at']=stamp(p['retry_at'])
-+ session['queue']=[dict(id='reconciler-retry-'+action['id'],kind='work',message='Resume from REPORT.md and your files. Verify prior effects before continuing. '+old.get('message','')[:12000])]+remaining
++ session['queue']=[dict(id='reconciler-retry-'+action['id'],kind='work',automatic=True,message='Resume from REPORT.md and your files. Verify prior effects before continuing. '+old.get('message','')[:12000])]+remaining
 + session.update(status='queued',last_line='safe retry queued with backoff')
 + return True
 +
@@ -180,8 +180,12 @@
 + board=board or importlib.import_module('board_client')
 + feed=board.call()
 + cards=feed.get('cards') if isinstance(feed,dict) else None
-+ if not isinstance(cards,list) or len(cards)>=500:raise RuntimeError('Complete card feed unavailable')
-+ s=local_snapshot(root,cards)
++ if not isinstance(cards,list):cards=[];card_coverage='unavailable'
++ else:card_coverage='truncated' if len(cards)>=500 else 'ok'
++ valid=[c for c in cards if isinstance(c,dict) and isinstance(c.get('id'),str) and re.fullmatch(r'[A-Za-z0-9._-]{1,64}',c['id'])]
++ if len(valid)!=len(cards):card_coverage='invalid_rows'
++ cards=valid
++ s=local_snapshot(root,cards);s['coverage']['cards']=card_coverage
 + try:
 +  feed=(mockups or importlib.import_module('mockup_client')).call()
 +  rows=feed.get('mockups')
@@ -203,9 +207,11 @@
 +  remote=board.call(resource='jobs')
 +  if not isinstance(remote.get('jobs'),list):raise ValueError()
 +  s['coverage']['remote_jobs']='ok'
-+  s['external_jobs']=[j for j in remote['jobs'] if j.get('id')!='fresh-ted-health' and j.get('status') in ('running','queued','untracked','waiting_approval') and (not j.get('card_id') or j.get('card_id') not in s['sessions'])]
-+  known={j.get('card_id') for j in remote['jobs'] if j.get('card_id')}
-+  for cid in known-set(s['sessions']):s['coverage']['untracked_job:'+cid]='unavailable'
++  jobs=[j for j in remote['jobs'] if isinstance(j,dict)]
++  if len(jobs)!=len(remote['jobs']):s['coverage']['remote_job_rows']='invalid_rows'
++  s['external_jobs']=[j for j in jobs if j.get('id')!='fresh-ted-health' and j.get('status') in ('running','queued','untracked','waiting_approval') and (not j.get('card_id') or j.get('card_id') not in s['sessions'])]
++  known={j.get('card_id') for j in jobs if isinstance(j.get('card_id'),str)}
++  for cid in known-set(s['sessions']):s['coverage']['untracked_job:'+digest(cid)]='unavailable'
 +  remote_ledger=remote.get('reconciliation')
 +  if not isinstance(remote_ledger,dict):s['coverage']['backend_ledger']='ok' if remote.get('reconciliation_error')=='not_published' else 'not_installed'
 +  else:
@@ -242,7 +248,41 @@
 + except (OSError,ValueError,subprocess.TimeoutExpired):return None
 +
 +
-+def confirmed_stop(session):
++def activity_stamp(session):
++ latest=0
++ prefix=Path(session.get('cwd',''))/str(session.get('turn',''))
++ for suffix in ('.events','.log'):
++  try:latest=max(latest,Path(str(prefix)+suffix).stat().st_mtime)
++  except OSError:pass
++ return latest
++
++
++def sample_health(store,now):
++ """Probe processes and file activity outside the renewal lock, then CAS observations."""
++ from sessions import alive
++ with store.locked() as data:sessions=json.loads(json.dumps(data['sessions']))
++ updates={}
++ for cid,session in sessions.items():
++  if session.get('status')!='running' or not session.get('lease_token'):continue
++  pid_dead=not alive(session.get('pid'),session.get('identity'))
++  activity=activity_stamp(session)
++  quiet=activity==session.get('health_activity_mtime',0) and now-activity>=150
++  expired=stamp(session.get('lease_expires_at'))<=now
++  signature=[session.get('lease_token'),session.get('lease_expires_at'),session.get('lease',{}).get('renewed_at')]
++  same=signature==session.get('health_lease')
++  misses=int(session.get('missed_renewals') or 0) if same else 0
++  if expired and pid_dead and quiet:
++   if now-stamp(session.get('health_observed_at'))>=30:misses+=1
++  else:misses=0
++  update=dict(pid_dead=pid_dead,activity_quiet=quiet,missed_renewals=misses,health_activity_mtime=activity,health_lease=signature,health_observed_at=now)
++  with store.locked() as data:
++   current=data['sessions'].get(cid,{})
++   if all(current.get(k)==session.get(k) for k in ('turn','lease_token','lease_expires_at','status')):
++    current.update(update);updates[cid]=dict(current)
++ return updates
++
++
++def confirmed_stop(session,allow_kill=False):
 + from sessions import alive,safe_kill
 + lease=session.get('lease') or {}
 + pid=session.get('pid') or lease.get('pid');ident=session.get('identity') or lease.get('identity')
@@ -250,6 +290,8 @@
 + members=group_members(pid)
 + if members is None:return False
 + if not alive(pid,ident):return not members
++ # Expiry alone never grants permission to signal a live process.
++ if not allow_kill:return False
 + if not safe_kill(pid,ident):return False
 + for _ in range(10):
 +  members=group_members(pid)
@@ -259,25 +301,43 @@
 + return False
 +
 +
++def require_leased_cutover(snapshot):
++ if any(s.get('status')=='running' and not s.get('lease_token') for s in snapshot.get('sessions',{}).values()):
++  raise RuntimeError('lease-less running workers prevent apply; drain the legacy runner first')
++
++
 +def execute(action,store,snapshot,board):
 + kind=action['kind'];p=action['payload'];cid=p.get('card_id')
 + if kind in ('retry','dead_letter','stop_worker'):
++  from sessions import matching_result
++  def result_ready(session):
++   result=read_json(Path(session.get('cwd',''))/(str(session.get('turn'))+'.result.json'),None)
++   return matching_result(session,result)
 +  with store.locked() as data:
-+   s=data['sessions'].get(cid)
-+   if not s:return False
-+   # Crash after local commit but before the SQLite receipt is a safe replay.
-+   if s.get('recovery_action')==action['id']:return True
++   current=data['sessions'].get(cid)
++   if not current:return False
++   if current.get('recovery_action')==action['id']:return True
++   if current.get('status')=='running' and not current.get('lease_token'):return False
++   if kind!='stop_worker' and result_ready(current):return False
++   observed=json.loads(json.dumps(current));observed_activity=activity_stamp(current)
++  # All probes, signals, and waits occur outside the session lock.
++  stopped=confirmed_stop(observed,allow_kill=kind=='stop_worker')
++  if not stopped:return False
++  with store.locked() as data:
++   current=data['sessions'].get(cid)
++   if not current:return False
++   if current.get('recovery_action')==action['id']:return True
++   if any(current.get(k)!=observed.get(k) for k in ('turn','lease_token','lease_expires_at','status','stop_requested')):return False
 +   if kind!='stop_worker':
-+    from sessions import matching_result
-+    result=read_json(Path(s.get('cwd',''))/(str(s.get('turn'))+'.result.json'),None)
-+    if matching_result(s,result):return False
-+   ok=recover_session(s,action,confirmed_stop)
-+   if ok and kind=='dead_letter':store._out(data,s,'retries exhausted or unsafe to repeat, ted owns this recovery','reconciler-dlq-'+action['id'])
++    if result_ready(current) or activity_stamp(current)!=observed_activity:return False
++    if current.get('status')=='running' and (current.get('pid_dead') is not True or current.get('activity_quiet') is not True or int(current.get('missed_renewals') or 0)<MISSED_RENEWALS):return False
++   ok=recover_session(current,action,lambda _:True)
++   if ok and kind=='dead_letter':store._out(data,current,'retries exhausted or unsafe to repeat, ted owns this recovery','reconciler-dlq-'+action['id'])
 +   return ok
 + if kind=='dispatch':
 +  c=next((c for c in snapshot['cards'] if c['id']==cid),None)
 +  if not c:return False
-+  store.enqueue(c,'Resume the card from REPORT.md and its files. Deliver and verify the requested outcome, and retain an accurate blocked state until it is live.','reconciler-dispatch-'+action['id'],engine='codex');return True
++  return store.enqueue(c,'Resume the card from REPORT.md and its files. Deliver and verify the requested outcome, and retain an accurate blocked state until it is live.','reconciler-dispatch-'+action['id'],engine='codex') is True
 + if kind=='escalation_digest':
 +  if any(c['id']==cid for c in snapshot['cards']):return True
 +  import card
@@ -320,12 +380,18 @@
 + result=plan(snapshot,completed=completed,now=now);result['applied']=False
 + if dry_run:return result
 + if store is None or board is None:raise ValueError('apply requires explicit effect adapters')
-+ # Missing feeds must never overwrite an authoritative ledger or start guessed work.
-+ if any(snapshot.get('coverage',{}).get(source)!='ok' for source in ('backend_ledger','inbox_policy','remote_jobs')):raise RuntimeError('Complete authoritative backend and inbox observations required before apply')
-+ publish={k:result[k] for k in ('generated_at','items','ted_queue','banner','coverage_defects')}
-+ response=board.call('reconcile_publish',**publish)
-+ if response.get('ok') is not True:raise RuntimeError('Reconciliation publication unconfirmed')
++ require_leased_cutover(snapshot)
++ partial_cards=snapshot.get('coverage',{}).get('cards','ok')!='ok'
++ if not partial_cards:
++  if any(snapshot.get('coverage',{}).get(source)!='ok' for source in ('backend_ledger','inbox_policy','remote_jobs')):raise RuntimeError('Complete authoritative backend and inbox observations required before apply')
++  publish={k:result[k] for k in ('generated_at','items','ted_queue','banner','coverage_defects')}
++  response=board.call('reconcile_publish',**publish)
++  if response.get('ok') is not True:raise RuntimeError('Reconciliation publication unconfirmed')
 + selected,limited=select_pass(result,completed)
++ if partial_cards:
++  limited += [a for a in selected if a['kind'] not in ('retry','dead_letter','stop_worker')]
++  selected=[a for a in selected if a['kind'] in ('retry','dead_letter','stop_worker')]
++ result['publication_skipped']=partial_cards
 + failures=[]
 + with Journal(journal_path) as journal:
 +  for action in selected:
@@ -337,7 +403,7 @@
 +     journal.complete_group([(action['id'],action['kind'])]+[(aid,'initial_digest_member') for aid in action['payload']['covered_ids']])
 +    elif not execute_recorded(action,journal,lambda a:execute(a,store,snapshot,board)):failures.append(action['id'])
 +   except Exception:failures.append(action['id'])
-+  if INITIAL_DIGEST_ID not in completed and not any(a['kind'] in ESCALATIONS for a in result['actions']):
++  if not partial_cards and INITIAL_DIGEST_ID not in completed and not any(a['kind'] in ESCALATIONS for a in result['actions']):
 +   journal.complete(INITIAL_DIGEST_ID,dict(kind='initial_scan'))
 + result.update(applied=True,selected_actions=selected,limited=[a['id'] for a in limited],failed=failures,deferred=failures+[a['id'] for a in limited])
 + return result
@@ -361,8 +427,8 @@
 + p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,default=Path.home()/'ted-ops/ted-board');p.add_argument('--snapshot',type=Path);p.add_argument('--output',type=Path);p.add_argument('--dry-run',action='store_true');p.add_argument('--apply',action='store_true');p.add_argument('--policy-source',type=Path);p.add_argument('--redrive');p.add_argument('--reason');a=p.parse_args(argv)
 + apply=a.apply and not a.dry_run
 + if a.apply and a.dry_run:p.error('choose dry-run or apply')
-+ from runner_admission import reconciler_enabled
-+ if apply and (not reconciler_enabled(a.root/'jobs/reconciler-config.json') or 'mini' not in socket.gethostname().lower()):p.error('apply requires mini and explicit reviewed enablement')
++ from reconciler_gate import reconciler_enabled
++ if apply and (not reconciler_enabled(a.root/'jobs/reconciler-config.json',strict=True) or 'mini' not in socket.gethostname().lower()):p.error('apply requires mini and explicit reviewed enablement')
 + if apply and (a.snapshot or a.policy_source):p.error('apply must observe fresh installed sources')
 + root=a.root.resolve();sys.path.insert(0,str(root))
 + lock=None
@@ -371,23 +437,26 @@
 +  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 +  except BlockingIOError:return 0
 + try:
-+  store=importlib.import_module('sessions').Store(root/'jobs') if apply else None
++  store=importlib.import_module('reconciler_sessions').Store(root/'jobs') if apply else None
 +  board=importlib.import_module('board_client') if apply else None
-+  if apply:store.controls(board.call('control').get('commands',[]))
 +  snapshot=read_json(a.snapshot,None) if a.snapshot else observe(root,policy_source=a.policy_source)
 +  if snapshot is None:raise RuntimeError('Snapshot unavailable')
++  if apply:
++   require_leased_cutover(snapshot)
++   if snapshot['coverage'].get('cards')=='ok':store.controls(board.call('control').get('commands',[]))
++   snapshot['sessions'].update(sample_health(store,time.time()))
 +  if a.redrive:
 +   if not apply:p.error('redrive requires apply and Ted repair reason')
 +   with store.locked() as data:redrive(data['sessions'][a.redrive],a.reason)
 +   return 0
 +  result=run(snapshot,root/'jobs/reconciler.sqlite',time.time(),not apply,store,board)
-+  if apply:
++  if apply and not result.get('publication_skipped'):
 +   # All lifecycle mutations are owned here, not by the heartbeat or reaper.
 +   sync_scheduling(store,snapshot);store.tick(reconcile=True);store.collect_approvals(reconcile=True);store.sync_approval_status();store.flush()
 +   if os.environ.get('TED_MOCKUP_AUTOARCHIVE_ENABLED')=='true':
 +    from mockup_autoarchive import heartbeat_pass
 +    heartbeat_pass()
-+   write_private(root/'jobs/ted-review-queue.json',dict(generated_at=result['generated_at'],items=[x for x in result['items'] if x['id'] in result['ted_queue']],coverage_defects=result['coverage_defects']))
++   write_private(root/'jobs/ted-review-queue.json',dict(generated_at=result['generated_at'],items=[x for x in result['items'] if x['id'] in result['ted_queue']],coverage_defects=result['coverage_defects'],notes=store.read().get('ted_outbox',[])))
 +  if a.output:write_private(a.output,dict(snapshot=snapshot,result=result))
 +  counts={}
 +  for action in result['actions']:counts[action['kind']]=counts.get(action['kind'],0)+1

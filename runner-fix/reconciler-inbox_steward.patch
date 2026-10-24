@@ -1,89 +1,15 @@
---- inbox_steward.py
-+++ inbox_steward.py
-@@ -12,6 +12,7 @@
- import subprocess
- import sys
- import time
-+from inbox_policy import disposition
- 
- ROOT = Path.home() / 'ted-ops/ted-board'
- DAY = 86400
-@@ -118,25 +119,8 @@
-     return None
+--- a/inbox_steward.py
++++ b/inbox_steward.py
+@@ -398,6 +398,12 @@
+     return 1 if result['failed'] else 0
  
  
--def classify_card(card, now):
--    reason = protection(card, now)
--    if reason:
--        return None, reason
--    last = latest(card)
--    if last == {} and FYI.search(str(card.get('title', ''))+' '+str(card.get('body', ''))):
--        return 'done', 'pure fyi, no action required'
--    if not last or str(last.get('who', '')).lower() not in WORKERS:
--        return None, 'no dated latest worker message'
--    text = str(last.get('text') or '')
--    negated = list(NEGATED_REPORT.finditer(text))
--    if any(not any(n.start() <= report.start() < n.end() for n in negated)
--           for report in REPORT.finditer(text)):
--        return 'up_next', 'Ted review'
--    if negated:
--        return None, 'unfinished or future work, ted judgment required'
--    if FYI.search(text):
--        return 'done', 'pure fyi, no action required'
--    return None, 'ambiguous, ted judgment required'
-+def classify_card(card, now, mockups=()):
-+    return disposition(card, mockups)
- 
- 
- def base_title(value):
-@@ -192,10 +176,11 @@
-     for c in cards:
-         if c.get('section') != 'needs_you':
-             continue
--        target, reason = classify_card(c, now)
-+        target, reason = classify_card(c, now, mockups)
-         if target:
-             actions.append(dict(kind='move', card_id=c['id'], project=c['project'],
--                                **{'from': 'needs_you'}, to=target, reason=reason, basis=digest(c)))
-+                                **{'from': 'needs_you'}, to=target, reason=reason, basis=digest(c),
-+                                expected_updated_at=c.get('updated_at')))
-         else:
-             review.append(review_row(c, now, 'keep', reason))
-     groups = defaultdict(list)
-@@ -252,9 +237,13 @@
-     return result
- 
- 
--def move_card(card_id, value, note):
--    from board_client import call
--    return call('move', page=True, card_id=card_id, value=value, note=note)
-+def move_card(card_id, value, note, expected_updated_at):
-+    from live_status import update
-+    if not stamp(expected_updated_at):
-+        raise RuntimeError('Card timestamp required for guarded inbox move')
-+    result = update(card_id, 'done' if value == 'done' else 'blocked', note, section=value,
-+                    expected_section='needs_you', expected_updated_at=expected_updated_at)
-+    return dict(ok=True, card=result)
- 
- 
- def archive_batch(project, batch):
-@@ -300,6 +289,10 @@
- 
- 
- def run_once(root=ROOT, dry_run=False, now=None):
-+    sys.path.insert(0,str(ROOT))
-+    from runner_admission import reconciler_enabled
-+    if reconciler_enabled():
-+        dry_run = True
-     root = Path(root)
-     fixed_now = now
-     now = time.time() if now is None else now
-@@ -325,7 +318,7 @@
-         journal(root, action, 'attempt', now)
-         try:
-             if action['kind'] == 'move':
--                result = move_card(action['card_id'], action['to'], action['reason'])
-+                result = move_card(action['card_id'], action['to'], action['reason'], action['expected_updated_at'])
-             else:
-                 result = archive_batch(action['project'], action['batch'])
-             if not isinstance(result, dict) or result.get('ok') is not True:
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_services import readonly_steward
++ run_once=readonly_steward(run_once)
++# END RECONCILER ROUTE
+ if __name__ == '__main__':
+     try:
+         sys.exit(main())

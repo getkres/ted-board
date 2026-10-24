@@ -1,27 +1,11 @@
-# Card reconciler implementation plan
+# PR 45 review round 2
 
-Goal: make stalled work observable and recoverable through one durable reconciliation loop.
-Architecture: pure snapshot planner, durable action journal, fenced session leases, private backend ledger, and authenticated Jobs view.
-Tech stack: Python standard library, TypeScript, existing Supabase Edge Function, PostgreSQL, and static JavaScript.
-Spec: DESIGN.md and the user's card brief.
+Binding specification: Ted review of PR 45 dated 2026-10-24, preserved in the private job directory as PR45-REVIEW-1024.md. No installation, service change, database execution, send, spend, or delegated worker.
 
-Global constraints: no production application, no installation before Ted review, no spending, no sends, no em dash, Oxford comma, and mini-only routines.
+1. Prove the flag-off leaks and malformed-row, dispatch, lease, cutover, configuration, and partial-feed defects with failing tests.
+2. Move the managed implementations to separate reconstructed modules. Every legacy source differs only by one marked guarded redirect. Stage a dedicated mini-only launchd entry. Remove unrelated standalone lane changes from this PR.
+3. Fix row quarantine and Ted queue ownership, stable once-only dispatch and lifetime bounds, lease-less cutover refusal, health observations and recovery outside the session lock, safe configuration checks, and partial-card-feed recovery.
+4. Prove failure routing stays operational, prepare additive SQL and exact SQL diffs, refresh live hashes, test the reconstructed bundle and committed public export, push, verify CI, and report blocked for Ted re-review.
 
-Review focus: partial feeds must not erase work; leases must fence duplicate workers; side effects must never auto-retry; polling must not reset age; schema or handler absence must not look healthy.
-
-1. Reconciliation core and durable driver
-   - Write failing unit tests for owner and deadline defects, 2h/12h/24h escalation, dead-worker simulation, expired leases, bounded retry and dead-letter, redrive, priority, idempotent action replay, and approved-to-verified evidence.
-   - Implement runner-fix/reconciler.py and runner-fix/reconciler_runtime.py with default dry-run, snapshot inputs, SQLite action receipts, and explicit enabled apply mode.
-   - Verify with python3 -m unittest discover -s runner-fix -p '*reconciler*test.py'.
-2. Private runner integration
-   - Write lease and dispatch tests before modifying candidate copies. Add fenced 30-second lease renewal, consume results before expiry, priority admission, urgent reserve, and a single recovery owner.
-   - Generate narrowly scoped patches against recorded private baselines. Preserve the archive hook and coordinate failure-routing dependencies.
-   - Test patch reconstruction and candidate Store behavior in temporary directories with transports and subprocesses stubbed.
-3. Backend and board
-   - Prepare private apply.sql, backup.sql, and rollback.sql, with explicit grants, RLS, safe ownership defaults, and an authenticated worker-only publish contract.
-   - Add a tested private handler integration patch and an aging Jobs view. Public repository gets only generic frontend, integration code, tests, patches, and documentation.
-   - Run grants checks, backend tests, and relevant UI checks.
-4. Evidence and handoff
-   - Read the live feeds without calling heartbeat, controls, dispatcher ticks, archive, or writes. Run the candidate in dry-run, record action counts and exact local action list, and report any unavailable feed.
-   - Obtain fresh review, fix meaningful findings with regression tests, rerun verification, create the PR, and write mini install, migration, soak, rollback, and Ted-review instructions.
-   - Keep final state blocked while PR review, migration, or installation remains pending.
+Ruling: use the review's permitted partial-feed coverage option instead of changing the legacy 500-card API. A truncated feed suppresses remote mutations and new admission while confirmed local managed recovery and lease renewal continue.
+Ruling: automatic recovery never kills a process. It requires three separate missed-renewal observations, a dead matching PID, no changing or recent event or log activity, and an absent process group. Only an explicit user stop can signal a matching process, outside the session lock.

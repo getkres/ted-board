@@ -34,12 +34,13 @@ export function validateReconciliationPublish(input:unknown,now=Date.now()):Reco
  if(Date.parse(generated_at)>now+300000)throw Error('Future generation');
  if(!Array.isArray(body.items)||body.items.length>2000||typeof body.banner!=='boolean'||!Array.isArray(body.ted_queue)||body.ted_queue.length>2000)throw Error('Invalid snapshot');
  const seen=new Set<string>(),cards=new Set<string>();
- const items=body.items.map(raw=>{
+ const defects:string[]=[];
+ const items:ReconciliationItem[]=body.items.flatMap((raw,index)=>{
+  try {
   const row=object(raw);
   if(Object.keys(row).some(key=>!itemFields.has(key)))throw Error('Unknown item field');
   const id=text(row.id,192),kind=row.kind as ReconciliationItem['kind'];
   if(!idPattern.test(id)||seen.has(id)||!['card','job','approval','pr','sql','mockup'].includes(kind))throw Error('Invalid item identity');
-  seen.add(id);
   const card_id=row.card_id===null?null:text(row.card_id,64);
   if(card_id!==null&&!cardPattern.test(card_id))throw Error('Invalid card identity');
   const owner=text(row.owner,136),next_action_due=timestamp(row.next_action_due),action_started_at=timestamp(row.action_started_at);
@@ -52,13 +53,17 @@ export function validateReconciliationPublish(input:unknown,now=Date.now()):Reco
    if(!card_id||!expected_updated_at||cards.has(card_id))throw Error('Card metadata requires a unique guarded card');
    cards.add(card_id);
   }
-  return {id,kind,card_id,owner,next_action_due,action_started_at,status:row.status,stage,priority:row.priority,summary,...(expected_updated_at?{expected_updated_at}:{})} as ReconciliationItem;
+  seen.add(id);
+  return [{id,kind,card_id,owner,next_action_due,action_started_at,status:row.status,stage,priority:row.priority,summary,...(expected_updated_at?{expected_updated_at}:{})} as ReconciliationItem];
+  } catch { defects.push('item_row:'+index); return []; }
  });
  const queue=new Set<string>(),byId=new Map(items.map(row=>[row.id,row]));
- const ted_queue=body.ted_queue.map(raw=>{
+ const ted_queue=body.ted_queue.flatMap((raw,index)=>{
+  try {
   const id=text(raw,192);
   if(queue.has(id)||byId.get(id)?.owner!=='ted')throw Error('Queue must contain distinct Ted entities');
-  queue.add(id);return id;
+  queue.add(id);return [id];
+  } catch { defects.push('queue_row:'+index); return []; }
  });
  const coverage=new Set<string>();
  let coverage_defects:string[]|undefined;
@@ -66,7 +71,11 @@ export function validateReconciliationPublish(input:unknown,now=Date.now()):Reco
   if(!Array.isArray(body.coverage_defects)||body.coverage_defects.length>500)throw Error('Invalid coverage');
   coverage_defects=body.coverage_defects.map(raw=>{const source=text(raw,192);if(!idPattern.test(source)||coverage.has(source))throw Error('Invalid coverage source');coverage.add(source);return source});
  }
- const result={generated_at,items,banner:body.banner,ted_queue,...(coverage_defects?{coverage_defects}:{})};
+ if(defects.length){
+  const merged=[...new Set([...(coverage_defects??[]),...defects])];
+  coverage_defects=merged.length>500?[...merged.slice(0,499),'quarantine_overflow']:merged;
+ }
+ const result={generated_at,items,banner:body.banner||defects.length>0,ted_queue,...(coverage_defects?{coverage_defects}:{})};
  if(new TextEncoder().encode(JSON.stringify(result)).length>1_500_000)throw Error('Snapshot too large');
  return result;
 }

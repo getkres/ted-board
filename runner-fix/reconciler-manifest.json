@@ -1,80 +1,128 @@
 {
   "sessions.py": {
-    "baseline_sha256": "8f6cbb513e136838d167d081e9fbace56a62e8e41af5a4b2b25c4d45482b1527",
-    "candidate_sha256": "0599c1bd00ba68c2ddccd6db3e9d73f119c5791d5852ef4ae51cf9f11efdda5a",
-    "patch": "reconciler-sessions.patch"
+    "patch": "reconciler-sessions.patch",
+    "candidate_sha256": "762136234210f7475acd0768eaddc33c729264fdddfcef401518103c93711360",
+    "source": "sessions.py",
+    "baseline_sha256": "8f6cbb513e136838d167d081e9fbace56a62e8e41af5a4b2b25c4d45482b1527"
   },
   "session_worker.py": {
-    "baseline_sha256": "ce122789da3344c6ca6ed4f41cc4393c51270a150cfb0c10d73efac286fd6a31",
-    "candidate_sha256": "92684ca184a0ecadb71547d718075a42cc1af46021602ff64ae57bcbdca062ed",
-    "patch": "reconciler-session_worker.patch"
-  },
-  "board_live.py": {
-    "baseline_sha256": "33d1b034978f220b2e8860afa6f3f86db1fb02a8bf7a5453b44049fef402d9e6",
-    "candidate_sha256": "62d3978b28ce804bc4097149fa2e23bb01c0c27fd017a1d71084d86fcf9e74b1",
-    "patch": "reconciler-board_live.patch"
-  },
-  "jobs_heartbeat.py": {
-    "baseline_sha256": "af2941a767b3bbd0f305810629592ce71b1971ebc1cdb9c8e4b6180eddbbc4a0",
-    "candidate_sha256": "8be61fec4724ebf91f1090d167578abc5b17ca921ab0a2f4e3485e9b6bbfbc48",
-    "patch": "reconciler-jobs_heartbeat.patch"
-  },
-  "job_watchdog.py": {
-    "baseline_sha256": "a28cffb57cc9c3bd25ae6b72e2b1040ee8f656712dc117bdac6a2f4e55f73b7c",
-    "candidate_sha256": "41bc0cbed19f128a9ecd0d5ceb91ae9b894efeb65b7f63a817fdf5505088a4e5",
-    "patch": "reconciler-job_watchdog.patch"
+    "patch": "reconciler-session_worker.patch",
+    "candidate_sha256": "63d1e508103507336ea98431595d4c7515ffb743b4b36f035d25a2cf8206d927",
+    "source": "session_worker.py",
+    "baseline_sha256": "ce122789da3344c6ca6ed4f41cc4393c51270a150cfb0c10d73efac286fd6a31"
   },
   "live_status.py": {
-    "baseline_sha256": "05453a861c08c2be5752ff3c86f524233da859f3dba06f4b72a5bf5559e65277",
-    "candidate_sha256": "71aba5cc05dab91fc28318eb4fcb631d6dbc5b2cb130573a3d278676d5954230",
-    "patch": "reconciler-live_status.patch"
+    "patch": "reconciler-live_status.patch",
+    "candidate_sha256": "bf3ff15f557f87f5d60099cd4181a72eba6a3a9ab35c8572b069fefa4da5884d",
+    "source": "live_status.py",
+    "baseline_sha256": "05453a861c08c2be5752ff3c86f524233da859f3dba06f4b72a5bf5559e65277"
+  },
+  "board_live.py": {
+    "patch": "reconciler-board_live.patch",
+    "candidate_sha256": "704c52c667db3e0f68cd1ff1197391085521d0b9dc7a0c02fd6f28348886142d",
+    "source": "board_live.py",
+    "baseline_sha256": "33d1b034978f220b2e8860afa6f3f86db1fb02a8bf7a5453b44049fef402d9e6"
+  },
+  "jobs_heartbeat.py": {
+    "patch": "reconciler-jobs_heartbeat.patch",
+    "candidate_sha256": "ee71d2ceebaa26484a59cc15cef38f48207904a7792b8f506236e3e2b67f4779",
+    "source": "jobs_heartbeat.py",
+    "baseline_sha256": "38600a30fb6db483d798191f265bd6195b041f7117f6b729d63a20a7accd0c6d"
+  },
+  "job_watchdog.py": {
+    "patch": "reconciler-job_watchdog.patch",
+    "candidate_sha256": "b119d64d757ce659f57648698f611f8d0148770de0d7765129e6a29ef302ee23",
+    "source": "job_watchdog.py",
+    "baseline_sha256": "0de7f0d0849011128419b45c119279061840303fbccd18ee8b048763ae52be9c"
   },
   "card.py": {
-    "baseline_sha256": "afc6836a567dda6b3ba73d54c86b57b5f28a4fafb8d9867a4839b089021c4b39",
-    "candidate_sha256": "933c042b0cac8d1d1156155d10368fa1010e1454fbbec6e977b7cb3965c9c8ea",
-    "patch": "reconciler-card.patch"
+    "patch": "reconciler-card.patch",
+    "candidate_sha256": "7efbe1c151fbbd89237520875a4e80ce8a85e0e83bacc139532a8924cb4a0543",
+    "source": "card.py",
+    "baseline_sha256": "afc6836a567dda6b3ba73d54c86b57b5f28a4fafb8d9867a4839b089021c4b39"
   },
   "inbox_steward.py": {
-    "baseline_sha256": "89005d6397f1a7ee194bc30ab7f36e6495618eecc328e8c1f45f7bc00572cffc",
-    "candidate_sha256": "ca4c88c8ec4fef3b184731ec5e9342b3c8e529e38f170c0f7290428c9bfa3d63",
-    "patch": "reconciler-inbox_steward.patch"
-  },
-  "hourly-SKILL.md": {
-    "baseline_sha256": "5af3ab5d9c51e27a5d4fa385ed14d95b7d543f5b18a56a0430c3bb33172367fe",
-    "candidate_sha256": "d9b8f2137e666a2152b1a732501573365a5812fd5ab281c94207baa31aeaa4c4",
-    "patch": "reconciler-hourly-SKILL.patch"
+    "patch": "reconciler-inbox_steward.patch",
+    "candidate_sha256": "02ba8ee5e2767774df80c48e751c3092830252e491741519a69b5f038f38d359",
+    "source": "inbox_steward.py",
+    "baseline_sha256": "ec57be8ab95eada39f4f0ce15e916a2f4f0f676f2d2f6ef006fa07cef400e061"
   },
   "handler.ts": {
-    "baseline_sha256": "206ec8899bc1713aa68e3164b6acb3c7355a98f4e2b65ba5e13bed8438f3cc34",
-    "candidate_sha256": "703aaa266d385b657b8641787558ed2326519138518d1e7a178c4a12619eac14",
-    "patch": "reconciliation-handler.patch"
+    "patch": "reconciliation-handler.patch",
+    "candidate_sha256": "b41d20507b3b64fe6120265398a92c9851c3de3a6c35af67581c8eda5763665d",
+    "source": "handler.ts",
+    "baseline_sha256": "206ec8899bc1713aa68e3164b6acb3c7355a98f4e2b65ba5e13bed8438f3cc34"
+  },
+  "reconciler_sessions.py": {
+    "patch": "reconciler-managed-sessions.patch",
+    "candidate_sha256": "6860c8678f78192ede0b03106d484ee7f0c320d071b888b5e0575276e35adc18",
+    "source": "sessions.py",
+    "baseline_sha256": "8f6cbb513e136838d167d081e9fbace56a62e8e41af5a4b2b25c4d45482b1527"
+  },
+  "reconciler_worker.py": {
+    "patch": "reconciler-managed-worker.patch",
+    "candidate_sha256": "eb4cba4c3c0a9998da264f12a664cef2b577934973a7fbf27c07fb958fb9ed67",
+    "source": "session_worker.py",
+    "baseline_sha256": "ce122789da3344c6ca6ed4f41cc4393c51270a150cfb0c10d73efac286fd6a31"
+  },
+  "reconciler_status.py": {
+    "patch": "reconciler-managed-status.patch",
+    "candidate_sha256": "71aba5cc05dab91fc28318eb4fcb631d6dbc5b2cb130573a3d278676d5954230",
+    "source": "live_status.py",
+    "baseline_sha256": "05453a861c08c2be5752ff3c86f524233da859f3dba06f4b72a5bf5559e65277"
+  },
+  "reconciler_card.py": {
+    "patch": "reconciler-managed-card.patch",
+    "candidate_sha256": "933c042b0cac8d1d1156155d10368fa1010e1454fbbec6e977b7cb3965c9c8ea",
+    "source": "card.py",
+    "baseline_sha256": "afc6836a567dda6b3ba73d54c86b57b5f28a4fafb8d9867a4839b089021c4b39"
+  },
+  "reconciler_heartbeat.py": {
+    "patch": "reconciler-managed-heartbeat.patch",
+    "candidate_sha256": "599b13e5014fa64397bad1286186512cb00f941f266c0466fc2291994a7a4c69",
+    "source": "jobs_heartbeat.py",
+    "baseline_sha256": "38600a30fb6db483d798191f265bd6195b041f7117f6b729d63a20a7accd0c6d"
+  },
+  "reconciler_handler.ts": {
+    "patch": "reconciler-managed-handler.patch",
+    "candidate_sha256": "6b9d6cc4fb6b0b758455f7e2fe023f0814128cccd158bddbd7a0e9836ea6640b",
+    "source": "handler.ts",
+    "baseline_sha256": "206ec8899bc1713aa68e3164b6acb3c7355a98f4e2b65ba5e13bed8438f3cc34"
   },
   "reconciler.py": {
-    "candidate_sha256": "ad424fb115977d69fc03345f04b93c2197c14c8acce52379cff4ab190648cda3",
-    "patch": "reconciler-core.patch"
+    "patch": "reconciler-core.patch",
+    "candidate_sha256": "53b7cc39f933aeba15617704f72d002b73d4ef735b7c17b671c21344799848af"
   },
   "reconciler_runtime.py": {
-    "candidate_sha256": "b66ec0723ff84f5dc6c4ba34fbc9ce8bb571d28b31518848c2fd9e23cfebec9f",
-    "patch": "reconciler-runtime.patch"
+    "patch": "reconciler-runtime.patch",
+    "candidate_sha256": "2eca076cb0fec90dcbedab3f0386abf09a599baa675c76edda2576e2bbb56fe8"
   },
   "runner_admission.py": {
-    "candidate_sha256": "a137874cf7ae96dfed22d16bc3a839acbd7b1b561f7c2b8981046483b8f5dd13",
-    "patch": "reconciler-admission.patch"
+    "patch": "reconciler-admission.patch",
+    "candidate_sha256": "048eb3398a1370071b108e76aa28dd86626a2091f7d2b0fe7be9c48918f89b7f"
   },
   "inbox_policy.py": {
-    "candidate_sha256": "4e39d9bf59d2e1e6b6c6c1df473a336b2fddb7151a3b0cb0930f6d460fe06f1c",
-    "patch": "reconciler-inbox-policy.patch"
-  },
-  "mockup_autoarchive.py": {
-    "candidate_sha256": "4ba8520135c8a0528226687279e5323a2043b0885ec465d1e912e036dbbf1bf2",
-    "patch": "mockup-autoarchive.patch"
+    "patch": "reconciler-inbox-policy.patch",
+    "candidate_sha256": "4e39d9bf59d2e1e6b6c6c1df473a336b2fddb7151a3b0cb0930f6d460fe06f1c"
   },
   "claude_lanes.py": {
     "patch": "reconciler-claude-lanes.patch",
     "candidate_sha256": "b049b1742e0b90a4f0e3dd95c89a48f07b17993746ff595f80e69766379b4960"
   },
+  "mockup_autoarchive.py": {
+    "patch": "mockup-autoarchive.patch",
+    "candidate_sha256": "4ba8520135c8a0528226687279e5323a2043b0885ec465d1e912e036dbbf1bf2"
+  },
   "capacity.json": {
     "patch": "reconciler-capacity.patch",
     "candidate_sha256": "1c1b235d7bea1175c71759ac7a7d82c80ede58c949ea53114bfedb49e6506aa6"
+  },
+  "reconciler_gate.py": {
+    "patch": "reconciler-gate.patch",
+    "candidate_sha256": "85dfd604dd34fb0b7148324763d08f4f7ef77a08fc6b88c02b082b752ca93424"
+  },
+  "reconciler_services.py": {
+    "patch": "reconciler-services.patch",
+    "candidate_sha256": "765f1faba5b47d3608d2da2eb68ae0234ad07a29ca979c6db821df54fd9ffb4f"
   }
 }

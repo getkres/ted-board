@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
+process.env.TED_RECONCILER_ENABLED='true';
 const {createHandler}=await import(pathToFileURL(path.resolve(process.env.TED_RUNTIME_SOURCE!, 'handler.ts')).href);
 
 function fixture() {
