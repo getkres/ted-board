@@ -1,6 +1,6 @@
 # Runner status reconciliation
 
-Current routing and installation instructions are in [RUNNER-FAILURES.md](RUNNER-FAILURES.md). Its combined patches supersede `board-live.patch` and `finished-jobs-*.patch`. The dispatcher routes worker failures to Ted. The steward only moves untyped, unprotected cards with no ask or decision sentence and positive mechanical evidence. Concrete decisions, recent replies, and ambiguous asks remain in Needs you.
+Current routing and installation instructions are in [RUNNER-FAILURES.md](RUNNER-FAILURES.md). Its combined patches supersede `board-live.patch` and `finished-jobs-*.patch`. The dispatcher routes worker failures to Ted. The steward only moves an untyped, unprotected card whose latest dated Ted message exactly matches a runner failure template with its stable marker. Every other card remains in Needs you. The shared allowlist and installation smoke check are documented there.
 
 The mini dispatcher is `Store.tick()` in the private `sessions.py` runtime. The jobs heartbeat calls it every 30 seconds. Each session has a wrapper and a model child. A section count is not a process count. A queued session can have only `BRIEF.md` until a slot opens.
 

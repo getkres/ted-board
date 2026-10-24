@@ -24,21 +24,22 @@ import sessions
 import session_worker as worker
 import board_live as reaper
 import inbox_steward as steward
+from inbox_policy import failure_message
 
 def card(**extra):
     return dict(dict(id='x', project='Fixture', title='Fixture task', body='', section='ted_doing',
                      updated_at='2026-10-20T00:00:00Z', decision_kind=None, messages=[], options=[]), **extra)
 
 class Routing(unittest.TestCase):
-    def test_failures_cannot_be_asked_even_with_a_decision_kind(self):
+    def test_failure_text_cannot_remove_a_decision_kind_card(self):
         for text in ('Worker exceeded the three-hour limit. Reply to continue.',
                      'Worker stopped without a final result. Reply to retry.',
                      'Worker could not start. Reply to retry.', 'Worker failed: RuntimeError. Reply to retry.'):
-            with self.subTest(text=text), patch.object(client, 'cards', return_value=[card(decision_kind='send_email')]), \
+            with self.subTest(text=text), patch.object(client, 'cards', return_value=[card(section='needs_you',decision_kind='send_email')]), \
                  patch.object(live, 'call', return_value=dict(ok=True, card=card())) as send:
                 live.update('x', 'waiting_on_you', text, section='needs_you', ask_anyway_reason='Needs review')
-                self.assertEqual(send.call_args.kwargs.get('section'), 'up_next')
-                self.assertEqual(send.call_args.kwargs['state'], 'blocked')
+                self.assertEqual(live.update('x','blocked',failure_message('crash'),section='up_next')['section'],'needs_you')
+                send.assert_not_called()
 
     def test_unclassified_requests_are_retained_for_review(self):
         for text in ('review the pending approval on this card', 'approve this PR',
@@ -66,7 +67,7 @@ class Routing(unittest.TestCase):
 
     def test_manual_move_is_not_overwritten(self):
         with patch.object(client, 'cards', return_value=[card(section='done')]), patch.object(live, 'call') as send:
-            result=live.update('x', 'waiting_on_you', 'Worker could not start', section='needs_you')
+            result=live.update('x', 'blocked', failure_message('startup_failure'), section='up_next')
             self.assertEqual(result['section'],'done')
             send.assert_not_called()
 
@@ -78,14 +79,14 @@ class Routing(unittest.TestCase):
 
     def test_failure_without_waiting_state_still_routes_to_ted(self):
         with patch.object(client,'cards',return_value=[card()]),patch.object(live,'call',return_value=dict(ok=True,card=card())) as send:
-            live.update('x','blocked','Worker could not start. Reply to retry.')
+            live.update('x','blocked',failure_message('startup_failure'))
             self.assertEqual(send.call_args.kwargs.get('section'),'up_next')
 
-    def test_existing_inbox_failure_is_removed_without_asking_again(self):
+    def test_unmarked_existing_inbox_failure_is_retained(self):
         with patch.object(client,'cards',return_value=[card(section='needs_you')]),patch.object(live,'call',return_value=dict(ok=True,card=card())) as send:
-            live.update('x','waiting_on_you','Worker could not start. Reply to retry.',section='needs_you')
-            self.assertEqual(send.call_args.kwargs.get('section'),'up_next')
-            self.assertEqual(send.call_args.kwargs.get('expected_section'),'needs_you')
+            result=live.update('x','waiting_on_you','Worker could not start. Reply to retry.',section='needs_you')
+            self.assertEqual(result['section'],'needs_you')
+            send.assert_not_called()
 
     def test_valid_rule_application_still_avoids_an_ask(self):
         with patch.object(client,'cards',return_value=[card(decision_kind='send_email')]), \
@@ -96,7 +97,7 @@ class Routing(unittest.TestCase):
 
     def test_lost_failure_ack_is_idempotently_confirmed(self):
         with patch.object(client,'cards',return_value=[card(section='up_next',live_state='blocked',live_status='worker failed, ted owns recovery from the job files')]),patch.object(live,'call') as send:
-            result=live.update('x','blocked','Worker stopped without a final result.',section='up_next')
+            result=live.update('x','blocked',failure_message('no_result'),section='up_next')
             self.assertEqual(result['section'],'up_next');send.assert_not_called()
 
     def test_matching_rule_holds_for_ted_without_an_automatic_override_reason(self):
@@ -321,12 +322,12 @@ class Steward(unittest.TestCase):
             actions=self.action(c)
             self.assertEqual(actions,[],text)
 
-    def test_archived_batch_and_explicit_supersession_leave_inbox(self):
+    def test_archived_batch_and_explicit_supersession_without_a_marker_stay(self):
         c=card(section='needs_you',title='Retired mockups',body='Batch "Launch v2" is archived.')
         rows=[dict(id='m',project='Fixture',batch='Launch v2',status='archived',created_at='2026-10-01T00:00:00Z')]
-        self.assertEqual(self.action(c,rows)[0]['to'],'done')
+        self.assertEqual(self.action(c,rows),[])
         c=card(section='needs_you',live_status='superseded by the new launch card')
-        self.assertEqual(self.action(c)[0]['to'],'done')
+        self.assertEqual(self.action(c),[])
 
     def test_fyi_with_historical_money_or_other_kind_remains_protected(self):
         c=card(section='needs_you',decision_kind='other',title='Payment receipt for $25',body='Payment completed. No action required.')
@@ -366,7 +367,7 @@ class Steward(unittest.TestCase):
             self.assertEqual(self.action(c),[])
 
     def test_dry_run_and_snapshot_race_have_no_mutations(self):
-        c=card(section='needs_you',live_status='Worker could not start')
+        c=card(section='needs_you',messages=[dict(who='ted',at='2026-10-23T00:00:00Z',text=failure_message('startup_failure'))])
         changed=card(section='needs_you',body='Please sign the contract',live_status='Please sign the contract',updated_at='2026-10-23T00:00:00Z')
         with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'snapshot',return_value=([c],[],[])),patch.object(steward,'move_card') as move,patch.object(steward,'archive_batch') as archive:
             result=steward.run_once(tmp,dry_run=True,now=2000000000)
@@ -377,8 +378,10 @@ class Steward(unittest.TestCase):
             self.assertEqual(result['deferred'],1);move.assert_not_called()
 
     def test_steward_move_sets_blocked_with_exact_snapshot_guard(self):
-        with patch.object(live,'call',return_value=dict(ok=True,card=card())) as send:
-            steward.move_card('x','up_next','ted review','2026-10-23T00:00:00Z')
+        note=failure_message('startup_failure')
+        c=card(section='needs_you',messages=[dict(who='ted',at='2026-10-23T00:00:00Z',text=note)])
+        with patch.object(client,'cards',return_value=[c]),patch.object(live,'call',return_value=dict(ok=True,card=card(section='up_next'))) as send:
+            steward.move_card('x','up_next',note,'2026-10-23T00:00:00Z')
             self.assertEqual(send.call_args.kwargs['expected_section'],'needs_you')
             self.assertEqual(send.call_args.kwargs['expected_updated_at'],'2026-10-23T00:00:00Z')
             self.assertEqual(send.call_args.kwargs['state'],'blocked')

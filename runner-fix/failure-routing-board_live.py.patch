@@ -1,7 +1,7 @@
 --- board_live.py
 +++ board_live.py
 @@ -13,0 +14 @@
-+from inbox_policy import disposition, approval_line, FAILURE_LINE, TED_LINE
++from inbox_policy import disposition, approval_line, FAILURE_LINE, TED_LINE, pending_approval
 @@ -81 +82,3 @@
 - sessions=read_json(root/'sessions.json',{}).get('sessions',{})
 + data=read_json(root/'sessions.json',{});sessions=data.get('sessions',{})
@@ -11,24 +11,27 @@
 -    state,line,section='blocked','no worker on this, ted needs to pick it up','needs_you'
 -    ask_anyway_reason='No worker or queued turn exists for this card. Sebastian must review it before work can resume.'
 +    state,line,section='blocked','no worker on this, ted needs to pick it up','up_next'
-@@ -137,3 +139,2 @@
+@@ -137,3 +139,8 @@
 -   elif job.get('artifact_error'):
 -    state,line,section='waiting_on_you','approval artifact needs fixing, see the card note','needs_you'
 -    ask_anyway_reason='An approval artifact failed safety checks. The file must be corrected before this card can continue.'
-+   elif job.get('artifact_error') or job.get('failure_kind') or job.get('failure_publish_pending') or (job.get('status')=='failed' and not isinstance(job.get('veto_outcome'),dict)):
-+    state,line,section='blocked',FAILURE_LINE,'up_next'
-@@ -143 +144,4 @@
--    state,line,section='waiting_on_you','review the pending approval on this card','needs_you'
++   elif job.get('pending_approval_kinds') or job.get('status')=='waiting_approval':
 +    asks=[approval_line(kind,card) for kind in job.get('pending_approval_kinds',[])]
 +    asks=[ask for ask in asks if ask]
 +    if asks:state,line,section='waiting_on_you',asks[0],'needs_you'
 +    else:state,line,section='blocked','ted review needed for the prepared packet','up_next'
-@@ -153,2 +157,2 @@
++   elif pending_approval(card):continue
++   elif job.get('artifact_error') or job.get('failure_kind') or job.get('failure_publish_pending') or (job.get('status')=='failed' and not isinstance(job.get('veto_outcome'),dict)):
++    state,line,section='blocked',job.get('failure_message') or FAILURE_LINE,'up_next'
+@@ -142,2 +148,0 @@
+-   elif job.get('status')=='waiting_approval':
+-    state,line,section='waiting_on_you','review the pending approval on this card','needs_you'
+@@ -153,2 +158,2 @@
 -     state,line,section='waiting_on_you','timed email was not sent, review the proposal','needs_you'
 -     ask_anyway_reason='The timed email was refused before sending. Sebastian must review the proposal before retrying.'
 +     state,line,section='waiting_on_you','review sending the drafted email after checking the refused proposal','needs_you'
 +     ask_anyway_reason='The timed email gate refused the proposal. Sebastian must review it before any new send.'
-@@ -156,2 +160,8 @@
+@@ -156,2 +161,8 @@
 -     state,line,section='waiting_on_you','email send result uncertain, check Gmail Sent before retrying','needs_you'
 -     ask_anyway_reason='The email send result is uncertain. Sebastian must reconcile Gmail Sent before any retry.'
 +     state,line,section='waiting_on_you','review sending the drafted email after reconciling Gmail Sent','needs_you'
@@ -39,11 +42,11 @@
 +    if report.is_file():completed=max(completed,report.stat().st_mtime)
 +    if stamp((card.get('answer') or {}).get('created_at'))>completed:continue
 +    state,line,section='blocked','ted review','up_next'
-@@ -161,2 +171 @@
+@@ -161,2 +172 @@
 -     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'needs_you'}.get(state)
 -     if section=='needs_you':ask_anyway_reason='The worker report has unfinished work that Sebastian must review before this card can continue.'
 +     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'up_next'}.get(state)
-@@ -164,2 +173,13 @@
+@@ -164,2 +174,13 @@
 -     state,line,section='blocked','worker stopped without a current report, review and restart the card','needs_you'
 -     ask_anyway_reason='The worker stopped without a current report. Sebastian must review the card before work can resume.'
 +     state,line,section='blocked','worker stopped without a current report, ted needs to review recovery','up_next'

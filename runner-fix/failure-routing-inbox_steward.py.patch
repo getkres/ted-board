@@ -1,45 +1,44 @@
 --- inbox_steward.py
 +++ inbox_steward.py
 @@ -14,0 +15 @@
-+from inbox_policy import ASK, decision, disposition
-@@ -153,2 +154,7 @@
++from inbox_policy import disposition
+@@ -153,2 +154,5 @@
 -def classify_card(card, now):
 -    reason = protection(card, now)
 +def classify_card(card, now, mockups=()):
-+    if card.get('decision_kind'):
-+        return None, 'decision kind requires review'
 +    messages=card.get('messages') or []
 +    if not isinstance(messages,list) or any(not isinstance(m,dict) for m in messages):
 +        return None, 'ambiguous, retain'
 +    reason=protection(card,now)
-@@ -156,11 +162,8 @@
+@@ -156,3 +160,3 @@
 -        return None, reason
 -    last = latest(card)
 -    if not last or str(last.get('who', '')).lower() not in WORKERS:
--        return None, 'no dated latest worker message'
++        return None,reason
++    last=latest(card)
++    if not last or str(last.get('who','')).lower() not in WORKERS:
+@@ -160,2 +164,2 @@
 -    text = str(last.get('text') or '')
 -    reason = report_only_reason(text)
--    if reason:
++    text=str(last.get('text') or '')
++    reason=report_only_reason(text)
+@@ -163,4 +167,4 @@
 -        return None, reason
 -    if FYI.search(text) and not positive_completion(text, REPORT):
 -        return 'done', 'pure fyi, no action required'
 -    return 'up_next', 'Ted review'
 +        return None,reason
-+    texts=[str(card.get(k) or '') for k in ('title','body','live_status')]
-+    texts.extend(str(m.get('text') or '') for m in messages)
-+    for text in texts:
-+        for sentence in re.split(r'(?<=[.!?])\s+|\n+',text):
-+            if ASK.search(sentence) or decision(card,sentence,mockups):
-+                return None, 'ask or decision retained'
-+    return disposition(card, mockups)
-@@ -222 +225 @@
++    if not positive_completion(text):
++        return None, 'no positive completion evidence'
++    return disposition(card,mockups)
+@@ -222 +226 @@
 -        target, reason = classify_card(c, now)
 +        target, reason = classify_card(c, now, mockups)
-@@ -225 +228,2 @@
+@@ -225 +229,2 @@
 -                                **{'from': 'needs_you'}, to=target, reason=reason, basis=digest(c)))
 +                                **{'from': 'needs_you'}, to=target, reason=reason, basis=digest(c),
 +                                expected_updated_at=c.get('updated_at')))
-@@ -282,3 +286,7 @@
+@@ -282,3 +287,9 @@
 -def move_card(card_id, value, note):
 -    from board_client import call
 -    return call('move', page=True, card_id=card_id, value=value, note=note)
@@ -49,7 +48,9 @@
 +        raise RuntimeError('Card timestamp required for guarded inbox move')
 +    result = update(card_id, 'done' if value == 'done' else 'blocked', note, section=value,
 +                    expected_section='needs_you', expected_updated_at=expected_updated_at)
++    if result.get('section')!=value:
++        raise RuntimeError('Inbox card retained, move not confirmed')
 +    return dict(ok=True, card=result)
-@@ -356 +364 @@
+@@ -356 +367 @@
 -                result = move_card(action['card_id'], action['to'], action['reason'])
 +                result = move_card(action['card_id'], action['to'], action['reason'], action['expected_updated_at'])

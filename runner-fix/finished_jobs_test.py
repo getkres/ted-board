@@ -95,7 +95,7 @@ class FinishedJobs(unittest.TestCase):
             self.assertFalse(any(c.kwargs.get('section') == 'up_next' for c in publish.call_args_list))
 
     def test_live_status_accepts_up_next_and_keeps_manual_move_guard(self):
-        with patch.object(live, 'call', return_value=dict(ok=True, card=dict(id='x'))) as call:
+        with patch.object(client,'cards',return_value=[dict(id='x',section='ted_doing')]),patch.object(live, 'call', return_value=dict(ok=True, card=dict(id='x'))) as call:
             live.update('x', 'blocked', 'Ted review', section='up_next')
         self.assertEqual(call.call_args.kwargs, dict(card_id='x', state='blocked', line='ted review', section='up_next', expected_section='ted_doing'))
 

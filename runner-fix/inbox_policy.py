@@ -1,15 +1,25 @@
 """Shared, conservative routing policy for Sebastian's decision inbox."""
 from datetime import datetime
+import json
+from pathlib import Path
 import re
 
 TED_LINE = 'ted review needed, this is not a sebastian decision'
-FAILURE_LINE = 'worker failed, ted owns recovery from the job files'
-FAILURES = re.compile(r'\bworker (?:exceeded|timed out|timeout|stopped|could not start|failed|crashed|returned no final)|'
-                      r'\bno worker on this|\bapproval artifact (?:is unsafe|needs fixing|failed)', re.I)
-ASK = re.compile(r'\?|\b(?:approve|approval|review|sign|choose|pick|decide|write|type|your call|your version|'
+TEMPLATES = json.loads(Path(__file__).with_name('runner_failure_templates.json').read_text())
+FAILURE_MESSAGES = {base+suffix: kind for kind,base in TEMPLATES['failures'].items()
+                    for suffix in TEMPLATES['recovery'].values()}
+# Used only to label approval categories, never to authorize an inbox departure.
+DECISION_ACTION = re.compile(r'\?|\b(?:approve|approval|review|sign|choose|pick|decide|write|type|your call|your version|'
                  r'you decide|flat fee|must|please|action required|needed|pending)\b', re.I)
-FYI = re.compile(r'\b(?:fyi|receipts?|confirmations?|payment completed|export completed|welcome|subscription notice)\b', re.I)
 OPERATIONAL = re.compile(r'\b(?:ted review|pr \d+[^.!?\n]*review|pending ted review|worker slot|waiting for CI)\b', re.I)
+
+
+def failure_message(kind, recovery='held'):
+    kind = 'startup_failure' if kind == 'start_failure' else kind
+    return TEMPLATES['failures'].get(kind,TEMPLATES['failures']['crash'])+TEMPLATES['recovery'][recovery]
+
+
+FAILURE_LINE = failure_message('crash')
 
 
 def stamp(value):
@@ -33,23 +43,35 @@ def current_text(card):
 
 
 def failure_kind(text):
-    """Classify a failure only when every sentence is free of ask wording."""
-    result = None
-    for sentence in re.split(r'(?<=[.!?])\s+|\n+', str(text or '')):
-        if ASK.search(sentence):
-            return None
-        if not FAILURES.search(sentence):
-            continue
-        if re.search(r'could not start', sentence, re.I):
-            kind = 'start_failure'
-        elif re.search(r'exceeded|timed out|timeout', sentence, re.I):
-            kind = 'timeout'
-        elif re.search(r'without (?:a )?(?:current report|final result)|no final|stopped without', sentence, re.I):
-            kind = 'no_result'
-        else:
-            kind = 'crash'
-        result = result or kind
-    return result
+    """Only the runner's complete versioned templates are failure evidence."""
+    return FAILURE_MESSAGES.get(text) if isinstance(text,str) else None
+
+
+def pending_approval(card):
+    if card.get('live_state') == 'waiting_on_you':
+        return True
+    if any(card.get(k) for k in ('pending_approval','approval_pending','pending_decision','veto_pending','pending_approval_kinds')):
+        return True
+    for key in ('approval','veto'):
+        value=card.get(key)
+        if isinstance(value,dict) and value.get('status') not in ('sent','cancelled','failed','done','superseded'):
+            return True
+    return False
+
+
+def runner_failure(card):
+    """Exact runner provenance is necessary before a card can leave Needs you."""
+    if 'decision_kind' not in card or card['decision_kind'] is not None or pending_approval(card):
+        return None
+    rows=card.get('messages')
+    if not isinstance(rows,list) or not rows or any(not isinstance(m,dict) or not stamp(m.get('at')) for m in rows):
+        return None
+    newest=max(stamp(m['at']) for m in rows)
+    latest=[m for m in rows if stamp(m['at'])==newest]
+    if len(latest)!=1 or latest[0].get('who')!=TEMPLATES['author']:
+        return None
+    text=latest[0].get('text')
+    return text if failure_kind(text) else None
 
 
 def linked_mockups(card, mockups):
@@ -76,7 +98,7 @@ def decision(card, line=None, mockups=()):
     for ask in re.split(r'(?<=[.!?])\s+|\n+', text):
         if failure_kind(ask) or OPERATIONAL.search(ask):
             continue
-        if not ASK.search(ask):
+        if not DECISION_ACTION.search(ask):
             continue
         if re.search(r'\b(?:write|type) (?:your|the|each)|\byours to write\b', ask, re.I) and re.search(r'\b(?:copy|headline|line|version|words)\b', ask, re.I):
             if not rows or not all(m.get('status') == 'archived' for m in rows):
@@ -109,24 +131,8 @@ def approval_line(kind, card):
 
 
 def disposition(card, mockups=(), line=None):
-    """Mechanical inbox move, or a reason to retain a real or ambiguous ask."""
-    text = current_text(card) if line is None else str(line)
-    family = decision(card, text, mockups)
-    if family:
-        return None, 'sebastian decision: '+family
-    if any(ASK.search(sentence) for sentence in re.split(r'(?<=[.!?])\s+|\n+',text)):
-        return None, 'ambiguous, retain'
-    if failure_kind(text):
-        return 'up_next', FAILURE_LINE
-    rows = linked_mockups(card, mockups)
-    if rows and all(m.get('status') == 'archived' for m in rows):
-        return 'done', 'linked mockup batch is archived'
-    if re.search(r'\b(?:superseded by|replaced by|obsolete|no longer needed)\b', text, re.I):
-        return 'done', 'superseded work, no current decision'
-    content = text+'\n'+str(card.get('title') or '')+'\n'+str(card.get('body') or '')
-    without_notice = re.sub(r'\bno action (?:required|needed)\b', '', content, flags=re.I)
-    if FYI.search(content) and not ASK.search(without_notice):
-        return 'done', 'pure fyi, no action required'
-    if card.get('live_state') == 'running':
-        return 'up_next', 'ted review, no sebastian decision'
+    """Retain everything except a complete, latest runner failure template."""
+    text=runner_failure(card)
+    if text and (line is None or line==text):
+        return 'up_next',text
     return None, 'ambiguous, retain'

@@ -21,6 +21,7 @@ class Package(unittest.TestCase):
             (package/('failure-routing-'+name+'.patch')).write_text('--- '+name+'\n+++ '+name+'\n@@ -1 +1 @@\n-original\n+candidate\n')
         (package/'failure-routing-baseline.json').write_text(json.dumps(manifest))
         (package/'inbox_policy.py').write_text('# fixture policy\n')
+        (package/'runner_failure_templates.json').write_text('{}\n')
         return runtime,package,paths
 
     def test_preparation_applies_only_to_private_candidate_copies(self):

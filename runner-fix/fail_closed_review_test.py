@@ -78,12 +78,11 @@ class RetainDecisions(unittest.TestCase):
                 c=card(section='needs_you',**dict(dict(body='Export completed.'),**extra))
                 self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
 
-    def test_unprotected_untyped_notices_still_have_mechanical_moves(self):
-        for text,target in [('Worker stopped without a final result.','up_next'),
-                            ('Superseded by v2.','done'),('Export completed.','done')]:
+    def test_unmarked_notices_are_retained_under_the_marker_allowlist(self):
+        for text in ('Worker stopped without a final result.','Superseded by v2.','Export completed.'):
             with self.subTest(text=text):
                 actions=steward.plan([card(section='needs_you',body=text)],[],[],NOW)['actions']
-                self.assertEqual([(a['kind'],a['to']) for a in actions],[('move',target)])
+                self.assertEqual(actions,[])
 
 
 class DeletedCardRecovery(unittest.TestCase):

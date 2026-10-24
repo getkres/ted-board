@@ -30,6 +30,7 @@ def prepare(runtime, destination):
     for source in sources['handler.ts'].parent.glob('*.ts'):
         shutil.copy2(source, destination/source.name)
     shutil.copy2(PACKAGE/'inbox_policy.py', destination/'inbox_policy.py')
+    shutil.copy2(PACKAGE/'runner_failure_templates.json', destination/'runner_failure_templates.json')
     for name in sources:
         with (PACKAGE/('failure-routing-'+name+'.patch')).open() as delta:
             result = subprocess.run(['patch', '--batch', '--fuzz=0', str(destination/name)],

@@ -1,13 +1,40 @@
 --- handler.ts
 +++ handler.ts
-@@ -113,2 +113,8 @@
+@@ -0,0 +1 @@
++import failureTemplates from './runner_failure_templates.json' with {type:'json'};
+@@ -5,0 +7,13 @@
++const runnerMessages=new Set(Object.values(failureTemplates.failures).flatMap(base=>Object.values(failureTemplates.recovery).map(suffix=>base+suffix)));
++function runnerFailure(card:any,line:string):boolean {
++  if(card.decision_kind!==null||card.live_state==='waiting_on_you')return false;
++  if(['pending_approval','approval_pending','pending_decision','veto_pending','pending_approval_kinds'].some(k=>Array.isArray(card[k])?card[k].length>0:!!card[k]))return false;
++  for(const key of ['approval','veto']) {
++    if(card[key]&&typeof card[key]==='object'&&!['sent','cancelled','failed','done','superseded'].includes(card[key].status))return false;
++  }
++  const rows=card.messages;
++  if(!Array.isArray(rows)||!rows.length||rows.some(m=>!m||!Number.isFinite(Date.parse(m.at))))return false;
++  const newest=Math.max(...rows.map(m=>Date.parse(m.at)));
++  const latest=rows.filter(m=>Date.parse(m.at)===newest);
++  return latest.length===1&&latest[0].who===failureTemplates.author&&latest[0].text===line&&runnerMessages.has(line);
++}
+@@ -113,2 +127,8 @@
 -      if (b.section !== undefined && !['done','needs_you','ted_doing'].includes(String(b.section))) return json({error:'Invalid live section'},400);
 -      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') return json({error:'Invalid section guard'},400);
 +      if (b.section !== undefined && !['done','needs_you','ted_doing','up_next'].includes(String(b.section))) return json({error:'Invalid live section'},400);
 +      if (b.state === 'waiting_on_you' && b.section !== 'needs_you') return json({error:'A decision requires a Needs you transition'},400);
 +      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') {
 +        const cleanup=b.expected_section==='needs_you' && typeof b.expected_updated_at==='string'
-+          && ((b.section==='up_next' && b.state==='blocked') || (b.section==='done' && b.state==='done'));
++          && b.section==='up_next' && b.state==='blocked';
 +        const recovery=b.expected_section==='up_next' && b.section==='ted_doing' && b.state==='running';
 +        if(!cleanup&&!recovery)return json({error:'Invalid section guard'},400);
 +      }
+@@ -129,0 +150,8 @@
++      const cleanup=b.expected_section==='needs_you';
++      let cleanupMessages:string|undefined;
++      if(cleanup) {
++        const {data:card,error}=await db.from('ted_board_cards').select('*').eq('id',b.card_id).maybeSingle();
++        if(error)return json({error:'Could not confirm inbox failure'},500);
++        if(!card||!runnerFailure(card,b.line))return json({error:'Inbox decision retained. Refresh and try again.'},409);
++        cleanupMessages=JSON.stringify(card.messages);
++      }
+@@ -134,0 +163 @@
++      if(cleanup)query=query.is('decision_kind',null).or('live_state.is.null,live_state.neq.waiting_on_you').eq('messages',cleanupMessages);

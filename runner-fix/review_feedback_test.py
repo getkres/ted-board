@@ -62,14 +62,14 @@ class PolicyReview(unittest.TestCase):
                 self.assertIsNone(policy.failure_kind(text))
                 self.assertIsNone(policy.disposition(card(section='needs_you',body=text))[0])
 
-    def test_running_worker_moves_only_when_no_ask_is_present(self):
+    def test_running_worker_without_a_runner_marker_is_retained(self):
         for text in UNKNOWN_ASKS:
             with self.subTest(text=text):
                 self.assertIsNone(policy.disposition(card(body=text,live_state='running'))[0])
-        self.assertEqual(policy.disposition(card(live_state='running',live_status='checking the native build'))[0],'up_next')
+        self.assertIsNone(policy.disposition(card(live_state='running',live_status='checking the native build'))[0])
 
-    def test_start_failure_takes_priority_over_timeout(self):
-        self.assertEqual(policy.failure_kind('Worker could not start after a timeout.'),'start_failure')
+    def test_unmarked_start_failure_text_is_not_routing_evidence(self):
+        self.assertIsNone(policy.failure_kind('Worker could not start after a timeout.'))
 
 
 class ClientReview(unittest.TestCase):
@@ -82,11 +82,11 @@ class ClientReview(unittest.TestCase):
     def test_up_next_and_done_failures_are_already_handled(self):
         for section in ('up_next','done'):
             with self.subTest(section=section),patch.object(client,'cards',return_value=[card(section=section)]),patch.object(live,'call') as send:
-                result=live.update('x','blocked','Worker stopped without a final result.',section='up_next')
+                result=live.update('x','blocked',policy.failure_message('no_result'),section='up_next')
                 self.assertEqual(result['section'],section)
                 send.assert_not_called()
         with patch.object(client,'cards',return_value=[]),self.assertRaises(client.BoardGone):
-            live.update('x','blocked','Worker could not start')
+            live.update('x','blocked',policy.failure_message('startup_failure'))
 
 
 class DispatcherReview(unittest.TestCase):
