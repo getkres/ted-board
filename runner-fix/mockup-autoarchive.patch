@@ -1,6 +1,6 @@
 --- /dev/null
 +++ mockup_autoarchive.py
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,317 @@
 +#!/usr/bin/env python3
 +"""Archive reviewed, completed, or stale superseded mockup batches on the mini.
 +
@@ -102,7 +102,8 @@
 +        seen.add(row['id'])
 +        groups.setdefault((row['project'], row['batch']), []).append(row)
 +    if any(not isinstance(card, dict) or any(not isinstance(card.get(k), str)
-+           for k in ('id', 'project', 'section', 'title')) for card in cards):
++           for k in ('id', 'project', 'section', 'title'))
++           or (card.get('body') is not None and not isinstance(card['body'], str)) for card in cards):
 +        raise ValueError('Invalid card snapshot')
 +    result = []
 +    for (project, batch), rows in sorted(groups.items()):
@@ -117,14 +118,16 @@
 +        reviewable = [row for row in active if not META_TITLE.search(row['title'])]
 +        decision = dict(project=project, batch=batch, ids=sorted(row['id'] for row in active),
 +                        total=len(rows), reviewable=len(reviewable), ignored=len(active)-len(reviewable))
-+        if reviewable and all(_verdict(row) in VERDICTS for row in reviewable):
-+            result.append(dict(decision, reason='all_reviewed'))
-+            continue
 +        explicit = {row.get('card_id') for row in rows if isinstance(row.get('card_id'), str)}
 +        ids = {row['id'] for row in rows}
 +        linked = [card for card in cards if card['project'] == project and (
 +            card['id'] in explicit or card['title'] == 'build approved: ' + batch or
 +            ids.intersection(MOCKUP_LINK.findall(card.get('body') or '')))]
++        if reviewable and all(_verdict(row) in VERDICTS for row in reviewable):
++            if any(card['section'] not in ('done', 'killed') for card in linked):
++                continue
++            result.append(dict(decision, reason='all_reviewed'))
++            continue
 +        whole_batch_link = any(card['id'] in explicit or card['title'] == 'build approved: ' + batch
 +                               for card in linked)
 +        every_frame_reviewed = bool(reviewable) and all(
@@ -209,11 +212,16 @@
 +    if not dry_run and os.environ.get(ENABLE_FLAG) != 'true':
 +        raise RuntimeError('Mockup auto-archive is not enabled')
 +    log_path = Path(log_path)
++    if dry_run:
++        return _run_pass(dry_run=True, mockup_call=mockup_call, cards_call=cards_call,
++                         log_path=log_path, now=now, state=None, state_path=None)
 +    state_path = log_path.with_suffix('.state.json')
 +    with _locked_state(state_path) as state:
 +        if heartbeat:
 +            at = now or datetime.now(timezone.utc)
 +            previous = _time(state.get('heartbeat_at'))
++            if previous is not None and previous - at > timedelta(minutes=10):
++                previous = None
 +            if previous is not None and at - previous < timedelta(minutes=10):
 +                return []
 +            # Claim the interval before network I/O, including attempts that fail.
@@ -242,11 +250,12 @@
 +        return candidates(snapshot['mockups'], cards_call(), at, pins=snapshot['pins'])
 +
 +    planned = read(now)
-+    keys = {_batch_key(candidate) for candidate in planned}
-+    retained = {key: value for key, value in state['batches'].items() if key in keys}
-+    if retained != state['batches']:
-+        state['batches'] = retained
-+        _save_state(state_path, state)
++    if not dry_run:
++        keys = {_batch_key(candidate) for candidate in planned}
++        retained = {key: value for key, value in state['batches'].items() if key in keys}
++        if retained != state['batches']:
++            state['batches'] = retained
++            _save_state(state_path, state)
 +    events = []
 +    for candidate in planned:
 +        event = dict(candidate, at=now.isoformat())

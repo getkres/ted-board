@@ -180,6 +180,37 @@ class Policy(unittest.TestCase):
             result = self.candidates([frame(), frame('b')], [card])
             self.assertEqual(result[0]['reason'], 'linked_card_' + section)
 
+    def test_all_reviewed_waits_for_every_same_project_linked_card(self):
+        for section in ('up_next', 'ted_doing', 'needs_you'):
+            for link in ('explicit', 'title', 'reference'):
+                row = frame(verdict='approved', **({'card_id': 'work'} if link == 'explicit' else {}))
+                card = dict(id='work', project='Fictora', section=section,
+                            title='build approved: Home v1' if link == 'title' else 'Build work',
+                            body='mockup ID: a' if link == 'reference' else None)
+                terminal = dict(id='finished', project='Fictora', section='done',
+                                title='Finished frame', body='mockup ID: a')
+                # A newer round must not turn this blocked all-reviewed batch into a stale archive.
+                rows = [row, frame('new', batch='Home v2', created_at=RECENT)]
+                self.assertEqual(self.candidates(rows, [terminal, card]), [], (section, link))
+
+    def test_all_reviewed_allows_terminal_unlinked_and_cross_project_cards(self):
+        rows = [frame(verdict='approved')]
+        for card in (dict(id='x', project='Fictora', section='done', title='build approved: Home v1'),
+                     dict(id='x', project='Fictora', section='killed', title='Build', body='mockup ID: a'),
+                     dict(id='x', project='Fictora', section='ted_doing', title='Unrelated work'),
+                     dict(id='x', project='Bookish', section='ted_doing', title='build approved: Home v1',
+                          body='mockup ID: a')):
+            self.assertEqual(self.candidates(rows, [card])[0]['reason'], 'all_reviewed')
+
+    def test_card_body_requires_string_or_none(self):
+        for body in (True, False, 1, 0, ['mockup ID: a'], {'text': 'mockup ID: a'}):
+            card = dict(id='x', project='Fictora', section='done', title='Build', body=body)
+            with self.assertRaises(ValueError):
+                self.candidates([frame(verdict='needs_work')], [card])
+        for body in (None, '', 'ordinary text'):
+            card = dict(id='x', project='Fictora', section='done', title='Build', body=body)
+            self.assertEqual(self.candidates([frame(verdict='needs_work')], [card]), [])
+
     def test_missing_active_cross_project_and_fuzzy_links_stay_open(self):
         for card in (dict(id='x', project='Fictora', section='up_next', title='build approved: Home v1'),
                      dict(id='x', project='Bookish', section='done', title='build approved: Home v1'),
@@ -456,6 +487,18 @@ class Runner(unittest.TestCase):
             self.assertEqual(archive.main(['--apply']), 0)
         self.assertEqual(calls, [True, True, False])
 
+    def test_cli_reports_invalid_card_body_without_a_type_error(self):
+        deps = dict(mockup_client=types.SimpleNamespace(call=lambda: dict(
+                        mockups=[frame(verdict='needs_work')], pins=[])),
+                    board_client=types.SimpleNamespace(cards=lambda: [dict(
+                        id='x', project='Fictora', section='done', title='Build', body={'private': 'data'})]))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, deps), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            result = archive.main(['--dry-run', '--log', str(Path(tmp)/'log.jsonl')])
+        self.assertEqual(result, 1)
+        self.assertNotIn('Traceback', err.getvalue())
+        self.assertNotIn('private', err.getvalue())
+
 
 class PersistentOutcomes(unittest.TestCase):
     def run_pass(self, log, *, outcome=None, rows=None, fresh=None, module=archive, now=NOW):
@@ -543,6 +586,38 @@ class PersistentOutcomes(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.run_pass(log)
 
+    def test_dry_run_creates_only_its_requested_audit_log(self):
+        for rows, expected_files in (([], []), ([frame(verdict='approved')], ['archive.jsonl'])):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp);log = root / 'archive.jsonl'
+                result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=rows, pins=[]),
+                    cards_call=lambda: [], log_path=log, now=NOW)
+                self.assertEqual(sorted(p.name for p in root.iterdir()), expected_files)
+                self.assertEqual(len(result), len(rows))
+
+    def test_dry_run_preserves_existing_throttle_and_backoff_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp);log = root / 'archive.jsonl'
+            self.run_pass(log, outcome=RuntimeError())
+            state = log.with_suffix('.state.json');lock = state.with_suffix('.lock')
+            before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
+            archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
+                             cards_call=lambda: [], log_path=log, now=NOW)
+            after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in (state, lock)}
+            self.assertEqual(after, before)
+            self.run_pass(log, outcome=RuntimeError(), now=NOW + timedelta(minutes=10))
+            self.assertEqual([e['event'] for e in self.events(log)].count('archive_failed'), 1)
+
+    def test_dry_run_does_not_read_corrupt_control_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp);log = root / 'archive.jsonl';state = log.with_suffix('.state.json')
+            state.write_text('{invalid')
+            result = archive.run_pass(dry_run=True, mockup_call=lambda: dict(mockups=[], pins=[]),
+                                      cards_call=lambda: [], log_path=log, now=NOW)
+            self.assertEqual(result, [])
+            self.assertEqual(state.read_text(), '{invalid')
+            self.assertEqual(list(root.iterdir()), [state])
+
 
 class HeartbeatRate(unittest.TestCase):
     def run_heartbeat(self, module, log, at, transport):
@@ -566,7 +641,7 @@ class HeartbeatRate(unittest.TestCase):
             self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=10), transport)
             self.assertEqual(len(reads), 2)
             self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=10, seconds=30), transport)
-            self.run_heartbeat(reloaded, log, NOW - timedelta(minutes=1), transport)
+            self.run_heartbeat(reloaded, log, NOW + timedelta(minutes=9), transport)
             self.assertEqual(len(reads), 2)
 
     def test_failed_pass_is_rate_limited_before_the_network_read(self):
@@ -583,6 +658,23 @@ class HeartbeatRate(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.run_heartbeat(archive, log, NOW + timedelta(minutes=10), transport)
             self.assertEqual(len(reads), 2)
+
+    def test_future_saved_heartbeat_resets_only_beyond_ten_minutes(self):
+        for ahead, resets in ((timedelta(minutes=10), False),
+                              (timedelta(minutes=10, microseconds=1), True),
+                              (timedelta(days=1), True)):
+            reads = []
+            def transport(action=None, **payload):
+                self.assertIsNone(action)
+                reads.append(action)
+                return dict(mockups=[], pins=[])
+            with tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp) / 'archive.jsonl'
+                self.run_heartbeat(archive, log, NOW + ahead, transport)
+                self.run_heartbeat(archive, log, NOW, transport)
+                self.assertEqual(len(reads), 2 if resets else 1, ahead)
+                self.run_heartbeat(archive, log, NOW + timedelta(seconds=30), transport)
+                self.assertEqual(len(reads), 2 if resets else 1)
 
     def test_disabled_heartbeat_creates_no_state_or_log(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,
