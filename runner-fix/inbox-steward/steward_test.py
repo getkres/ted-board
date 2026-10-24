@@ -261,16 +261,26 @@ class Runner(unittest.TestCase):
             self.assertEqual(r['failed'], 1)
             text = (Path(root)/'steward-log.jsonl').read_text()
             self.assertNotIn('do-not-print', text)
-            self.assertIn('uncertain', text)
+            self.assertEqual([json.loads(line)['outcome'] for line in text.splitlines()], ['attempt'])
+            self.assertTrue(r['stale'])
 
 
-    def test_adapters_use_existing_transports_and_page_key_only_for_moves(self):
+    def test_adapters_preserve_raw_envelopes_and_use_page_authorization(self):
         import types
-        board = types.SimpleNamespace(cards=lambda: [], call=lambda *a, **kw: (a, kw))
-        with patch.dict(sys.modules, board_client=board):
-            self.assertEqual(steward.move_card('c1', 'up_next', 'Ted review'),
-                             (('move',), dict(page=True, card_id='c1', value='up_next', note='Ted review')))
-
+        rows = [card()]; requests = []
+        def call(action=None, **kw):
+            requests.append((action, kw))
+            if action is None:
+                return {'ok': True, 'cards': rows}
+            rows[0]['section'] = kw['value']
+            return {'ok': True}
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(sys.modules, board_client=types.SimpleNamespace(call=call)):
+            result = steward.run_once(Path(tmp), now=NOW)
+        self.assertEqual(result['moved'], 1)
+        self.assertEqual([r for r in requests if r[0] == 'move'],
+                         [('move', dict(page=True, card_id='worker', value='up_next', note='Ted review'))])
+        self.assertTrue(all(kw == {'page': True} for action, kw in requests if action is None))
 
     def test_empty_overflow_replaces_a_previous_overflow(self):
         with tempfile.TemporaryDirectory() as root:
@@ -282,7 +292,7 @@ class Runner(unittest.TestCase):
 
     def test_incomplete_snapshots_are_refused(self):
         import types
-        board = types.SimpleNamespace(cards=lambda: [card()]*500)
+        board = types.SimpleNamespace(call=lambda **kw: {'ok': True, 'cards': [card()]*500})
         with patch.dict(sys.modules, board_client=board):
             with self.assertRaises(RuntimeError):
                 steward.fetch_cards()
@@ -308,14 +318,14 @@ class Runner(unittest.TestCase):
             row['messages'][0]['at'] = '2026-10-01T00:00:00Z'
         rows[0]['updated_at'] = '2026-10-01T00:01:00Z'
         with tempfile.TemporaryDirectory() as root:
-            steward.write_overflow(Path(root), rows, NOW)
+            self.run_steward(root, rows)
             result = json.loads((Path(root)/'steward-overflow.json').read_text())
             self.assertEqual(result['ranked'][-1]['id'], '0')
 
     def test_ambiguous_cards_are_listed_for_ted_even_below_the_cap(self):
         rows = [card('choice', text='Uploaded 3 logo options for you to look at.')]
         with tempfile.TemporaryDirectory() as root:
-            steward.write_overflow(Path(root), rows, NOW)
+            self.run_steward(root, rows)
             result = json.loads((Path(root)/'steward-overflow.json').read_text())
             self.assertEqual(result['excess_count'], 0)
             self.assertEqual([r['id'] for r in result['ranked']], ['choice'])
@@ -457,6 +467,203 @@ class ScopeAndAvailability(unittest.TestCase):
             result = steward.run_once(Path(tmp), now=NOW)
             self.assertFalse(move.called)
             self.assertEqual(result['deferred'], 1)
+
+
+class StructuralBoundary(unittest.TestCase):
+    def test_writers_without_a_run_snapshot_cannot_mutate(self):
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sent = []
+            action = dict(card_id='c1', project='Test', **{'from': 'needs_you'},
+                          to='up_next', reason='Ted review')
+            operations = [lambda: steward.journal(root, action, 'attempt', NOW),
+                          lambda: steward.write_overflow(root, [], NOW),
+                          lambda: steward.mark_stale(root, NOW),
+                          lambda: steward.move_card('c1', 'up_next', 'Ted review')]
+            board = types.SimpleNamespace(call=lambda *a, **kw: sent.append((a, kw)))
+            with patch.dict(sys.modules, board_client=board):
+                for operation in operations:
+                    with self.assertRaises(RuntimeError):
+                        operation()
+            self.assertEqual(sent, [])
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_expired_snapshot_cannot_authorize_a_move(self):
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sent = []; clock = [0.0]
+            real_journal = steward.journal
+            def journal(*args):
+                real_journal(*args)
+                if args[2] == 'attempt':
+                    clock[0] += 3600
+            board = types.SimpleNamespace(call=lambda *a, **kw: sent.append((a, kw)))
+            with patch.object(steward, 'fetch_cards', return_value=[card()]), \
+                 patch.object(steward.time, 'monotonic', side_effect=lambda: clock[0]), \
+                 patch.object(steward, 'journal', side_effect=journal), \
+                 patch.dict(sys.modules, board_client=board):
+                result = steward.run_once(root, now=NOW)
+            self.assertEqual(sent, [])
+            self.assertEqual(result['failed'], 1)
+            self.assertTrue(result['stale'])
+            self.assertTrue(json.loads((root/'steward-overflow.json').read_text())['stale'])
+
+    def test_stale_recovery_permission_cannot_authorize_other_writes(self):
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sent = []; denied = []
+            real_mark_stale = steward.mark_stale
+            action = dict(card_id='c1', project='Test', **{'from': 'needs_you'},
+                          to='up_next', reason='Ted review')
+            def recover(*args):
+                operations = [lambda: steward.journal(root, action, 'attempt', NOW),
+                              lambda: steward.write_overflow(root, [], NOW),
+                              lambda: steward.move_card('c1', 'up_next', 'Ted review')]
+                for operation in operations:
+                    try:
+                        operation()
+                    except RuntimeError:
+                        denied.append(True)
+                real_mark_stale(*args)
+            with patch.object(steward, 'fetch_cards', side_effect=RuntimeError('offline')), \
+                 patch.object(steward, 'mark_stale', side_effect=recover), \
+                 patch.dict(sys.modules, board_client=types.SimpleNamespace(call=lambda *a, **kw: sent.append(kw))):
+                result = steward.run_once(root, now=NOW)
+            self.assertEqual(denied, [True, True, True])
+            self.assertEqual(sent, [])
+            self.assertFalse((root/'steward-log.jsonl').exists())
+            self.assertTrue(result['stale'])
+            self.assertTrue(json.loads((root/'steward-overflow.json').read_text())['stale'])
+
+    def test_switch_before_atomic_promotion_preserves_the_old_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root/'steward-overflow.json'
+            original = '{"needs_you": 8, "ranked": ["retained"]}'
+            path.write_text(original)
+            real_fsync = steward.os.fsync
+            def fsync(fd):
+                real_fsync(fd)
+                (root/'steward.disabled').touch()
+            with patch.object(steward, 'fetch_cards', return_value=[]), \
+                 patch.object(steward.os, 'fsync', side_effect=fsync):
+                result = steward.run_once(root, now=NOW)
+            self.assertTrue(result['disabled'])
+            self.assertEqual(path.read_text(), original)
+
+    def test_recovery_write_failure_returns_failure_without_recursion_or_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(steward, 'fetch_cards', side_effect=RuntimeError('offline')), \
+             patch.object(steward.os, 'open', side_effect=OSError('token=hidden')):
+            result = steward.run_once(Path(tmp), now=NOW)
+        self.assertEqual(result['failed'], 1)
+        self.assertTrue(result['stale_write_failed'])
+        self.assertNotIn('hidden', json.dumps(result))
+
+    def test_incomplete_raw_envelopes_preserve_cached_count_and_mark_stale(self):
+        import types
+        for response in [None, [], {'ok': True, 'cards': [None]}, {}, {'ok': False}, {'ok': True}, {'ok': True, 'cards': None},
+                         {'ok': True, 'cards': {}}, {'cards': []}, {'ok': 1, 'cards': []}]:
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); path = root/'steward-overflow.json'
+                path.write_text(json.dumps({'at': OLD, 'needs_you': 7, 'ranked': [{'id': 'keep'}]}))
+                board = types.SimpleNamespace(cards=lambda: [], call=lambda *a, **kw: response)
+                with patch.dict(sys.modules, board_client=board):
+                    result = steward.run_once(root, now=NOW)
+                cached = json.loads(path.read_text())
+                self.assertTrue(result['stale'])
+                self.assertEqual(result['failed'], 1)
+                self.assertEqual(cached['needs_you'], 7)
+                self.assertEqual(cached['ranked'], [{'id': 'keep'}])
+                self.assertTrue(cached['stale'])
+
+    def test_valid_empty_raw_envelope_can_clear_the_overflow(self):
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            board = types.SimpleNamespace(call=lambda *a, **kw: {'ok': True, 'cards': []})
+            with patch.dict(sys.modules, board_client=board):
+                result = steward.run_once(root, now=NOW)
+            self.assertEqual(result['failed'], 0)
+            cached = json.loads((root/'steward-overflow.json').read_text())
+            self.assertEqual(cached['needs_you'], 0)
+            self.assertFalse(cached['stale'])
+
+    def test_null_messages_remain_ambiguous_without_crashing_activity(self):
+        row = card(); row['messages'] = None
+        with tempfile.TemporaryDirectory() as tmp, patch.object(steward, 'fetch_cards', return_value=[row]):
+            root = Path(tmp); result = steward.run_once(root, now=NOW)
+            self.assertEqual(result['failed'], 0)
+            cached = json.loads((root/'steward-overflow.json').read_text())
+            self.assertEqual(cached['needs_you'], 1)
+            self.assertEqual(cached['ambiguous'][0]['id'], 'worker')
+
+    def test_any_post_fetch_failure_marks_stale_and_stops_the_run(self):
+        # Removing the outer exception boundary must break each stage.
+        for stage in ['plan', 'journal', 'write_overflow']:
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp, \
+                 patch.object(steward, 'fetch_cards', return_value=[card()]), \
+                 patch.object(steward, stage, side_effect=RuntimeError('token=hidden')), \
+                 patch.object(steward, 'move_card', return_value={'ok': True}) as move:
+                root = Path(tmp); result = steward.run_once(root, now=NOW)
+                self.assertEqual(result['failed'], 1)
+                self.assertTrue(result['stale'])
+                cached = json.loads((root/'steward-overflow.json').read_text())
+                self.assertTrue(cached['stale'])
+                self.assertNotIn('hidden', json.dumps(result)+json.dumps(cached))
+                if stage != 'write_overflow':
+                    self.assertFalse(move.called)
+
+    def test_failed_fetch_after_switch_activation_cannot_mark_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root/'steward-overflow.json'
+            original = '{"at": "retained", "needs_you": 9}'
+            path.write_text(original)
+            def fetch():
+                (root/'steward.disabled').touch()
+                raise RuntimeError('offline')
+            with patch.object(steward, 'fetch_cards', side_effect=fetch):
+                result = steward.run_once(root, now=NOW)
+            self.assertTrue(result['disabled'])
+            self.assertEqual(path.read_text(), original)
+            self.assertFalse((root/'steward-log.jsonl').exists())
+            self.assertFalse((root/'steward-overflow.json.tmp').exists())
+
+    def test_switch_after_attempt_journal_blocks_real_move_adapter(self):
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); sent = []
+            real_journal = steward.journal
+            def journal(*args):
+                real_journal(*args)
+                if args[2] == 'attempt':
+                    (root/'steward.disabled').touch()
+            def call(*args, **kw):
+                sent.append((args, kw))
+                return {'ok': True}
+            with patch.object(steward, 'fetch_cards', return_value=[card()]), \
+                 patch.object(steward, 'journal', side_effect=journal), \
+                 patch.dict(sys.modules, board_client=types.SimpleNamespace(call=call)):
+                result = steward.run_once(root, now=NOW)
+            self.assertEqual(sent, [])
+            self.assertTrue(result['disabled'])
+            self.assertEqual(result['moved'], 0)
+            self.assertFalse((root/'steward-overflow.json').exists())
+            self.assertEqual([json.loads(line)['outcome'] for line in
+                              (root/'steward-log.jsonl').read_text().splitlines()], ['attempt'])
+
+    def test_failed_move_stops_before_later_actions_and_keeps_cache_stale(self):
+        attempted = []
+        def fail(cid, *args):
+            attempted.append(cid)
+            raise RuntimeError('unconfirmed')
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(steward, 'fetch_cards', return_value=[card('first'), card('second')]), \
+             patch.object(steward, 'move_card', side_effect=fail):
+            root = Path(tmp); result = steward.run_once(root, now=NOW)
+            self.assertEqual(attempted, ['first'])
+            self.assertEqual(result['failed'], 1)
+            self.assertTrue(result['stale'])
+            self.assertTrue(json.loads((root/'steward-overflow.json').read_text())['stale'])
 
 
 if __name__ == '__main__':
