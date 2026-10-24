@@ -2,7 +2,7 @@
 +++ handler.ts
 @@ -0,0 +1 @@
 +import failureTemplates from './runner_failure_templates.json' with {type:'json'};
-@@ -5,0 +7,13 @@
+@@ -5,0 +7,14 @@
 +const runnerMessages=new Set(Object.values(failureTemplates.failures).flatMap(base=>Object.values(failureTemplates.recovery).map(suffix=>base+suffix)));
 +function runnerFailure(card:any,line:string):boolean {
 +  if(card.decision_kind!==null||card.live_state==='waiting_on_you')return false;
@@ -14,9 +14,10 @@
 +  if(!Array.isArray(rows)||!rows.length||rows.some(m=>!m||!Number.isFinite(Date.parse(m.at))))return false;
 +  const newest=Math.max(...rows.map(m=>Date.parse(m.at)));
 +  const latest=rows.filter(m=>Date.parse(m.at)===newest);
-+  return latest.length===1&&latest[0].who===failureTemplates.author&&latest[0].text===line&&runnerMessages.has(line);
++  if(card.live_status_at!=null&&(!Number.isFinite(Date.parse(card.live_status_at))||Date.parse(card.live_status_at)>newest))return false;
++  return latest.length===1&&latest[0].runner_failure===true&&latest[0].who===failureTemplates.author&&latest[0].text===line&&runnerMessages.has(line);
 +}
-@@ -113,2 +127,8 @@
+@@ -117,2 +132,8 @@
 -      if (b.section !== undefined && !['done','needs_you','ted_doing'].includes(String(b.section))) return json({error:'Invalid live section'},400);
 -      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') return json({error:'Invalid section guard'},400);
 +      if (b.section !== undefined && !['done','needs_you','ted_doing','up_next'].includes(String(b.section))) return json({error:'Invalid live section'},400);
@@ -27,14 +28,44 @@
 +        const recovery=b.expected_section==='up_next' && b.section==='ted_doing' && b.state==='running';
 +        if(!cleanup&&!recovery)return json({error:'Invalid section guard'},400);
 +      }
-@@ -129,0 +150,8 @@
+@@ -133,0 +155,10 @@
 +      const cleanup=b.expected_section==='needs_you';
 +      let cleanupMessages:string|undefined;
++      let cleanupStatusAt:string|null=null;
 +      if(cleanup) {
 +        const {data:card,error}=await db.from('ted_board_cards').select('*').eq('id',b.card_id).maybeSingle();
 +        if(error)return json({error:'Could not confirm inbox failure'},500);
 +        if(!card||!runnerFailure(card,b.line))return json({error:'Inbox decision retained. Refresh and try again.'},409);
 +        cleanupMessages=JSON.stringify(card.messages);
++        cleanupStatusAt=card.live_status_at??null;
 +      }
-@@ -134,0 +163 @@
-+      if(cleanup)query=query.is('decision_kind',null).or('live_state.is.null,live_state.neq.waiting_on_you').eq('messages',cleanupMessages);
+@@ -138,0 +170,4 @@
++      if(cleanup) {
++        query=query.is('decision_kind',null).or('live_state.is.null,live_state.neq.waiting_on_you').eq('messages',cleanupMessages);
++        query=cleanupStatusAt===null?query.is('live_status_at',null):query.eq('live_status_at',cleanupStatusAt);
++      }
+@@ -163,0 +199,24 @@
++    }
++    if (b.action === 'runner_failure') {
++      if(!sameKey(String(b.key??''),workerKey))return json({error:'forbidden'},403);
++      const kind=b.failure_kind,recovery=b.recovery;
++      if(typeof b.card_id!=='string'||!/^[A-Za-z0-9._-]{1,64}$/.test(b.card_id)
++          ||typeof b.token!=='string'||!/^[A-Za-z0-9._-]{1,150}$/.test(b.token)
++          ||!Object.hasOwn(failureTemplates.failures,kind)||!Object.hasOwn(failureTemplates.recovery,recovery)
++          ||b.text!==undefined||b.runner_failure!==undefined)return json({error:'Invalid runner failure'},400);
++      const text=failureTemplates.failures[kind as keyof typeof failureTemplates.failures]+failureTemplates.recovery[recovery as keyof typeof failureTemplates.recovery];
++      const {data:card,error}=await db.from('ted_board_cards').select('*').eq('id',b.card_id).maybeSingle();
++      if(error)return json({error:'Could not load failure card'},500);
++      if(!card)return json({error:'Card no longer exists'},404);
++      if(!Array.isArray(card.messages))return json({error:'Card messages unavailable'},409);
++      const previous=card.messages.find((m:any)=>m&&m.runner_failure_token===b.token);
++      if(previous) {
++        if(previous.runner_failure!==true||previous.text!==text)return json({error:'Failure token changed'},409);
++        return json({ok:true,card});
++      }
++      const message={who:failureTemplates.author,text,at:new Date().toISOString(),runner_failure:true,runner_failure_token:b.token};
++      const saved=await db.from('ted_board_cards').update({messages:[...card.messages,message]}).eq('id',b.card_id)
++        .eq('messages',JSON.stringify(card.messages)).select('*').maybeSingle();
++      if(saved.error)return json({error:'Could not publish runner failure'},500);
++      if(!saved.data)return json({error:'Card changed. Refresh and try again.'},409);
++      return json({ok:true,card:saved.data});

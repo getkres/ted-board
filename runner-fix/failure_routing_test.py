@@ -1,5 +1,6 @@
 """Offline regression suite. Network, model execution, and production writes are forbidden."""
 import importlib.util
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,15 @@ from inbox_policy import failure_message
 def card(**extra):
     return dict(dict(id='x', project='Fixture', title='Fixture task', body='', section='ted_doing',
                      updated_at='2026-10-20T00:00:00Z', decision_kind=None, messages=[], options=[]), **extra)
+
+@contextmanager
+def steward_lease(root, rows):
+    root=Path(root)
+    with patch.object(steward,'ROOT',root):
+        token=steward.RUN.set(steward.WriteState(root.resolve(),cards=rows,observed_at=steward.time.monotonic()))
+        try:yield
+        finally:steward.RUN.reset(token)
+
 
 class Routing(unittest.TestCase):
     def test_failure_text_cannot_remove_a_decision_kind_card(self):
@@ -311,14 +321,14 @@ class WorkerResults(unittest.TestCase):
 
 class Steward(unittest.TestCase):
     def action(self, c, mockups=()):
-        return steward.plan([c], list(mockups), [], 2000000000)['actions']
+        return steward.plan([c], 2000000000)['actions']
 
     def test_steward_retains_failures_with_options_and_a_decision_kind(self):
         for text in ('Worker exceeded the three-hour limit. Reply to continue.',
                      'Worker stopped without a final result. Reply to retry.',
                      'Worker could not start. Reply to retry.', 'Worker failed: OSError. Reply to retry.'):
             c = card(section='needs_you',decision_kind='other',options=['retry'],
-                     messages=[dict(who='ted',at='2026-10-22T00:00:00Z',text=text)])
+                     messages=[dict(who='ted',runner_failure=True,at='2026-10-22T00:00:00Z',text=text)])
             actions=self.action(c)
             self.assertEqual(actions,[],text)
 
@@ -350,8 +360,8 @@ class Steward(unittest.TestCase):
 
     def test_new_real_ask_wins_over_historical_worker_failure(self):
         c=card(section='needs_you',body='Please sign the contract',
-               messages=[dict(who='ted',at='2026-10-20T00:00:00Z',text='Worker failed: OSError'),
-                         dict(who='ted',at='2026-10-22T00:00:00Z',text='Please sign the contract')])
+               messages=[dict(who='ted',runner_failure=True,at='2026-10-20T00:00:00Z',text='Worker failed: OSError'),
+                         dict(who='ted',runner_failure=True,at='2026-10-22T00:00:00Z',text='Please sign the contract')])
         self.assertEqual(self.action(c),[])
 
     def test_archived_copy_ask_is_retained_despite_background_pricing(self):
@@ -367,28 +377,24 @@ class Steward(unittest.TestCase):
             self.assertEqual(self.action(c),[])
 
     def test_dry_run_and_snapshot_race_have_no_mutations(self):
-        c=card(section='needs_you',messages=[dict(who='ted',at='2026-10-23T00:00:00Z',text=failure_message('startup_failure'))])
+        c=card(section='needs_you',messages=[dict(who='ted',runner_failure=True,at='2026-10-23T00:00:00Z',text=failure_message('startup_failure'))])
         changed=card(section='needs_you',body='Please sign the contract',live_status='Please sign the contract',updated_at='2026-10-23T00:00:00Z')
-        with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'snapshot',return_value=([c],[],[])),patch.object(steward,'move_card') as move,patch.object(steward,'archive_batch') as archive:
+        with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'fetch_cards',return_value=[c]),patch.object(steward,'move_card') as move:
             result=steward.run_once(tmp,dry_run=True,now=2000000000)
-            self.assertEqual(result['planned_moves'],1);move.assert_not_called();archive.assert_not_called()
+            self.assertEqual(result['planned_moves'],1);move.assert_not_called()
             self.assertEqual(list(Path(tmp).iterdir()),[])
-        with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'snapshot',side_effect=[([c],[],[]),([changed],[],[])]),patch.object(steward,'fetch_cards',return_value=[changed]),patch.object(steward,'move_card') as move:
+        with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'fetch_cards',side_effect=[[c],[changed],[changed]]),patch.object(steward,'move_card') as move:
             result=steward.run_once(tmp,now=2000000000)
             self.assertEqual(result['deferred'],1);move.assert_not_called()
 
     def test_steward_move_sets_blocked_with_exact_snapshot_guard(self):
         note=failure_message('startup_failure')
-        c=card(section='needs_you',messages=[dict(who='ted',at='2026-10-23T00:00:00Z',text=note)])
-        with patch.object(client,'cards',return_value=[c]),patch.object(live,'call',return_value=dict(ok=True,card=card(section='up_next'))) as send:
-            steward.move_card('x','up_next',note,'2026-10-23T00:00:00Z')
+        c=card(section='needs_you',messages=[dict(who='ted',runner_failure=True,at='2026-10-23T00:00:00Z',text=note)])
+        with tempfile.TemporaryDirectory() as tmp,steward_lease(tmp,[c]),patch.object(client,'call',return_value=dict(ok=True,card=card(section='up_next'))) as send:
+            steward.move_card('x','up_next',note)
             self.assertEqual(send.call_args.kwargs['expected_section'],'needs_you')
-            self.assertEqual(send.call_args.kwargs['expected_updated_at'],'2026-10-23T00:00:00Z')
+            self.assertEqual(send.call_args.kwargs['expected_updated_at'],'2026-10-20T00:00:00Z')
             self.assertEqual(send.call_args.kwargs['state'],'blocked')
 
-    def test_running_build_still_protects_its_batch_from_archive(self):
-        c=card(section='ted_doing',live_state='running',body='Implement batch "Launch v2"')
-        rows=[dict(id='m',project='Fixture',batch='Launch v2',status='open',verdict='approved',created_at='2026-10-01T00:00:00Z')]
-        self.assertFalse(any(a['kind']=='archive' for a in steward.plan([c],rows,[],2000000000)['actions']))
 
 if __name__=='__main__':unittest.main()

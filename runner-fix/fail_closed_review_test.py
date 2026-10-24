@@ -30,13 +30,13 @@ class RetainDecisions(unittest.TestCase):
                 self.assertIsNone(policy.failure_kind(text))
                 self.assertIsNone(policy.disposition(card(body=text))[0])
                 c=card(section='needs_you',body=text)
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
     def test_supersession_cannot_override_any_ask_sentence(self):
         for text in (SUPERSEDED_ASK,'Choose the next route. Superseded by v2.'):
             with self.subTest(text=text):
                 self.assertIsNone(policy.disposition(card(body=text))[0])
-                self.assertEqual(steward.plan([card(section='needs_you',body=text)],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([card(section='needs_you',body=text)],NOW)['actions'],[])
 
     def test_live_status_preserves_same_sentence_and_superseded_asks(self):
         for text in MIXED_ASKS+(SUPERSEDED_ASK,):
@@ -50,7 +50,7 @@ class RetainDecisions(unittest.TestCase):
             with self.subTest(kind=kind):
                 c=card(section='needs_you',body='Export completed.',decision_kind=kind)
                 self.assertIsNone(steward.classify_card(c,NOW)[0])
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
     def test_recent_human_reply_or_answer_retains_a_completed_card(self):
         fields=(dict(messages=[dict(who='sebastian',at=RECENT,text='Looks fine.')]),
@@ -58,7 +58,7 @@ class RetainDecisions(unittest.TestCase):
         for extra in fields:
             with self.subTest(extra=extra):
                 c=card(section='needs_you',body='Export completed.',**extra)
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
     def test_existing_protection_guards_are_required_before_any_move(self):
         fields=(dict(live_state='running'),dict(pending_approval=True),dict(amount_cents=40000),
@@ -66,7 +66,7 @@ class RetainDecisions(unittest.TestCase):
         for extra in fields:
             with self.subTest(extra=extra):
                 c=card(section='needs_you',body='Export completed.',**extra)
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
     def test_ask_in_other_visible_card_text_or_thread_retains_the_card(self):
         fields=(dict(title='Which route do you prefer?'),
@@ -76,12 +76,12 @@ class RetainDecisions(unittest.TestCase):
         for extra in fields:
             with self.subTest(extra=extra):
                 c=card(section='needs_you',**dict(dict(body='Export completed.'),**extra))
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
     def test_unmarked_notices_are_retained_under_the_marker_allowlist(self):
         for text in ('Worker stopped without a final result.','Superseded by v2.','Export completed.'):
             with self.subTest(text=text):
-                actions=steward.plan([card(section='needs_you',body=text)],[],[],NOW)['actions']
+                actions=steward.plan([card(section='needs_you',body=text)],NOW)['actions']
                 self.assertEqual(actions,[])
 
 
@@ -94,7 +94,7 @@ class DeletedCardRecovery(unittest.TestCase):
             with self.subTest(missing_at_read=missing_at_read),tempfile.TemporaryDirectory() as tmp:
                 store,s=self.session(tmp)
                 sessions.atomic(Path(s['cwd'])/'turn.result.json',dict(ok=False,failure_kind='timeout',text='Worker timed out.'))
-                with patch.object(client,'cards',return_value=[] if missing_at_read else [card()]),patch.object(sessions,'publish_live',side_effect=live.publish_live),patch.object(live,'call',side_effect=client.BoardGone('Card no longer exists')) as send,patch.object(sessions,'alive',return_value=False),patch.object(sessions.subprocess,'Popen',return_value=Mock(pid=456)) as spawn:
+                with patch.object(client,'cards',return_value=[card(id='other')] if missing_at_read else [card()]),patch.object(sessions,'publish_live',side_effect=live.publish_live),patch.object(live,'call',side_effect=client.BoardGone('Card no longer exists')) as send,patch.object(sessions,'alive',return_value=False),patch.object(sessions.subprocess,'Popen',return_value=Mock(pid=456)) as spawn:
                     store.tick();store.tick()
                     self.assertEqual(send.call_count,0 if missing_at_read else 1)
                     spawn.assert_not_called()

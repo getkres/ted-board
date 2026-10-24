@@ -14,6 +14,7 @@ class Package(unittest.TestCase):
         paths={name:runtime/name for name in prepare.RUNTIME}
         paths['handler.ts']=runtime/'supabase/functions/ted-board/handler.ts'
         paths['inbox_steward.py']=runtime/'steward-runtime/current/inbox_steward.py'
+        paths['steward_review.py']=runtime/'steward-runtime/current/steward_review.py'
         manifest={}
         for name,path in paths.items():
             path.parent.mkdir(parents=True,exist_ok=True);path.write_text('original\n')
@@ -30,7 +31,7 @@ class Package(unittest.TestCase):
             with patch.object(prepare,'PACKAGE',package):prepare.prepare(runtime,destination)
             for name,source in paths.items():
                 self.assertEqual(source.read_text(),'original\n')
-                self.assertEqual((destination/name).read_text(),'candidate\n')
+                self.assertEqual((destination/name).read_text(),'original\n' if name=='steward_review.py' else 'candidate\n')
             self.assertEqual(destination.stat().st_mode & 0o777,0o700)
 
     def test_drift_and_existing_destinations_refuse_before_patching(self):

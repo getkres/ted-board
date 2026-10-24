@@ -21,7 +21,7 @@ NOTE='[ted-runner-failure:v1:timeout] worker run finished with a timeout; ted ow
 
 
 def marked(**extra):
-    return card(**dict(dict(section='needs_you',live_state='blocked',messages=[dict(who='ted',at='2026-10-24T21:00:00Z',text=NOTE)]),**extra))
+    return card(**dict(dict(section='needs_you',live_state='blocked',messages=[dict(who='ted',runner_failure=True,at='2026-10-24T21:00:00Z',text=NOTE)]),**extra))
 
 
 class Allowlist(unittest.TestCase):
@@ -32,26 +32,26 @@ class Allowlist(unittest.TestCase):
                '[ted-runner-failure:v1:crash] worker run finished with a crash; ted owns recovery from the job files. no automatic retry remains.')
         for note in notes:
             with self.subTest(note=note):
-                c=marked(messages=[dict(who='ted',at='2026-10-24T21:00:00Z',text=note)])
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'][0]['to'],'up_next')
+                c=marked(messages=[dict(who='ted',runner_failure=True,at='2026-10-24T21:00:00Z',text=note)])
+                self.assertEqual(steward.plan([c],NOW)['actions'][0]['to'],'up_next')
 
     def test_only_an_exact_latest_runner_template_can_authorize_a_move(self):
         self.assertEqual(policy.disposition(marked())[0],'up_next')
-        self.assertEqual(steward.plan([marked()],[],[],NOW)['actions'][0]['to'],'up_next')
+        self.assertEqual(steward.plan([marked()],NOW)['actions'][0]['to'],'up_next')
         for text in ('Worker timed out.','Superseded by v2.','Export completed.',
                      'Confirm the $500 ad spend.','Need your OK to go live.',
                      'Go ahead and launch when ready.',NOTE+' Confirm the $20 plan.',NOTE.replace('timeout]','unknown]')):
             with self.subTest(text=text):
-                c=marked(messages=[dict(who='ted',at='2026-10-24T21:00:00Z',text=text)])
+                c=marked(messages=[dict(who='ted',runner_failure=True,at='2026-10-24T21:00:00Z',text=text)])
                 self.assertIsNone(policy.disposition(c)[0])
-                self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+                self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
     def test_kind_pending_human_newer_or_ambiguous_message_retains(self):
         fields=[dict(decision_kind=k) for k in ('send_email','spend_money','other','')]
         fields += [dict(pending_approval=True),dict(live_state='waiting_on_you'),
                    dict(messages=[dict(who='seb',at='2026-10-20T00:00:00Z',text=NOTE)]),
-                   dict(messages=[dict(who='ted',at='2026-10-24T21:00:00Z',text=NOTE),dict(who='seb',at='2026-10-24T21:01:00Z',text='Proceed.')]),
-                   dict(messages=[dict(who='ted',at='2026-10-24T21:00:00Z',text=NOTE),dict(who='seb',at='2026-10-24T21:00:00Z',text='Proceed.')]),
+                   dict(messages=[dict(who='ted',runner_failure=True,at='2026-10-24T21:00:00Z',text=NOTE),dict(who='seb',at='2026-10-24T21:01:00Z',text='Proceed.')]),
+                   dict(messages=[dict(who='ted',runner_failure=True,at='2026-10-24T21:00:00Z',text=NOTE),dict(who='seb',at='2026-10-24T21:00:00Z',text='Proceed.')]),
                    dict(messages=[dict(who='ted',text=NOTE)])]
         for extra in fields:
             with self.subTest(extra=extra):
@@ -81,7 +81,7 @@ class Allowlist(unittest.TestCase):
 
     def test_old_sebastian_authored_fyi_stays_in_inbox(self):
         c=card(section='needs_you',messages=[dict(who='sebastian',at='2026-10-20T00:00:00Z',text='Export completed.')])
-        self.assertEqual(steward.plan([c],[],[],NOW)['actions'],[])
+        self.assertEqual(steward.plan([c],NOW)['actions'],[])
 
 
 class CrashAndReaper(unittest.TestCase):
@@ -129,22 +129,23 @@ class CrashAndReaper(unittest.TestCase):
             sessions.atomic(Path(s['cwd'])/'turn.result.json',dict(ok=False,failure_kind='timeout',text='Worker timed out.'))
             with patch.object(sessions,'alive',return_value=False),patch.object(sessions,'publish_live',return_value=False):store.tick()
             note=store.read()['outbox'][0]['text']
-            self.assertEqual(policy.disposition(marked(messages=[dict(who='ted',at='2026-10-24T21:00:00Z',text=note)]))[0],'up_next')
+            self.assertEqual(policy.disposition(marked(messages=[dict(who='ted',runner_failure=True,at='2026-10-24T21:00:00Z',text=note)]))[0],'up_next')
             self.assertTrue(note.startswith('[ted-runner-failure:v1:timeout] '))
 
 
 class StewardDelivery(unittest.TestCase):
     def test_retained_card_is_not_reported_as_a_successful_move(self):
-        with patch.object(client,'cards',return_value=[marked(decision_kind='send_email')]),patch.object(live,'call') as send,self.assertRaises(RuntimeError):
-            steward.move_card('x','up_next',NOTE,'2026-10-20T00:00:00Z')
+        with tempfile.TemporaryDirectory() as tmp,fixture.steward_lease(tmp,[marked(decision_kind='send_email')]),patch.object(client,'cards',return_value=[marked(decision_kind='send_email')]),patch.object(live,'call') as send,self.assertRaises(RuntimeError):
+            steward.move_card('x','up_next',NOTE)
         send.assert_not_called()
 
-    def test_a_move_exception_is_counted_and_later_moves_continue(self):
+    def test_pr36_boundary_counts_a_move_exception_and_stops_later_moves(self):
         cards=[marked(id='x'),marked(id='y')]
-        with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'snapshot',return_value=(cards,[],[])),patch.object(steward,'fetch_cards',return_value=cards),patch.object(steward,'move_card',side_effect=[RuntimeError('fixture failure'),dict(ok=True)]) as move:
+        with tempfile.TemporaryDirectory() as tmp,patch.object(steward,'fetch_cards',return_value=cards),patch.object(steward,'move_card',side_effect=[RuntimeError('fixture failure'),dict(ok=True)]) as move:
             result=steward.run_once(tmp,now=NOW)
-            self.assertEqual((result['planned_moves'],result['failed'],result['moved']),(2,1,1))
-            self.assertEqual(move.call_count,2)
+            self.assertEqual((result['planned_moves'],result['failed'],result['moved']),(2,1,0))
+            self.assertEqual(move.call_count,1)
+            self.assertTrue(result['stale'])
 
 
 if __name__=='__main__':unittest.main()

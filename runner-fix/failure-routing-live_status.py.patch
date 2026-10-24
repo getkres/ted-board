@@ -6,11 +6,27 @@
 -SECTIONS=('done','needs_you','ted_doing')
 -REAPER_APPROVAL_LINE='review the pending approval on this card'
 +SECTIONS=('done','needs_you','ted_doing','up_next')
-@@ -19,0 +20,16 @@
+@@ -12,0 +13,16 @@
++
++
++def lookup_card(card_id):
++ try:rows=board_client.cards()
++ except (board_client.BoardGone,AttributeError,KeyError,TypeError):raise RuntimeError('Card snapshot could not confirm existence') from None
++ if (not isinstance(rows,list) or not rows or len(rows)>500
++     or any(not isinstance(c,dict) or not isinstance(c.get('id'),str)
++            or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',c['id'])
++            or not isinstance(c.get('project'),str) or not isinstance(c.get('section'),str) for c in rows)
++     or len({c['id'] for c in rows})!=len(rows)):
++  raise RuntimeError('Card snapshot could not confirm existence')
++ card=next((c for c in rows if c['id']==card_id),None)
++ if card is None:
++  if len(rows)>=500:raise RuntimeError('Card snapshot may be truncated')
++  raise board_client.BoardGone('Card no longer exists')
++ return card
+@@ -19,0 +36,15 @@
 + card=None
 + if section is not None or state=='waiting_on_you' or failure_kind(line):
-+  card=next((item for item in board_client.cards() if item.get('id')==card_id),None)
-+  if not card:raise board_client.BoardGone('Card no longer exists')
++  card=lookup_card(card_id)
 +  if card.get('section')=='needs_you':
 +   if section=='needs_you' or state=='waiting_on_you':return card
 +   target,_=disposition(card,line=line)
@@ -23,9 +39,9 @@
 +  result=call('live_status',**body)
 +  if not result.get('ok') or not result.get('card'):raise RuntimeError('Failure handoff was not confirmed')
 +  return result['card']
-@@ -21 +36,0 @@
+@@ -21 +51,0 @@
 -  card=next((item for item in board_client.cards() if item.get('id')==card_id),None)
-@@ -23,0 +39,8 @@
+@@ -23,0 +54,8 @@
 +  mockups=[]
 +  if re.search(r'\b(?:mockup|design|batch|pick|choose|copy|headline|write|type)\b',line,re.I):
 +   from mockup_client import call as mockup_call
@@ -34,21 +50,21 @@
 +   mockups=payload['mockups']
 +  section='needs_you'
 +  if state!='waiting_on_you':state='waiting_on_you'
-@@ -27,2 +49,0 @@
+@@ -27,2 +64,0 @@
 -  if reaper and line.strip().lower()==REAPER_APPROVAL_LINE and apply_rule_id is None and ask_anyway_reason is None:
 -   ask_anyway_reason='A pending approval artifact needs Sebastian to review its exact contents.'
-@@ -34 +55 @@
+@@ -34 +70 @@
 -   blocked=dict(card_id=card_id,state='blocked',line=REAPER_BLOCKED_LINE,expected_section='ted_doing')
 +   blocked=dict(card_id=card_id,state='blocked',line=REAPER_BLOCKED_LINE,section='up_next',expected_section='ted_doing')
-@@ -54 +75,3 @@
+@@ -54 +90,3 @@
 -         "When you finish: if done, "+command+" done '<one line result>' --section done; "
 +         "When a worker turn finishes successfully, "+command+" blocked 'ted review' --section up_next; "
 +         "Worker failures and operational blockers belong in up_next with state blocked, never needs_you. "
 +         "Needs you is only for spending, email sends, legal or contract decisions, pricing, gated production writes, fresh mockup taste picks, and copy Sebastian writes. "
-@@ -62 +85 @@
+@@ -62 +100 @@
 -def publish_live(card_id,state,line,section=None):
 +def publish_live(card_id,state,line,section=None,raise_gone=False,**guards):
-@@ -64 +87,6 @@
+@@ -64 +102,6 @@
 - try:update(card_id,state,line,section)
 + try:
 +  result=update(card_id,state,line,section,**guards)

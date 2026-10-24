@@ -43,7 +43,7 @@ class PolicyReview(unittest.TestCase):
             with self.subTest(text=text):
                 c=card(section='needs_you',body=text)
                 self.assertEqual(policy.disposition(c),(None,'ambiguous, retain'))
-                self.assertEqual(steward.plan([c],[],[],2000000000)['actions'],[])
+                self.assertEqual(steward.plan([c],2000000000)['actions'],[])
 
     def test_operational_sentence_does_not_hide_a_later_email_ask(self):
         for prefix in PREFIXES:
@@ -53,7 +53,7 @@ class PolicyReview(unittest.TestCase):
                 self.assertEqual(policy.decision(c),'send_email')
                 self.assertIsNone(policy.failure_kind(text))
                 self.assertIsNone(policy.disposition(c)[0])
-                self.assertEqual(steward.plan([c],[],[],2000000000)['actions'],[])
+                self.assertEqual(steward.plan([c],2000000000)['actions'],[])
 
     def test_unknown_ask_after_failure_also_remains(self):
         for ask in UNKNOWN_ASKS:
@@ -85,7 +85,7 @@ class ClientReview(unittest.TestCase):
                 result=live.update('x','blocked',policy.failure_message('no_result'),section='up_next')
                 self.assertEqual(result['section'],section)
                 send.assert_not_called()
-        with patch.object(client,'cards',return_value=[]),self.assertRaises(client.BoardGone):
+        with patch.object(client,'cards',return_value=[]),self.assertRaises(RuntimeError):
             live.update('x','blocked',policy.failure_message('startup_failure'))
 
 

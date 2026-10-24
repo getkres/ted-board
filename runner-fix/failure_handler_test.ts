@@ -6,7 +6,7 @@ const {createHandler}=await import(pathToFileURL(path.resolve(process.env.TED_RU
 
 function fixture() {
  const note='[ted-runner-failure:v1:startup_failure] worker run finished with a startup failure; ted owns recovery from the job files. no automatic retry remains.';
- const writes:any[]=[],filters:any[]=[];let data:any={id:'x',section:'needs_you',decision_kind:null,live_state:'blocked',messages:[{who:'ted',at:'2026-10-23T00:00:00Z',text:note}]};
+ const writes:any[]=[],filters:any[]=[];let data:any={id:'x',section:'needs_you',decision_kind:null,live_state:'blocked',live_status_at:null,messages:[{who:'ted',runner_failure:true,at:'2026-10-23T00:00:00Z',text:note}]};
  const query:any={update:(fields:any)=>{writes.push(fields);return query;},eq:(...args:any[])=>{filters.push(args);return query;},is:(...args:any[])=>{filters.push(['is',...args]);return query;},or:(filter:string)=>{filters.push(['or',filter]);return query;},select:()=>query,maybeSingle:async()=>({data,error:null})};
  const handler=createHandler({from:()=>query},'fixture-page','fixture-worker',null);
  const post=(extra={})=>handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({action:'live_status',key:'fixture-worker',card_id:'x',state:'blocked',line:note,section:'up_next',...extra})}));
@@ -24,7 +24,7 @@ test('steward cleanup is conditional on inbox section and exact snapshot time',a
  const f=fixture();
  assert.equal((await f.post({expected_section:'needs_you'})).status,400);
  assert.equal((await f.post({expected_section:'needs_you',expected_updated_at:'2026-10-23T00:00:00Z'})).status,200);
- assert.deepEqual(f.filters,[['id','x'],['id','x'],['section','needs_you'],['updated_at','2026-10-23T00:00:00Z'],['is','decision_kind',null],['or','live_state.is.null,live_state.neq.waiting_on_you'],['messages',JSON.stringify(f.messages)]]);
+ assert.deepEqual(f.filters,[['id','x'],['id','x'],['section','needs_you'],['updated_at','2026-10-23T00:00:00Z'],['is','decision_kind',null],['or','live_state.is.null,live_state.neq.waiting_on_you'],['messages',JSON.stringify(f.messages)],['is','live_status_at',null]]);
  f.missing();assert.equal((await f.post({expected_section:'needs_you',expected_updated_at:'2026-10-23T00:00:00Z'})).status,409);
 });
 test('retry may resume only from up next into running doing',async()=>{

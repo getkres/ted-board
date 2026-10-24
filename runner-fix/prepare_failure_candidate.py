@@ -19,13 +19,14 @@ def prepare(runtime, destination):
     sources = {name: runtime/name for name in RUNTIME}
     sources['handler.ts'] = runtime/'supabase/functions/ted-board/handler.ts'
     sources['inbox_steward.py'] = runtime/'steward-runtime/current/inbox_steward.py'
+    dependencies = {'steward_review.py': runtime/'steward-runtime/current/steward_review.py'}
     manifest = json.loads((PACKAGE/'failure-routing-baseline.json').read_text())
-    for name, source in sources.items():
+    for name, source in {**sources, **dependencies}.items():
         if hashlib.sha256(source.read_bytes()).hexdigest() != manifest[name]:
             raise ValueError('Private source drift: '+name+'. Rebase and retest before review.')
     destination.mkdir(parents=True, mode=0o700)
     destination.chmod(0o700)
-    for source in sources.values():
+    for source in {**sources, **dependencies}.values():
         shutil.copy2(source, destination/source.name)
     for source in sources['handler.ts'].parent.glob('*.ts'):
         shutil.copy2(source, destination/source.name)

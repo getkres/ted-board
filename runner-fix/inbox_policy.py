@@ -68,7 +68,10 @@ def runner_failure(card):
         return None
     newest=max(stamp(m['at']) for m in rows)
     latest=[m for m in rows if stamp(m['at'])==newest]
-    if len(latest)!=1 or latest[0].get('who')!=TEMPLATES['author']:
+    if len(latest)!=1 or latest[0].get('who')!=TEMPLATES['author'] or latest[0].get('runner_failure') is not True:
+        return None
+    status_at=card.get('live_status_at')
+    if status_at is not None and (not stamp(status_at) or stamp(status_at)>newest):
         return None
     text=latest[0].get('text')
     return text if failure_kind(text) else None
