@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - 'runner-fix/safeguard-tools.patch'
+      - 'runner-fix/bounded-watchdog-log.patch'
+      - 'runner-fix/fixtures/job_watchdog.py'
       - 'runner-fix/bottleneck_safeguards_test.py'
       - '.github/workflows/ops-safeguards.yml'
   push:
     branches: [main]
     paths:
       - 'runner-fix/safeguard-tools.patch'
+      - 'runner-fix/bounded-watchdog-log.patch'
+      - 'runner-fix/fixtures/job_watchdog.py'
       - 'runner-fix/bottleneck_safeguards_test.py'
       - '.github/workflows/ops-safeguards.yml'
 

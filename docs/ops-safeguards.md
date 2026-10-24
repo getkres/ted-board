@@ -37,11 +37,11 @@ Expiry checks consume operator-recorded dates only. They do not decode JWTs, ref
 
 All writers to the selected log must migrate together. Do not rotate launchd stdout/stderr, active vendor transcripts, or logs with a writer holding an old descriptor. Their retention needs a separate process-aware change. The parent directory must already exist, be private, and be trusted. This helper is for Unix hosts, including the mini. The lock file remains in place; do not unlink it during operation.
 
-The private watchdog integration is staged in [bounded-watchdog-log.patch](../runner-fix/bounded-watchdog-log.patch). It gives both normal and exception-path writes the helper's own lock. It does not enable recovery, change SSH coverage, or alter watchdog authority.
+The private watchdog integration is staged in [bounded-watchdog-log.patch](../runner-fix/bounded-watchdog-log.patch). Both normal and exception-path writes use the helper's own lock. Logger validation, import, or filesystem failures emit only a fixed stderr marker and never escape `log()`. If stderr also fails, monitoring still continues. The fallback does not append through refused symlinks or hard links, and it does not echo records or exception text. A lazy helper import keeps standalone remote probes usable without the helper package. Install the explicit `scripts/__init__.py` with both helper modules. This patch changes logging only; the live watchdog's recovery authority remains unchanged.
 
 ## Rollout and rollback
 
-After review, Ted can prepare a timestamped backup of the private watchdog and its log, preserve any oversized existing archives separately, dry-run the patch against the then-current source, install both generic scripts, and run the offline tests. Refuse source drift. Coordinate a quiet transition so no old writer remains, then let the existing mini invocation pick up the reviewed code. This card did not execute that rollout, create a launch agent, or run the watchdog. Roll back by restoring the backed-up watchdog; retain the helper and archives until all new writers have stopped.
+After review, Ted can prepare a timestamped backup of the private watchdog and its log, preserve any oversized existing archives separately, dry-run the patch with `--fuzz=0` against the then-current source, install the explicit package and both generic scripts, and run the offline tests. Keep `~/ted-ops/logs` at mode `0700`; keep individual logs and locks at `0600`. Refuse source drift. Coordinate a quiet transition so no old writer remains, then let the existing mini invocation pick up the reviewed code. This card did not execute that rollout, create a launch agent, or run live recovery. Roll back by restoring the backed-up watchdog; retain the helper and archives until all new writers have stopped.
 
 For monitoring, first run a private inventory manually. Review each success artifact before integrating exit codes into the existing mini health routine. External recovery monitoring, spend shutoffs, legal sign-off, and provider quota decisions remain separate. Local warning output is not a delivered external alert.
 
@@ -49,8 +49,9 @@ For monitoring, first run a private inventory manually. Review each success arti
 
 ```sh
 python3 runner-fix/bottleneck_safeguards_test.py
+python3 runner-fix/bottleneck_safeguards_test.py --watchdog-source /absolute/private/job_watchdog.py
 python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 python3 scripts/check_data_api_grants.py
 ```
 
-The harness applies the bundled patch in a disposable directory and runs its 15 tests. Existing grant checks stay separate. The tests use synthetic files, clocks, expiry metadata, and concurrent subprocesses. They cover concurrent directory replacement, FIFO inventory refusal, and retention reductions. They do not contact providers or operate production routines. CI runs this same offline harness.
+The harness applies the tools patch and the watchdog patch with zero fuzz in a disposable directory, then runs 25 tests. CI uses a public contract fixture containing the original logging surface and an offline probe, without private recovery code. The optional private-source invocation copies the actual watchdog into the same disposable tree, imports the patched module, exercises refused paths, and executes only `--probe` against an empty temporary jobs directory. It never runs enforcement, imports production sessions, contacts providers, or changes production state. Tests cover oversized records and logs, hard links, symlink parents, old archives, missing imports, failed stderr, private JSON output, concurrent writers, concurrent directory replacement, FIFO inventory refusal, and retention reductions. Existing grant checks stay separate.

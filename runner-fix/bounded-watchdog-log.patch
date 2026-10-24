@@ -1,13 +1,20 @@
 --- a/job_watchdog.py
 +++ b/job_watchdog.py
-@@ -16 +16,2 @@
--import uuid
-+import uuid
-+from scripts.bounded_json_log import append_rows
-@@ -392,4 +393,2 @@
+@@ -13,5 +13,12 @@
+-    LOG.parent.mkdir(parents=True, exist_ok=True)
 -    with open(LOG, 'a', opener=lambda p, f: os.open(p, f, 0o600)) as stream:
 -        for row in rows:
 -            stream.write(json.dumps(dict(at=time.time(), dry_run=dry_run, **row), sort_keys=True) + '\n')
 -    LOG.chmod(0o600)
-+    append_rows(LOG, [dict(at=time.time(), dry_run=dry_run, **row) for row in rows],
-+                max_bytes=5_000_000, backups=3)
++    # Logging must never disable live monitoring or recurse through its handler.
++    try:
++        from scripts.bounded_json_log import append_rows
++        LOG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
++        append_rows(LOG, [dict(at=time.time(), dry_run=dry_run, **row) for row in rows],
++                    max_bytes=5_000_000, backups=3)
++    except Exception:
++        # Do not append through a refused path or disclose rows or exception text.
++        try:
++            print('watchdog logging unavailable', file=sys.stderr)
++        except Exception:
++            pass

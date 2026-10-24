@@ -529,3 +529,106 @@
 +
 +if __name__ == '__main__':
 +    unittest.main()
+--- /dev/null
++++ b/scripts/__init__.py
+@@ -0,0 +1 @@
++"""Local operational helpers. Keep this package with its reviewed callers."""
+--- /dev/null
++++ b/tests/test_watchdog_integration.py
+@@ -0,0 +1,96 @@
++"""Exercise the patched watchdog, including its real bounded logger."""
++import contextlib
++import importlib.util
++import io
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import unittest
++from unittest import mock
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class WatchdogIntegration(unittest.TestCase):
++    def setUp(self):
++        self.temporary = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temporary.cleanup)
++        self.root = Path(self.temporary.name).resolve()
++        spec = importlib.util.spec_from_file_location('candidate_watchdog', ROOT / 'job_watchdog.py')
++        self.watchdog = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(self.watchdog)
++        self.watchdog.LOG = self.root / 'watchdog.log'
++
++    def assert_continues(self, rows=None):
++        error = io.StringIO()
++        with contextlib.redirect_stderr(error):
++            self.watchdog.log(rows or [dict(action='sample')], False)
++            # The top-level error handler calls log again after a normal failure.
++            self.watchdog.log([dict(action='watchdog_error')], True)
++        self.assertIn('watchdog logging unavailable', error.getvalue())
++        self.assertNotIn('private-sentinel', error.getvalue())
++
++    def test_explicit_local_package_and_import(self):
++        import scripts
++        self.assertEqual(Path(scripts.__file__).resolve(), ROOT / 'scripts/__init__.py')
++        self.assertTrue(callable(self.watchdog.log))
++
++    def test_real_log_writes_private_json(self):
++        self.watchdog.log([dict(action='sample')], False)
++        row = json.loads(self.watchdog.LOG.read_text())
++        self.assertEqual(row['action'], 'sample')
++        self.assertFalse(row['dry_run'])
++        self.assertEqual(self.watchdog.LOG.stat().st_mode & 0o777, 0o600)
++
++    def test_oversized_existing_log_does_not_stop_watchdog(self):
++        self.watchdog.LOG.write_bytes(b'x' * 5_000_001)
++        self.assert_continues()
++        self.assertEqual(self.watchdog.LOG.stat().st_size, 5_000_001)
++
++    def test_hard_link_refusal_does_not_stop_watchdog(self):
++        target = self.root / 'private-sentinel'
++        target.write_text('preserve')
++        os.link(target, self.watchdog.LOG)
++        self.assert_continues()
++        self.assertEqual(target.read_text(), 'preserve')
++
++    def test_symlink_parent_refusal_does_not_stop_watchdog(self):
++        (self.root / 'alias').symlink_to(self.root, target_is_directory=True)
++        self.watchdog.LOG = self.root / 'alias/watchdog.log'
++        self.assert_continues()
++        self.assertFalse((self.root / 'watchdog.log').exists())
++
++    def test_old_archive_refusal_does_not_stop_watchdog(self):
++        old = self.root / 'watchdog.log.4'
++        old.write_text('preserve')
++        self.assert_continues()
++        self.assertEqual(old.read_text(), 'preserve')
++
++    def test_oversized_record_is_not_echoed(self):
++        self.assert_continues([dict(action='private-sentinel' * 400_000)])
++
++    def test_import_failure_is_nonfatal(self):
++        with mock.patch.dict(sys.modules, {'scripts.bounded_json_log': None}):
++            self.assert_continues()
++
++    def test_stderr_failure_is_nonfatal(self):
++        self.watchdog.LOG.write_bytes(b'x' * 5_000_001)
++        with mock.patch('sys.stderr.write', side_effect=OSError('private-sentinel')):
++            self.watchdog.log([dict(action='sample')], False)
++
++    def test_standalone_probe_runs_from_unrelated_directory(self):
++        jobs = self.root / 'jobs'
++        jobs.mkdir()
++        env = dict(os.environ)
++        env.pop('PYTHONPATH', None)
++        result = subprocess.run([sys.executable, str(ROOT / 'job_watchdog.py'), '--probe', '--root', str(jobs)],
++                                cwd=self.root, env=env, capture_output=True, text=True, timeout=20)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(json.loads(result.stdout)['jobs'], [])
++
++
++if __name__ == '__main__':
++    unittest.main()
