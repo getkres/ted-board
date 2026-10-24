@@ -113,7 +113,7 @@
 +   action('coverage_defect',source,stage,dict(source=source))
 +  if c.get('section') in TERMINAL and (not has_chain or stage=='verified' or c.get('section')=='killed'):continue
 +  started=stamp(c.get('action_started_at') or c.get('created_at')) or stamp(c.get('updated_at')) or now
-+  review=bool(snapshot.get('workflows',{}).get(cid,{}).get('review_required')) or stage in ('pr','merged','deployed') or any(x in str(c.get('live_status','')).lower() for x in ('ted review','ted owns','ted must','waiting on ted','worker stopped','exceeded','could not start'))
++  review=cid=='reconciler-initial-ted-digest' or bool(snapshot.get('workflows',{}).get(cid,{}).get('review_required')) or stage in ('pr','merged','deployed') or any(x in str(c.get('live_status','')).lower() for x in ('ted review','ted owns','ted must','waiting on ted','worker stopped','exceeded','could not start'))
 +  owner=c.get('owner')
 +  valid_owner=owner in ('ted','sebastian','external') or (isinstance(owner,str) and owner.startswith('worker:') and len(owner)>7)
 +  desired_owner='worker:'+cid if s.get('status')=='running' else 'sebastian' if c.get('section')=='needs_you' and reserved(c) else 'external' if c.get('external_wait') is True else 'ted'

@@ -1,8 +1,8 @@
-# Claude Max account setup
+# Claude Max account setup, account 2 first
 
-Run on the Mac mini after Ted reviews and installs the lane patches. Account 1 remains Ted and interactive work. Account 2 handles design, art, and design review, and account 3 handles research, analysis, and review gates. The flag stays off until both new accounts are verified.
+Run on the Mac mini after Ted reviews and installs the current runner bundle. Account 2 is sufficient for activation. Account 3 can be added later. The installer does not change the flag.
 
-1. **Create a separate directory, and log in normally.** Set `lane_account=2` for the design account. Repeat with `lane_account=3` for the research account, using its own Max subscription in the browser. Check the browser account before approving login.
+1. **Create a separate directory, and log in normally.** For the account Sebastian just bought, use `lane_account=2`. If Ted already completed that login, proceed to verification. Confirm macOS uses Google Chrome as its default browser before starting the login, and select the intended Max account in Chrome.
 
    ```sh
    lane_account=2
@@ -12,31 +12,32 @@ Run on the Mac mini after Ted reviews and installs the lane patches. Account 1 r
    CLAUDE_CONFIG_DIR="$lane_dir" claude auth login --claudeai
    ```
 
-2. **Verify that account and directory.** Run the command below in the same shell. Confirm `loggedIn: true`, `authMethod: "claude.ai"`, `subscriptionType: "max"`, the expected `configDirectory`, and the intended account identity. The identities for accounts 1, 2, and 3 must differ. Do not copy credentials, configure a proxy, use an API key helper, or export account tokens. The dispatcher strips inherited authentication, provider, and proxy overrides for managed lanes, and repeats this status check before every job. Complete any first-launch setup by opening `CLAUDE_CONFIG_DIR="$lane_dir" claude`, then exit without starting work. In each account's `/usage` screen, leave paid extra usage disabled.
+2. **Verify the account and directory.** In the same shell, run the command below. Confirm `loggedIn: true`, `authMethod: "claude.ai"`, `subscriptionType: "max"`, the exact `configDirectory`, and the intended account identity. Account 2 must differ from account 1. Complete any initial CLI setup with `CLAUDE_CONFIG_DIR="$lane_dir" claude`, then exit without starting work. Leave paid extra usage disabled in that account's `/usage` screen. Never copy tokens, configure a proxy, export credential overrides, or share account directories.
 
    ```sh
    CLAUDE_CONFIG_DIR="$lane_dir" claude auth status --json
    ```
 
-3. **Enable only after both accounts pass step 2.** This is a local flag file, reread at job boundaries by the existing mini heartbeat. No new routine or daemon is needed. The Jobs tab should show the three lane summaries after the next heartbeat. A new Claude design card should use account 2, and a new Claude research card should use account 3. Existing conversations retain their original account.
+3. **Ted enables account 2 only after installation and verification.** This is an operator action, separate from applying the bundle. The existing dispatcher rereads the flag at job boundaries. The command below is for Ted to run when ready; the preparation job must not run it.
 
    ```sh
-   python3 - <<'PY'
+   python3 - <<'PY_ENABLE'
    import json
    import os
    from pathlib import Path
    root = Path.home() / 'ted-ops/claude-lanes'
    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-   target = root / 'config.json'
    temporary = root / 'config.json.tmp'
    temporary.write_text(json.dumps({'enabled': True}) + '\n')
    temporary.chmod(0o600)
-   os.replace(temporary, target)
-   PY
+   os.replace(temporary, root / 'config.json')
+   PY_ENABLE
    ```
 
-To disable routing, repeat step 3 with `False`. A running session finishes on its current account. Queued dedicated conversations wait until the flag is reenabled, and new unassigned jobs use legacy behavior. Never move an existing session ID to another account. Reauthenticate only with the same directory and account.
+After the next heartbeat, new managed Opus, Sonnet, research, art, and review conversations use account 2. Aggregate caps become 4 Opus and 16 Sonnet workers when account 2 verifies, subject to the global 64-worker limit and load guard. Existing main-account conversations keep their original account and conservative 2/8 worker ceilings. All values come from ~/ted-ops/ted-board/capacity.json. Approval reviews are exempt from model worker caps, and they still obey the global limit and host guards.
 
-Jobs reports observed CLI token totals from this dispatcher's completed turns and typed limit events. These are not subscription balances or percentages. Account 1's interactive usage, usage on other machines, and account-wide plan percentages remain unavailable in this view. Use each account's interactive `/usage` screen for those details. An absent signal stays unknown, and a known limit queues the same conversation until its reported reset. A limit without a reset waits five minutes before another attempt on the same account.
+Later, repeat steps 1 and 2 with `lane_account=3` and a different Max identity. No second flag change is needed. After the next successful account 3 readiness probe, only new research, analysis, and review conversations use account 3. Existing account 2 conversations remain pinned there. If account 3 is absent or fails verification, new research and review conversations continue on account 2; conversations already pinned to account 3 wait for it instead of moving.
 
-Verified against installed Claude Code 2.1.309 help on 2026-10-22. Official references: [separate account directories](https://code.claude.com/docs/en/authentication#log-in-with-multiple-accounts), [authentication commands](https://code.claude.com/docs/en/cli-reference), and [interactive usage](https://code.claude.com/docs/en/costs#using-the-usage-command).
+To disable future dedicated launches, Ted may repeat step 3 with `False`. Running processes finish on their current account. Queued dedicated conversations wait until reenabled. Account-wide subscription usage and interactive usage are unavailable in the Jobs telemetry; use each account's interactive `/usage` screen for those details.
+
+Official references: [separate account directories](https://code.claude.com/docs/en/authentication#log-in-with-multiple-accounts), [authentication commands](https://code.claude.com/docs/en/cli-reference), and [interactive usage](https://code.claude.com/docs/en/costs#using-the-usage-command).

@@ -1,6 +1,6 @@
---- session_worker.py
-+++ session_worker.py
-@@ -5,8 +5,11 @@
+--- a/session_worker.py
++++ b/session_worker.py
+@@ -5,8 +5,12 @@
  from pathlib import Path
  import subprocess
  import sys
@@ -10,10 +10,11 @@
 +from sessions import atomic,engine_command,Store,identity,lease_matches,reconciler_enabled
 +
 +LEASE_RENEW_SECONDS=30
++import claude_lanes as lanes
  
  
  def run(prefix):
-@@ -17,10 +20,37 @@
+@@ -17,10 +21,37 @@
   try:fcntl.flock(claim,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError:claim.close();return
   store=Store(Path(s['cwd']).parent)
@@ -52,7 +53,7 @@
   if inp.get('veto_proposal_id'):
    try:
     from veto_worker import send
-@@ -30,7 +60,7 @@
+@@ -30,19 +61,21 @@
     result=dict(ok=False,veto_outcome='failed',text='Timed send was refused before Gmail send. Review the proposal before retrying.')
    except Exception:
     result=dict(ok=False,veto_outcome='uncertain',text='Timed send result is uncertain. Check the proposal and Gmail Sent before retrying.')
@@ -61,7 +62,23 @@
   command=engine_command(s,inp['prompt'],prefix,inp.get('review',False))
   result=dict(ok=False,text='Worker failed before returning an answer.')
   try:
-@@ -52,10 +82,12 @@
+   with open(str(prefix)+'.events','w') as out:
+    Path(out.name).chmod(0o600)
+-   p=subprocess.run(command,cwd=s['cwd'],stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
++   p=subprocess.run(command,cwd=s['cwd'],env=lanes.environment(s,os.environ),stdin=subprocess.DEVNULL,stdout=out,stderr=sys.stderr,timeout=12*3600)
+   raw=Path(str(prefix)+'.events').read_text();sid=None;text=''
+   if s['engine'] in ('claude','sonnet') or inp.get('review'):
+-   payload={}
++   payload={};events=[]
+    for line in raw.splitlines():
+     try:event=json.loads(line)
+     except ValueError:continue
++    if not isinstance(event,dict):continue
++    events.append(event)
+     if event.get('session_id'):sid=event['session_id']
+     if event.get('type')=='result':payload=event
+    text=payload.get('result','');ok=p.returncode==0 and bool(payload) and not payload.get('is_error',False)
+@@ -52,10 +85,13 @@
      except ValueError:continue
      if event.get('type')=='thread.started':sid=event.get('thread_id')
     last=Path(str(prefix)+'.last.txt');text=last.read_text() if last.exists() else '';ok=p.returncode==0
@@ -72,6 +89,7 @@
 - claim.close()
 +  ok=ok and bool(text.strip())
 +  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer.',session_id=sid)
++  if s['engine'] in ('claude','sonnet') or inp.get('review'):result['lane_usage']=lanes.observe(events)
 +  if not ok:result['failure_kind']='no_result' if p.returncode==0 and not text.strip() else 'crash'
 + except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the twelve-hour limit.')
 + except Exception:result=dict(ok=False,failure_kind='crash',text='Worker failed before returning a result.')

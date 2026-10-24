@@ -18,3 +18,6 @@ jobs:
           python-version: '3.12'
       - run: python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
       - run: python3 scripts/check_data_api_grants.py
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_runtime_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_packaging_test.py'

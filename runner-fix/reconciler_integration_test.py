@@ -7,7 +7,10 @@ import types
 import unittest
 from unittest.mock import Mock,patch
 
-ROOT=Path(os.environ.get('RECONCILER_CANDIDATE',Path(__file__).resolve().parents[2]/'candidate'))
+candidate=os.environ.get('RECONCILER_CANDIDATE')
+if os.environ.get('CI') and (not candidate or not (Path(candidate)/'sessions.py').is_file()):
+ raise RuntimeError('CI requires RECONCILER_CANDIDATE with the private reconstructed runtime')
+ROOT=Path(candidate or Path(__file__).resolve().parents[2]/'candidate')
 
 def load(name):
  spec=importlib.util.spec_from_file_location('candidate_'+name,ROOT/(name+'.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
