@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,337 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -63,12 +63,18 @@
 + p=action['payload']
 + if session.get('turn')!=p.get('expected_turn') or session.get('lease_token')!=p.get('expected_lease_token'):return False
 + if session.get('recovery_action')==action['id']:return False
-+ if action['kind']=='retry' and unsafe_session(session):return False
++ if action['kind']=='retry' and (unsafe_session(session) or session.get('stop_requested') or session.get('status')=='stopped'):return False
++ if action['kind']=='stop_worker' and not session.get('stop_requested'):return False
++ if action['kind']!='stop_worker' and session.get('status')=='running' and stamp(session.get('lease_expires_at'))>time.time():return False
 + if not stop(session):return False
 + old=dict(session.get('active_turn') or {})
 + session.update(pid=None,identity='',recovery_action=action['id'],recovery_required=None)
 + remaining=list(session.get('queue') or [])
 + session['queue']=remaining
++ if action['kind']=='stop_worker':
++  session.pop('stop_requested',None);session.pop('kill_requested_at',None)
++  session.update(status='queued' if remaining else 'stopped',last_line='user stop settled, no retry of cancelled attempt')
++  return True
 + if action['kind']=='dead_letter':
 +  session.update(status='dead_letter',last_line='retry exhausted or unsafe to repeat, ted review required',dead_letter_at=time.time())
 +  return True
@@ -164,7 +170,8 @@
 +   s['previous_items']=remote_ledger.get('items',[])
 +   s['coverage']['backend_ledger']='ok'
 +   if s['coverage'].get('mockups')!='ok':s['retained_items']=[x for x in s['previous_items'] if x.get('kind')=='mockup']
-+ except Exception:s['coverage']['remote_jobs']='unavailable'
++ except Exception:
++  s['coverage']['remote_jobs']='unavailable';s['coverage']['backend_ledger']='unavailable'
 + urls=sorted({w['pr_url'] for w in s['workflows'].values() if w.get('pr_url')})
 + with ThreadPoolExecutor(max_workers=4) as pool:
 +  for url,pr in pool.map(pr_observation,urls):
@@ -212,12 +219,16 @@
 +
 +def execute(action,store,snapshot,board):
 + kind=action['kind'];p=action['payload'];cid=p.get('card_id')
-+ if kind in ('retry','dead_letter'):
++ if kind in ('retry','dead_letter','stop_worker'):
 +  with store.locked() as data:
 +   s=data['sessions'].get(cid)
 +   if not s:return False
 +   # Crash after local commit but before the SQLite receipt is a safe replay.
 +   if s.get('recovery_action')==action['id']:return True
++   if kind!='stop_worker':
++    from sessions import matching_result
++    result=read_json(Path(s.get('cwd',''))/(str(s.get('turn'))+'.result.json'),None)
++    if matching_result(s,result):return False
 +   ok=recover_session(s,action,confirmed_stop)
 +   if ok and kind=='dead_letter':store._out(data,s,'retries exhausted or unsafe to repeat, ted owns this recovery','reconciler-dlq-'+action['id'])
 +   return ok
@@ -257,7 +268,7 @@
 + if dry_run:return result
 + if store is None or board is None:raise ValueError('apply requires explicit effect adapters')
 + # Missing feeds must never overwrite an authoritative ledger or start guessed work.
-+ if any(source in result['coverage_defects'] for source in ('backend_ledger','inbox_policy')):raise RuntimeError('Reviewed backend and inbox policy must be installed before apply')
++ if any(snapshot.get('coverage',{}).get(source)!='ok' for source in ('backend_ledger','inbox_policy','remote_jobs')):raise RuntimeError('Complete authoritative backend and inbox observations required before apply')
 + publish={k:result[k] for k in ('generated_at','items','ted_queue','banner','coverage_defects')}
 + response=board.call('reconcile_publish',**publish)
 + if response.get('ok') is not True:raise RuntimeError('Reconciliation publication unconfirmed')
@@ -269,6 +280,15 @@
 +   except Exception:failures.append(action['id'])
 + result.update(applied=True,deferred=failures)
 + return result
++
++
++def sync_scheduling(store,snapshot):
++ with store.locked() as data:
++  for card in snapshot['cards']:
++   session=data['sessions'].get(card['id'])
++   if session is None:continue
++   for key in ('priority_class','explicit_ask','created_at','action_started_at'):
++    if key in card:session[key]=card[key]
 +
 +
 +def write_private(path,data):
@@ -290,10 +310,11 @@
 +  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 +  except BlockingIOError:return 0
 + try:
-+  snapshot=read_json(a.snapshot,None) if a.snapshot else observe(root,policy_source=a.policy_source)
-+  if snapshot is None:raise RuntimeError('Snapshot unavailable')
 +  store=importlib.import_module('sessions').Store(root/'jobs') if apply else None
 +  board=importlib.import_module('board_client') if apply else None
++  if apply:store.controls(board.call('control').get('commands',[]))
++  snapshot=read_json(a.snapshot,None) if a.snapshot else observe(root,policy_source=a.policy_source)
++  if snapshot is None:raise RuntimeError('Snapshot unavailable')
 +  if a.redrive:
 +   if not apply:p.error('redrive requires apply and Ted repair reason')
 +   with store.locked() as data:redrive(data['sessions'][a.redrive],a.reason)
@@ -301,7 +322,7 @@
 +  result=run(snapshot,root/'jobs/reconciler.sqlite',time.time(),not apply,store,board)
 +  if apply:
 +   # All lifecycle mutations are owned here, not by the heartbeat or reaper.
-+   store.controls(board.call('control').get('commands',[]));store.tick(reconcile=True);store.collect_approvals(reconcile=True);store.sync_approval_status();store.flush()
++   sync_scheduling(store,snapshot);store.tick(reconcile=True);store.collect_approvals(reconcile=True);store.sync_approval_status();store.flush()
 +   if os.environ.get('TED_MOCKUP_AUTOARCHIVE_ENABLED')=='true':
 +    from mockup_autoarchive import heartbeat_pass
 +    heartbeat_pass()

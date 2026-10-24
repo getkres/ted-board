@@ -1,12 +1,12 @@
 {
   "sessions.py": {
     "baseline_sha256": "8f6cbb513e136838d167d081e9fbace56a62e8e41af5a4b2b25c4d45482b1527",
-    "candidate_sha256": "396b4095a12e46d8ef4f4c113f3f88418f7762e676ff0f4f329b7b5e0a037efc",
+    "candidate_sha256": "55cf3ac76485f823df642a2a042366dbfad713e8322bb2106ee8ee08890b1b67",
     "patch": "reconciler-sessions.patch"
   },
   "session_worker.py": {
     "baseline_sha256": "ce122789da3344c6ca6ed4f41cc4393c51270a150cfb0c10d73efac286fd6a31",
-    "candidate_sha256": "16f19d89536bb80e517913c87e5125dd0447846f1f3d239c5e474c03a2c8885f",
+    "candidate_sha256": "fcd40f5fda3cbe421d0a5aba936b0d0c8743f31387dd2bfe829a73e847e64a1f",
     "patch": "reconciler-session_worker.patch"
   },
   "board_live.py": {
@@ -50,11 +50,11 @@
     "patch": "reconciliation-handler.patch"
   },
   "reconciler.py": {
-    "candidate_sha256": "9bce2b6d721c1f436f321732b12aa4a95732c9cf90bcead1b771fa04f49b9034",
+    "candidate_sha256": "9b61f40a541c5abb6f22bbcda76aeeabf201cf67d020216357d769cdba1a080f",
     "patch": "reconciler-core.patch"
   },
   "reconciler_runtime.py": {
-    "candidate_sha256": "d807bb421cce0e0e8cab2166906ad441e7123a5ef480d946ed1cd9688cfaa118",
+    "candidate_sha256": "45d64d9ba093ade49bd22e6fa6a60d662a12d1095f98022d1cd3ae5319d0fe28",
     "patch": "reconciler-runtime.patch"
   },
   "runner_admission.py": {

@@ -1,5 +1,8 @@
 import reconciler_test_support
 import json
+import contextlib
+import types
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,6 +50,40 @@ class RuntimeTests(unittest.TestCase):
   sessions=types.ModuleType('sessions');sessions.alive=lambda *a:False;sessions.safe_kill=lambda *a:False
   with patch.dict(sys.modules,{'sessions':sessions}),patch.object(d,'group_members',return_value=None):
    self.assertFalse(d.confirmed_stop({'pid':100,'identity':'ident'}))
+ def test_result_arriving_after_observe_is_rechecked_before_recovery(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   session={'turn':'t','lease_token':'f','status':'running','cwd':tmp}
+   Path(tmp,'t.result.json').write_text('{"ok":true,"text":"finished"}')
+   data={'sessions':{'c':session}}
+   @contextlib.contextmanager
+   def locked():yield data
+   store=types.SimpleNamespace(locked=locked)
+   sessions=types.SimpleNamespace(matching_result=lambda s,r:True)
+   action={'id':'a','kind':'retry','payload':{'card_id':'c','expected_turn':'t','expected_lease_token':'f','attempt':1,'retry_at':'2027-01-15T08:01:00Z'}}
+   with patch.dict(sys.modules,{'sessions':sessions}),patch.object(d,'confirmed_stop',side_effect=AssertionError('must not stop completed work')):
+    self.assertFalse(d.execute(action,store,{},None))
+   self.assertEqual(session['status'],'running')
+ def test_unavailable_jobs_read_cannot_publish_partial_ledger(self):
+  s={'cards':[],'sessions':{},'approvals':[],'mockups':[],'coverage':{'remote_jobs':'unavailable','inbox_policy':'ok'}}
+  board=types.SimpleNamespace(call=lambda *a,**k: (_ for _ in ()).throw(AssertionError('partial publish forbidden')))
+  with tempfile.TemporaryDirectory() as tmp:
+   with self.assertRaises(RuntimeError):d.run(s,Path(tmp)/'journal.db',1800000000,False,object(),board)
+ def test_classified_card_priority_reaches_existing_session_admission(self):
+  data={'sessions':{'c':{'status':'queued','queue':[{'id':'work'}],'lease_token':'f'}}}
+  @contextlib.contextmanager
+  def locked():yield data
+  d.sync_scheduling(types.SimpleNamespace(locked=locked),{'cards':[{'id':'c','priority_class':'urgent','explicit_ask':True}]})
+  self.assertEqual(data['sessions']['c']['priority_class'],'urgent');self.assertTrue(data['sessions']['c']['explicit_ask']);self.assertEqual(data['sessions']['c']['queue'],[{'id':'work'}]);self.assertEqual(data['sessions']['c']['lease_token'],'f')
+ def test_cancelled_attempt_cannot_retry_and_stop_settlement_preserves_new_work(self):
+  s={'turn':'t','lease_token':'f','stop_requested':True,'queue':[{'id':'new'}]}
+  a={'id':'a','kind':'retry','payload':{'expected_turn':'t','expected_lease_token':'f','attempt':1,'retry_at':'2027-01-15T08:01:00Z'}}
+  self.assertFalse(d.recover_session(s,a,lambda s:True));a['kind']='stop_worker'
+  self.assertTrue(d.recover_session(s,a,lambda s:True));self.assertEqual(s['status'],'queued');self.assertEqual(s['queue'],[{'id':'new'}]);self.assertFalse(s.get('stop_requested'))
+ def test_renewed_current_lease_invalidates_an_old_recovery_proposal(self):
+  import time
+  s={'turn':'t','lease_token':'f','status':'running','lease_expires_at':time.time()+150}
+  a={'id':'a','kind':'retry','payload':{'expected_turn':'t','expected_lease_token':'f','attempt':1,'retry_at':'2027-01-15T08:01:00Z'}}
+  self.assertFalse(d.recover_session(s,a,lambda s: (_ for _ in ()).throw(AssertionError('valid lease must not be killed'))))
  def test_recovery_preserves_new_user_requests(self):
   s={'turn':'one','lease_token':'a','status':'running','queue':[{'id':'new','message':'new request'}]}
   a={'id':'id','kind':'retry','payload':{'expected_turn':'one','expected_lease_token':'a','attempt':1,'retry_at':'2027-01-15T08:01:00Z'}}

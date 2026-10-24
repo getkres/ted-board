@@ -86,6 +86,19 @@ class PlannerTests(unittest.TestCase):
   s=snapshot();s['workflows']={'c-one':{'pr_url':'https://github.com/example/test/pull/1'}};s['prs']={'https://github.com/example/test/pull/1':{'state':'MERGED','created_at':r.iso(NOW-10000),'merged_at':r.iso(NOW-10),'merge_revision':'sha'}}
   row=next(x for x in r.plan(s,now=NOW)['items'] if x['kind']=='pr')
   self.assertEqual(row['action_started_at'],r.iso(NOW-10))
+ def test_user_stop_is_settled_without_retry(self):
+  s=snapshot();s['sessions']={'c-one':{'status':'failed','turn':'t','stop_requested':True}}
+  kinds=[x['kind'] for x in r.plan(s,now=NOW)['actions']]
+  self.assertIn('stop_worker',kinds);self.assertNotIn('retry',kinds)
+  s['sessions']['c-one']['kill_requested_at']=NOW-2
+  first=next(x['id'] for x in r.plan(s,now=NOW)['actions'] if x['kind']=='stop_worker')
+  s['sessions']['c-one']['kill_requested_at']=NOW-1
+  second=next(x['id'] for x in r.plan(s,now=NOW)['actions'] if x['kind']=='stop_worker')
+  self.assertNotEqual(first,second)
+ def test_lost_local_artifacts_preserve_established_delivery_stage(self):
+  c=card(owner='ted',reconciliation_stage='merged',next_action_due=r.iso(NOW-1),action_started_at=r.iso(NOW-100))
+  p=r.plan(snapshot([c]),now=NOW)
+  self.assertEqual(p['items'][0]['stage'],'merged');self.assertNotIn('dispatch',[x['kind'] for x in p['actions']]);self.assertIn('workflow:c-one',p['coverage_defects'])
  def test_final_approval_parity_and_active_undo(self):
   for row,expected in (({'verdict':'good_with_fix','status':'open'},False),({'verdict':None,'status':'picked'},True),({'verdict':'approved','verdict_change':{'undo_until':r.iso(NOW+5)}},False)):
    s=snapshot(cards=[]);s['mockups']=[dict(id='m',project='test',batch='b',created_at=r.iso(NOW),**row)]

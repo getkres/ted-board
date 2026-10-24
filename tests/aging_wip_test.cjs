@@ -135,3 +135,9 @@ test('fresh partial reconciliation explicitly reports incomplete feed coverage',
   assert.equal(view.stale, false);
   assert.match(view.warnings.join(' '), /Incomplete reconciliation coverage.*sessions.*github/);
 });
+
+test('a coverage-only banner does not invent a twelve-hour delay', () => {
+  const view = prepare([], {reconciliation: {generated_at: at(0), items: [], ted_queue: [], banner: true, coverage_defects: ['github']}});
+  assert.match(view.banner, /follow-up|coverage/i);
+  assert.doesNotMatch(view.banner, /12 hours|waited/);
+});

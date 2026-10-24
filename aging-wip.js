@@ -112,7 +112,8 @@ const AgingWip = (() => {
     const bannerValue = reconciliation?.banner;
     let banner = typeof bannerValue === 'string' ? bannerValue : bannerValue && typeof bannerValue === 'object' && bannerValue.active !== false ? text(bannerValue.message) || text(bannerValue.text) : '';
     const escalated = items.filter(row => row.ageMs !== null && row.ageMs >= 12 * HOUR);
-    if (!banner && (bannerValue === true || escalated.length)) banner = 'Ted follow-up needed: ' + (escalated.length || 'one or more') + ' open ' + (escalated.length === 1 ? 'item has' : 'items have') + ' waited at least 12 hours.';
+    if (!banner && escalated.length) banner = 'Ted follow-up needed: ' + escalated.length + ' open ' + (escalated.length === 1 ? 'item has' : 'items have') + ' waited at least 12 hours.';
+    if (!banner && bannerValue === true) banner = 'Ted follow-up needed. Check Jobs for coverage defects or pending work.';
     if (banner && (stale || error)) banner += ' Reconciliation is ' + (error ? 'not refreshing' : 'stale') + '; check Jobs for coverage defects.';
     return {available, stale, generatedAt, items, tedQueue, warnings, banner};
   }
