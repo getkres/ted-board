@@ -1,0 +1,17 @@
+--- hourly-SKILL.md
++++ hourly-SKILL.md
+@@ -6,6 +6,14 @@
+ Never use an em dash; always use the Oxford comma.
+ 
+ HEARTBEAT: first command of the run: `python3 "/Users/vahallo/Claude Code - Fictora/ops/company/heartbeat.py" ted-hourly-lead-loop start`; last command before your final reply: same with `end "<one-line outcome>"`. Feeds the office view (stalled = no beat in 1.5x cadence).
++
++## Reconciler review queue, before quiet-tick gate
++
++Before the usage plan's quiet-tick gate, read `~/ted-ops/ted-board/jobs/ted-review-queue.json`. It must be newer than five minutes. If missing or stale, run `python3 ~/ted-ops/ted-board/reconciler_runtime.py --dry-run --output /tmp/ted-reconciler-review.json`, inspect its coverage defects, and treat the stale loop as Ted-owned work. Do not call heartbeat, controls, or an apply path just to inspect it.
++
++Drain at least two oldest pending review items, plus urgent explicit asks. Deduplicate by card, and keep working through every item already past the six-hour review SLA before starting new work. If that cannot fit this tick, record the exact remaining owner and deadline, retain the banner, and make review the next tick too. A busy queue is not a quiet tick. A nonempty review queue or coverage defect forbids a quiet tick. Verify the current card and artifact before acting. PR review, SQL preparation, worker failure, retry exhaustion, missing owner, and missing deadline are Ted work. Dead-letter redrive requires a repaired cause and a reason: `python3 ~/ted-ops/ted-board/reconciler_runtime.py --apply --redrive CARD --reason 'what changed'`. Never redrive side effects through this command. Review and execute gated SQL only through the original exact approval flow. Do not create a Sebastian ask for operational recovery.
++
++For approved designs, verify the complete chain: approved frame, build card, PR, merged revision, deployment receipt, and independent verification receipt. A merged PR without deployment evidence stays open. Record `workflow.json` receipts in the job directory: `deployment` has `verified:true`, `deployed_at`, and `revision`; `verification` has `ok:true`, `verified_at`, the same merged-commit `revision`, and the current source `card_revision`. Only verified live outcomes close the chain. Inspect actual deployment output and live behavior before recording either receipt.
+ 
+ USAGE PLAN (Sebastian 2026-10-15, HARD, memory feedback-usage-routing-plan.md): Claude usage is scarce, Codex is idle.
+ - QUIET-TICK GATE FIRST: before reading any docs, run `git -C "/Users/vahallo/Claude Code - Fictora" fetch -q origin && gh pr list --state open --json number,updatedAt -L 20` and `python3 ops/roadmap/exitbot.py | head -5`. Compare these with ~/.local/state/fictora/lead-loop-last.txt. If nothing changed (design-queue.md has no unhandled briefs, same pick, no PR updated since the last tick, no failing CI on master), overwrite that file, write the heartbeat end "quiet", and STOP. Do not read AGENTS.md/CURRENT.md/MEMORY.md, and do not commit a "quiet tick" delta.

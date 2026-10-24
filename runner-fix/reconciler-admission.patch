@@ -1,0 +1,114 @@
+--- /dev/null
++++ runner_admission.py
+@@ -0,0 +1,111 @@
++"""Resource admission for the mini. No provider throughput assumptions are used."""
++from datetime import datetime
++import json
++import math
++import os
++from pathlib import Path
++import re
++import subprocess
++
++GIB = 1024 ** 3
++
++
++def reconciler_enabled(config_path=None):
++    if os.environ.get('TED_RECONCILER_ENABLED', '').lower() == 'true':
++        return True
++    path = Path(config_path) if config_path is not None else Path(__file__).resolve().parent / 'jobs/reconciler-config.json'
++    try:
++        value = json.loads(path.read_text())
++    except FileNotFoundError:
++        return False
++    except (OSError, ValueError):
++        raise RuntimeError('reconciler config is unreadable or invalid') from None
++    if not isinstance(value, dict) or not isinstance(value.get('enabled'), bool):
++        raise RuntimeError('reconciler config requires a boolean enabled flag')
++    return value['enabled']
++
++
++def bounded_env(name, default, maximum=16):
++    try:
++        return max(0, min(maximum, int(os.environ.get(name, str(default)))))
++    except ValueError:
++        return default
++
++
++def stamp(value):
++    try:
++        result = float(value) if isinstance(value, (int, float)) else datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
++        return result if math.isfinite(result) else 0
++    except (ValueError, TypeError, OverflowError):
++        return 0
++
++
++def priority_key(session):
++    metadata = session.get('metadata') if isinstance(session.get('metadata'), dict) else {}
++    priority = session.get('priority_class', metadata.get('priority_class'))
++    explicit = session.get('explicit_ask', metadata.get('explicit_ask'))
++    rank = 0 if priority == 'urgent' or explicit is True else 1 if priority in ('launch', 'revenue', 'client_revenue') else 2
++    age = stamp(session.get('action_started_at') or session.get('created_at') or session.get('first_enqueued_at'))
++    return rank, age, str(session.get('card_id', session.get('id', '')))
++
++
++def available_memory():
++    """Conservative reclaimable bytes from vm_stat, excluding overlapping purgeable pages."""
++    try:
++        result = subprocess.run(['/usr/bin/vm_stat'], capture_output=True, text=True, timeout=5)
++        if result.returncode != 0:
++            return None
++        header = re.search(r'page size of (\d+) bytes', result.stdout)
++        if not header:
++            return None
++        pages = {}
++        for name in ('free', 'inactive', 'speculative'):
++            match = re.search(r'^Pages ' + name + r':\s+(\d+)\.', result.stdout, re.M)
++            if not match:
++                return None
++            pages[name] = int(match.group(1))
++        return sum(pages.values()) * int(header.group(1))
++    except (OSError, ValueError, subprocess.TimeoutExpired):
++        return None
++
++
++def admission_state():
++    cap = bounded_env('TED_RUNNER_MAX_WORKERS', 16)
++    try:
++        cpus = os.cpu_count() or 18
++        load = os.getloadavg()[0]
++        ratio = load / cpus
++        available = available_memory()
++        if not math.isfinite(ratio) or available is None:
++            return dict(cap=0, reason='host observation unavailable')
++        if available < 8 * GIB:
++            return dict(cap=0, reason='available memory below 8 gib')
++        if ratio > 1.5:
++            return dict(cap=0, reason='host load above admission ceiling')
++        return dict(cap=min(cap, 8 if ratio > 1 else 16), reason='host pressure' if ratio > 1 else 'within host budget')
++    except (OSError, ValueError):
++        return dict(cap=0, reason='host observation unavailable')
++
++
++def effective_engine(session, turn=None):
++    return 'claude' if session.get('reviewing') or (turn or {}).get('kind') == 'review' else session.get('engine', 'codex')
++
++
++def can_admit(session, turn, running, cap):
++    if cap <= 0 or len(running) >= cap:
++        return False
++    urgent = priority_key(session)[0] == 0
++    ordinary = [s for s in running if priority_key(s)[0] != 0]
++    if not urgent and len(ordinary) >= max(0, cap - 2):
++        return False
++    engine = effective_engine(session, turn)
++    family = 'claude' if engine in ('claude', 'sonnet') else 'codex'
++    peers = [s for s in running if ('claude' if effective_engine(s) in ('claude', 'sonnet') else 'codex') == family]
++    engine_cap = bounded_env('TED_RUNNER_CLAUDE_CAP' if family == 'claude' else 'TED_RUNNER_CODEX_CAP', 2 if family == 'claude' else 16)
++    if len(peers) >= engine_cap:
++        return False
++    if family == 'claude' and not urgent and sum(priority_key(s)[0] != 0 for s in peers) >= 2:
++        return False
++    if engine == 'sonnet' and sum(effective_engine(s) == 'sonnet' for s in running) >= bounded_env('TED_RUNNER_SONNET_CAP', 8):
++        return False
++    return True

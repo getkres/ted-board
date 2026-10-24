@@ -1,0 +1,106 @@
+--- board_live.py
++++ board_live.py
+@@ -6,11 +6,13 @@
+ from pathlib import Path
+ import re
+ import sys
++from runner_admission import reconciler_enabled
+ import time
+ from datetime import datetime
+ from board_client import cards
+ from live_status import update
+ from sessions import alive, identity
++from inbox_policy import decision, approval_line, FAILURE_LINE, TED_LINE
+ 
+ ROOT=Path(__file__).resolve().parent
+ SIX_HOURS=6*3600
+@@ -78,7 +80,9 @@
+ 
+ 
+ def job_index(root):
+- sessions=read_json(root/'sessions.json',{}).get('sessions',{})
++ data=read_json(root/'sessions.json',{});sessions=data.get('sessions',{})
++ for cid,s in sessions.items():
++  s['pending_approval_kinds']=[a.get('kind') for a in data.get('approvals',{}).values() if a.get('card_id')==cid and a.get('status')=='pending']
+  result={cid:(Path(s['cwd']),s) for cid,s in sessions.items() if s.get('cwd')}
+  # Modern per-card sessions take precedence over legacy receipt jobs.
+  for path in sorted(root.glob('*/job.json'),key=lambda p:p.stat().st_mtime):
+@@ -122,8 +126,7 @@
+   entry=jobs.get(card['id']);state=line=section=ask_anyway_reason=None
+   if not entry:
+    if age>=SIX_HOURS:
+-    state,line,section='blocked','no worker on this, ted needs to pick it up','needs_you'
+-    ask_anyway_reason='No worker or queued turn exists for this card. Sebastian must review it before work can resume.'
++    state,line,section='blocked','no worker on this, ted needs to pick it up','up_next'
+   else:
+    directory,job=entry
+    review_starting=job.get('status')=='waiting_approval' or (job.get('status')=='queued' and any(turn.get('kind')=='review' for turn in job.get('queue',[])))
+@@ -134,13 +137,15 @@
+    if running:
+     state='running';line=latest_summary(directory,job)
+     if not line and card.get('live_state')!='running':line='worker is running, waiting for the next step'
+-   elif job.get('artifact_error'):
+-    state,line,section='waiting_on_you','approval artifact needs fixing, see the card note','needs_you'
+-    ask_anyway_reason='An approval artifact failed safety checks. The file must be corrected before this card can continue.'
++   elif job.get('artifact_error') or job.get('status')=='failed' or job.get('failure_publish_pending'):
++    state,line,section='blocked',FAILURE_LINE,'up_next'
+    elif job.get('queue') or job.get('status')=='queued':
+     state,line='blocked','queued, waiting for a worker slot'
+    elif job.get('status')=='waiting_approval':
+-    state,line,section='waiting_on_you','review the pending approval on this card','needs_you'
++    asks=[approval_line(kind,card) for kind in job.get('pending_approval_kinds',[])]
++    asks=[ask for ask in asks if ask]
++    if asks:state,line,section='waiting_on_you',asks[0],'needs_you'
++    else:state,line,section='blocked','ted review needed for the prepared packet','up_next'
+    elif isinstance(job.get('veto_outcome'),dict):
+     outcome=job['veto_outcome']
+     # The queued draft belongs to one actionable revision. A later card edit
+@@ -150,19 +155,30 @@
+     if outcome.get('status')=='sent':
+      state,line,section='done','routine email sent, see the card reply for the Gmail receipt','done'
+     elif outcome.get('status')=='failed':
+-     state,line,section='waiting_on_you','timed email was not sent, review the proposal','needs_you'
+-     ask_anyway_reason='The timed email was refused before sending. Sebastian must review the proposal before retrying.'
++     state,line,section='blocked','timed email was not sent, ted must review the proposal','up_next'
+     elif outcome.get('status')=='uncertain':
+-     state,line,section='waiting_on_you','email send result uncertain, check Gmail Sent before retrying','needs_you'
+-     ask_anyway_reason='The email send result is uncertain. Sebastian must reconcile Gmail Sent before any retry.'
++     state,line,section='blocked','email send result uncertain, ted must reconcile Gmail Sent before retrying','up_next'
++   elif job.get('status') in ('done','finished'):
++    completed=max(float(job.get('last_activity') or 0),float(job.get('started_at') or 0))
++    report=directory/'REPORT.md'
++    if report.is_file():completed=max(completed,report.stat().st_mtime)
++    if stamp((card.get('answer') or {}).get('created_at'))>completed:continue
++    state,line,section='blocked','ted review','up_next'
+    else:
+     report=directory/'REPORT.md'
+     if report.is_file() and report.stat().st_mtime>=max(float(job.get('started_at') or 0),stamp((card.get('answer') or {}).get('created_at'))):
+-     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'needs_you'}.get(state)
+-     if section=='needs_you':ask_anyway_reason='The worker report has unfinished work that Sebastian must review before this card can continue.'
++     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'up_next'}.get(state)
+     elif job.get('pid') or job.get('status') in ('done','failed','finished') or age>=SIX_HOURS:
+-     state,line,section='blocked','worker stopped without a current report, review and restart the card','needs_you'
+-     ask_anyway_reason='The worker stopped without a current report. Sebastian must review the card before work can resume.'
++     state,line,section='blocked','worker stopped without a current report, ted needs to review recovery','up_next'
++  if section=='needs_you' or state=='waiting_on_you':
++   mockups=[]
++   if re.search(r'\b(?:mockup|batch|design|copy|headline|write|type)\b',line or '',re.I):
++    try:
++     from mockup_client import call as mockup_call
++     mockups=mockup_call()['mockups']
++    except (RuntimeError,KeyError,TypeError):failed+=1;continue
++   if decision(card,line,mockups) is None:
++    state,line,section='blocked',TED_LINE,'up_next';ask_anyway_reason=None
+   if not line or (state==card.get('live_state') and line==card.get('live_status') and not section):continue
+   try:
+    update(card['id'],state,line,section=section,expected_section='ted_doing',expected_updated_at=card.get('updated_at'),**({'ask_anyway_reason':ask_anyway_reason} if ask_anyway_reason else {}));changed+=1
+@@ -171,6 +187,9 @@
+ 
+ 
+ def main():
++ if reconciler_enabled():
++  from reconciler_runtime import main as reconcile
++  return reconcile(['--apply'])
+  # This scheduled routine belongs exclusively on the mini.
+  import subprocess
+  computer=subprocess.run(['/usr/sbin/scutil','--get','ComputerName'],capture_output=True,text=True).stdout.lower()

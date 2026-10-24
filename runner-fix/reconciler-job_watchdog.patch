@@ -1,0 +1,19 @@
+--- job_watchdog.py
++++ job_watchdog.py
+@@ -12,6 +12,7 @@
+ import socket
+ import subprocess
+ import sys
++from runner_admission import reconciler_enabled
+ import time
+ import uuid
+ 
+@@ -406,6 +407,8 @@
+     parser.add_argument('--config', type=Path, default=BOARD / 'job-watchdog.json')
+     parser.add_argument('--state', type=Path, default=STATE)
+     args = parser.parse_args(argv)
++    if reconciler_enabled() and (args.recover or args.enforce):
++        raise RuntimeError('Recovery belongs to the card reconciler')
+     if args.probe:
+         print(json.dumps(observe(args.root)))
+         return 0

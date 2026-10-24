@@ -27,6 +27,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <link rel="stylesheet" href="roadmap-v3.css">
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="decide-stack.css">
+<link rel="stylesheet" href="aging-wip.css">
 <link rel="icon" href="assets/ted.svg" type="image/svg+xml">
 </head>
 <body>
@@ -35,6 +36,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <div class="shell">
 <header class="masthead"><div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><h1>Ted Board</h1><p>tap it, i'll handle the rest.</p></div></div><button class="icon-button" id="refresh" aria-label="Refresh" title="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg></button></header>
 <nav class="tab-wrap" aria-label="Projects"><div class="tabs" role="tablist" aria-label="Projects" id="tabs"></div></nav>
+<p id="aging-banner" class="aging-banner" role="status" aria-live="polite" hidden></p>
 <div id="notice" class="status" role="status" aria-live="polite"></div>
 <p id="fresh-status" class="fresh-status" role="status" aria-live="polite"></p>
 <p id="ted-health" class="fresh-status" role="alert" hidden></p>
@@ -51,6 +53,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <script>installMarkupV3(MockupsV3);</script>
 <script src="control-center.js"></script>
 <script src="board-status.js"></script>
+<script src="aging-wip.js"></script>
 <script src="theme.js"></script>
 <script src="spaces-v3.js"></script>
 <script src="roadmap-v3.js"></script>
@@ -62,7 +65,7 @@ const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board'
 const POD_PULSE_ERROR='Pod updates could not load. Refresh to try again.';
 const SECTIONS=[['needs_you','Needs you'],['ted_doing',"Ted’s doing"],['up_next','Up next'],['done','Done']];
 const $=id=>document.getElementById(id);
-const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],jobsLoaded:false,loadError:'',jobsError:'',jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
+const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],reconciliation:null,jobsLoaded:false,loadError:'',jobsError:'',jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
 const memory=new Map();let storageUnavailable=false;
 const storage={get(k){try{return localStorage.getItem(k)??memory.get(k)??null}catch{storageUnavailable=true;return memory.get(k)??null}},set(k,v){memory.set(k,v);try{localStorage.setItem(k,v);return true}catch{storageUnavailable=true;return false}},remove(k){memory.delete(k);try{localStorage.removeItem(k)}catch{storageUnavailable=true}}};
 let key=storage.get('ted-board-key')||'';
@@ -173,11 +176,13 @@ function resetForKeyChange(){
  state.loadRequestId++;
  state.loading=false;state.loaded=false;state.loadError='';state.jobsError='';state.cards=[];
  state.podPulse=[];state.podPulseError=false;state.openPods.clear();
- state.jobsRequestId++;state.jobsLoading=false;state.jobsLoaded=false;state.jobs=[];state.approvals=[];
+ state.jobsRequestId++;state.jobsLoading=false;state.jobsLoaded=false;state.jobs=[];state.approvals=[];state.reconciliation=null;renderAgingBanner();
  state.freshRequestId++;freshSending=false;freshState=null;
  updateTedChat();
  controlCenter.reset();
 }
+function agingView(){return AgingWip.prepare({reconciliation:state.reconciliation,cards:state.cards,jobs:state.jobs,approvals:state.approvals,loaded:state.jobsLoaded,error:state.jobsError})}
+function renderAgingBanner(){const banner=$('aging-banner'),text=key?agingView().banner:'';banner.hidden=!text;if(banner.textContent!==text)banner.textContent=text}
 function announce(text,error=false){$('notice').textContent=text;$('notice').className='status'+(error?' error':'')}
 function options(card){return (Array.isArray(card.options)?card.options:[]).slice(0,4).map(o=>typeof o==='string'?{label:o,value:o}:o).filter(o=>o&&typeof o.label==='string'&&typeof o.value==='string')}
 function steps(card){return (Array.isArray(card.steps)?card.steps:[]).filter(s=>s&&typeof s.text==='string')}
@@ -243,7 +248,7 @@ function renderCard(card){
  return article;
 }
 function render(){
- renderFresh();renderTabs();const main=$('main');
+ renderFresh();renderAgingBanner();renderTabs();const main=$('main');
  const deciding=Boolean(key)&&decide.active();document.body.classList.toggle('deciding',deciding);main.setAttribute('role',deciding?'main':'tabpanel');if(deciding)main.removeAttribute('aria-labelledby');
  /* Keep each mockup row's horizontal position and the page position across the 10s and 20s polls, which rebuild this tab. */
  const rowScroll=new Map();main.querySelectorAll('.mockup-row[aria-label]').forEach(r=>rowScroll.set(r.getAttribute('aria-label'),r.scrollLeft));const pageY=window.scrollY;
@@ -326,14 +331,14 @@ function renderApprovals(card,article){
 }
 async function loadJobs(){
  if(!key||state.jobsLoading)return;state.jobsLoading=true;state.jobsError='';const requestId=++state.jobsRequestId,requestKey=key;
- try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);state.jobs=Array.isArray(data.jobs)?data.jobs:[];renderFresh();state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
+ try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);state.jobs=Array.isArray(data.jobs)?data.jobs:[];renderFresh();state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.reconciliation=data.reconciliation&&typeof data.reconciliation==='object'?data.reconciliation:null;state.jobsLoaded=true;renderAgingBanner();renderTabs();
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
  /* Mockups shows no jobs data, so a rebuild there only resets the swipe the viewer is in. */
  if(ControlCenterV3.isMockups(state.project))renderFresh();
  else if(!editing&&!state.busy.size){render();document.querySelectorAll('details:not(.pod-row)').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true})}
- }catch(e){if(requestId===state.jobsRequestId&&requestKey===key){state.jobsError=e.message;state.jobsLoaded=false;if(state.project==='Jobs'||decide.active()){announce(e.message,true);render();}}}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
+ }catch(e){if(requestId===state.jobsRequestId&&requestKey===key){state.jobsError=e.message;state.jobsLoaded=false;renderAgingBanner();if(state.project==='Jobs'||decide.active()){announce(e.message,true);render();}}}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
 async function control(action,body,transport={}){
  if(action==='approval'){const cardId=state.approvals.find(a=>a.id===body.approval_id)?.card_id;if(cardId)decide.cancelQueued(cardId);}
@@ -342,6 +347,7 @@ async function control(action,body,transport={}){
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);
+ AgingWip.render(main,agingView(),{onOpenCard:openJobCard});
  const laneRows=state.jobs.filter(j=>j.lane_summary===true&&['claude-lane-main','claude-lane-design','claude-lane-research'].includes(j.id));
  if(laneRows.length){
   const lanes=el('section','claude-lanes');lanes.setAttribute('aria-label','Claude account lanes');lanes.append(el('h3',null,'Claude account lanes'),el('p','job-meta','Usage from dispatched jobs only. Plan-wide usage unavailable from CLI.'));
