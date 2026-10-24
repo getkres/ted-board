@@ -1,0 +1,300 @@
+--- sessions.py
++++ sessions.py
+@@ -13,13 +13,30 @@
+ import uuid
+ from board_client import BoardConflict, BoardGone, call
+ from live_status import instructions, publish_live
++from inbox_policy import failure_kind, FAILURE_LINE, approval_line
++from runner_admission import admission_state, can_admit, priority_key, stamp, reconciler_enabled
++
++LEASE_SECONDS=150
++
++
++def lease_matches(s,turn,pid,expected,token):
++ lease=s.get('lease') if isinstance(s.get('lease'),dict) else {}
++ return bool(token and expected) and s.get('status')=='running' and s.get('turn')==turn and s.get('pid')==pid and s.get('identity')==expected and s.get('lease_token')==token and all(lease.get(k)==v for k,v in dict(token=token,turn=turn,pid=pid,identity=expected).items())
++
++
++def matching_result(s,result):
++ if not isinstance(result,dict) or not isinstance(result.get('ok'),bool) or not isinstance(result.get('text',''),str):return False
++ if not s.get('lease_token'):
++  # A completed legacy turn is drained before requiring its absent lease.
++  return not any(result.get(k) for k in ('lease_token','turn','pid','identity'))
++ return lease_matches(s,result.get('turn'),result.get('pid'),result.get('identity'),result.get('lease_token'))
+ 
+ ROOT=Path(__file__).resolve().parent
+ CODEX='/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
+ CLAUDE=str(Path.home()/'.local/bin/claude')
+ PYTHON='/Library/Developer/CommandLineTools/usr/bin/python3'
+ DATABASE_GATE="DATABASE GATE (Sebastian 10-16, hard): NEVER run INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, migrations, or purge_account against Supabase project wqnrortftkffmbeugjky yourself. Read-only SELECTs are fine. If the task needs a database change, write the exact SQL plus a backup and rollback into apply.sql in this job dir, set REPORT.md to 'NEEDS TED REVIEW', and stop. Ted reviews and applies it."
+-RULES=(DATABASE_GATE+"\nNever print secrets. No em dash anywhere; always use the Oxford comma. Work in this job directory, use isolated worktrees and PRs for repo changes.  Use Google Chrome only for any browser work, never Safari."
++RULES=(DATABASE_GATE+"\nNever print secrets. No em dash anywhere; always use the Oxford comma. Work in this job directory, use isolated worktrees and PRs for repo changes.  Use Google Chrome only for any browser work, never Safari. "
+  "Draft external sends and spending only: write draft-email.json or spend.json with summary, exact text, recipients or amount, and execution instructions, then stop for card approval. "
+  "Narrow veto exception: only for a queued veto_cleared proposal, the dedicated veto worker invokes the server to send the exact cleared routine email to the already known recipient. "
+  "Timed drafts are sent only through the dedicated veto worker and the server veto_send gate. General model turns cannot execute a timed send. The server checks veto_details, status cleared, the same card revision, confidence at least 80 percent, "
+@@ -123,6 +140,14 @@
+    else:atomic(self.path,data)
+  def read(self):
+   with self.locked() as data:return json.loads(json.dumps(data))
++ def renew_lease(self,card_id,turn,pid,expected,token):
++  with self.locked() as data:
++   s=data['sessions'].get(card_id,{})
++   now=time.time()
++   if not lease_matches(s,turn,pid,expected,token) or stamp(s.get('lease_expires_at'))<=now or stamp(s.get('lease',{}).get('expires_at'))<=now or identity(pid)!=expected:return False
++   s['lease'].update(renewed_at=now,expires_at=now+LEASE_SECONDS)
++   s.update(lease_expires_at=now+LEASE_SECONDS)
++   return True
+  def enqueue(self,card,message,receipt_id,engine='claude',brief=''):
+   if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude','sonnet'):raise ValueError('Invalid card or engine')
+   veto_id=str(receipt_id)[5:] if str(receipt_id).startswith('veto-') else None
+@@ -138,32 +163,111 @@
+     s=dict(id='card-'+cid,card_id=cid,engine=engine,session_id=None,cwd=str(d.resolve()),status='idle',last_line='Queued',started_at=None,last_activity=time.time(),pid=None,identity='',queue=[],title=card['title'],brief=brief or card.get('body',''),thread='',seen_artifacts=[])
+     data['sessions'][cid]=s
+    s.update(title=card['title'],thread='\n'.join(m.get('who','')+': '+m.get('text','') for m in card.get('messages',[]))[-30000:])
++   for key in ('priority_class','explicit_ask','metadata','side_effecting','owner','owner_since','owner_assigned_at','action_started_at','next_action_due','created_at','updated_at','due_at','deadline_at','last_transition_at','review_due_at'):
++    if key in card:s[key]=card[key]
++   s.setdefault('first_enqueued_at',time.time())
++   s.setdefault('retry_count',0)
++   if not str(receipt_id).startswith('reconciler-retry-'):
++    s['retry_count']=0;s.pop('retry_at',None)
++   s['decision_scope']={k:card.get(k) for k in ('title','body','decision_kind','project')}
+    if s['status']=='waiting_approval':
+     for a in data['approvals'].values():
+      if a['card_id']==cid and a['status']=='pending':a.update(status='superseded',sync_status=True)
+     s['status']='queued'
+    veto_fields={'veto_proposal_id':veto_id,'veto_card_revision':card['revision']} if veto_id else {}
+-   s['queue'].append(dict(id=str(uuid.uuid4()),message=message,kind='work',**veto_fields));s['last_activity']=time.time()
+-   if s['status'] not in ('running','waiting_approval'):s['status']='queued'
++   s['queue'].append(dict(id=str(uuid.uuid4()),message=message,kind='work',enqueued_at=time.time(),**veto_fields));s['last_activity']=time.time()
++   if s['status'] not in ('running','waiting_approval') and not (reconciler_enabled() and s['status']=='dead_letter'):s['status']='queued'
+    data['receipts'].append(str(receipt_id))
+    return True
+  def _out(self,data,s,text,token):
+   data['outbox'].append(dict(card_id=s['card_id'],text=text.replace(chr(8212),'-')[:2000] or 'Worker returned no answer.',token=token))
+  def _fail_artifact(self,data,s):
+-  line='approval artifact is unsafe or over 60 kb; fix it, then reply to retry'
++  line='approval artifact failed safety checks, ted needs to repair the packet'
+   already_reported=s.get('artifact_error')==line
+   s.update(status='failed',queue=[],last_line=line,artifact_error=line,last_activity=time.time())
+   for approval in data['approvals'].values():
+    if approval['card_id']==s['card_id'] and approval['status'] in ('pending','approved','reviewing'):
+     approval.update(status='superseded',reason='approval artifact failed safety checks',sync_status=True)
+   if not already_reported:
+-   self._out(data,s,'Approval stopped: the artifact is unsafe, unreadable, or over 60 KB. Fix the file, then reply to retry.','artifact-error-'+uuid.uuid4().hex)
+- def tick(self):
++   self._out(data,s,'Ted review: the approval artifact is unsafe, unreadable, or over 60 KB. Ted will repair the packet.','artifact-error-'+uuid.uuid4().hex)
++  s['failure_publish_pending']=True
++ def _worker_failure(self,data,s,kind,retry=False):
++  active=s.get('active_turn') or {}
++  group=active.get('recovery_group') or s.get('turn') or uuid.uuid4().hex
++  s.update(failure_kind=kind,failure_publish_pending=True,last_line=FAILURE_LINE)
++  if s.get('failure_note_group')!=group:
++   self._out(data,s,'Ted review: a worker failed. Ted owns bounded recovery from the job files.' if reconciler_enabled() else 'Ted review: a worker failed. Ted owns recovery from the job files. Timeout and missing-result work gets one automatic retry, then holds for Ted.','worker-failure-'+group)
++   s['failure_note_group']=group
++  if retry and not active.get('recovery_attempt') and not s.get('queue'):
++   s['queue'].insert(0,dict(id=str(uuid.uuid4()),kind='work',message='Resume from your files. Read BRIEF.md and REPORT.md, inspect saved artifacts, and continue the unfinished work. Check prior effects before repeating any action.',recovery_attempt=1,recovery_group=group))
++ def _queue_publication(self,data,s,state,line,kind,**kwargs):
++  item=dict(card_id=s['card_id'],state=state,line=line,kind=kind,kwargs=kwargs,turn=s.get('turn'),lease_token=s.get('lease_token'),status=s.get('status'))
++  item['id']=hashlib.sha256(json.dumps(item,sort_keys=True).encode()).hexdigest()
++  data.setdefault('publications',{})[s['card_id']]=item
++ def _flush_publications(self):
++  # Serialize publishers without holding the session lock that leases require.
++  with (self.root/'.publications.lock').open('a') as lock:
++   os.chmod(lock.name,0o600)
++   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++   except BlockingIOError:return
++   with self.locked() as data:pending=json.loads(json.dumps(data.get('publications',{})))
++   for cid,item in pending.items():
++    with self.locked() as data:
++     s=data['sessions'].get(cid,{})
++     current=data.get('publications',{}).get(cid,{})
++     valid=current.get('id')==item['id'] and all(s.get(key)==item.get(key) for key in ('turn','lease_token','status'))
++     if valid and item['state']=='running':
++      valid=lease_matches(s,s.get('turn'),s.get('pid'),s.get('identity'),s.get('lease_token')) and stamp(s.get('lease_expires_at'))>time.time()
++     if not valid:
++      if current.get('id')==item['id']:data['publications'].pop(cid,None)
++      continue
++    try:confirmed=publish_live(cid,item['state'],item['line'],**item['kwargs'])
++    except (OSError,RuntimeError):confirmed=False
++    if not confirmed:continue
++    with self.locked() as data:
++     current=data.get('publications',{}).get(cid,{})
++     s=data['sessions'].get(cid,{})
++     if current.get('id')!=item['id']:continue
++     data['publications'].pop(cid,None)
++     if not all(s.get(key)==item.get(key) for key in ('turn','lease_token','status')):continue
++     if item['kind']=='failure':s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
++     elif item['kind'] in ('start','resume'):s.pop('recovery_section',None)
++ def _publish_failure(self,s,data=None):
++  if s.get('failure_publish_pending'):
++   if data is not None:
++    self._queue_publication(data,s,'blocked',FAILURE_LINE,'failure',section='up_next');return
++   if publish_live(s['card_id'],'blocked',FAILURE_LINE,section='up_next'):
++    s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
++ def tick(self,reconcile=False):
++  managed=reconciler_enabled()
++  if managed and not reconcile:return
+   with self.locked() as data:
++   for s in data['sessions'].values():
++    self._publish_failure(s,data if managed else None)
++    if s.get('recovery_section') and s['status']=='running' and (not managed or (lease_matches(s,s.get('turn'),s.get('pid'),s.get('identity'),s.get('lease_token')) and stamp(s.get('lease_expires_at'))>time.time())) and alive(s.get('pid'),s.get('identity')):
++     if managed:self._queue_publication(data,s,'running','worker is resuming from the saved job files','resume',section='ted_doing',expected_section='up_next')
++     elif publish_live(s['card_id'],'running','worker is resuming from the saved job files',section='ted_doing',expected_section='up_next'):
++      s.pop('recovery_section',None)
+    for s in data['sessions'].values():
+     if s['status']!='running':continue
+     prefix=Path(s['cwd'])/s['turn'];result=Path(str(prefix)+'.result.json')
+-    if alive(s.get('pid'),s.get('identity')):
++    r=None
++    if managed:
++     if result.exists():
++      try:
++       candidate=json.loads(result.read_text())
++       if matching_result(s,candidate):r=candidate
++      except (OSError,ValueError):pass
++     if r is None:
++      if not lease_matches(s,s.get('turn'),s.get('pid'),s.get('identity'),s.get('lease_token')):reason='lease_missing'
++      elif stamp(s.get('lease_expires_at'))<=time.time() or stamp(s['lease'].get('expires_at'))<=time.time():reason='lease_expired'
++      elif not alive(s.get('pid'),s.get('identity')):reason='worker_missing'
++      else:reason=None
++      if reason:
++       s.update(recovery_required=reason,last_line=reason.replace('_',' ')+'; ted recovery pending')
++       continue
++      s.pop('recovery_required',None)
++    if r is None and alive(s.get('pid'),s.get('identity')):
+      activity_path=Path(str(prefix)+'.events')
+      if activity_path.exists():
+       s['last_activity']=max(s['last_activity'],activity_path.stat().st_mtime)
+@@ -179,7 +283,15 @@
+        if event.get('type') in ('item.started','item.completed'):
+         s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
+      s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);continue
+-    r=json.loads(result.read_text()) if result.exists() else dict(ok=False,text='Worker stopped without a final result. Reply to retry.')
++    if r is None:
++     try:
++      r=json.loads(result.read_text()) if result.exists() else dict(ok=False,failure_kind='no_result',text='Worker stopped without a final result.')
++      if not isinstance(r,dict) or not isinstance(r.get('ok'),bool) or not isinstance(r.get('text'),str):raise ValueError('Invalid worker result')
++     except (OSError,ValueError):r=dict(ok=False,failure_kind='crash',text='Worker result was unreadable, ted needs to inspect the job files.')
++    if r.get('ok') and not r.get('text','').strip():r.update(ok=False,failure_kind='no_result')
++    if r.get('text','').startswith('Worker returned no final answer.'):
++     r.update(ok=False,failure_kind='no_result')
++    s.pop('recovery_required',None)
+     if r.get('session_id') and not s.get('reviewing'):s['session_id']=r['session_id']
+     veto_revision=s.pop('active_veto_revision',None)
+     if veto_revision is not None:
+@@ -187,7 +299,12 @@
+      if outcome not in ('sent','failed','uncertain') or bool(r.get('ok'))!=(outcome=='sent'):outcome='uncertain'
+      s['veto_outcome']=dict(status=outcome,revision=veto_revision)
+     s.update(status='done' if r['ok'] else 'failed',last_activity=time.time(),pid=None,last_line=r.get('text','')[-500:])
+-    self._out(data,s,r.get('text',''),s['turn'])
++    failed=not r['ok'] and not s.get('kill_requested_at')
++    if failed:
++     kind=r.get('failure_kind') or failure_kind(r.get('text')) or 'crash'
++     self._worker_failure(data,s,kind,retry=not managed and kind in ('timeout','no_result') and not s.get('reviewing') and veto_revision is None)
++     self._publish_failure(s,data if managed else None)
++    else:self._out(data,s,r.get('text',''),s['turn'])
+     if s.get('reviewing'):
+      aid=s.pop('reviewing');a=data['approvals'][aid]
+      a['status']='done' if r['ok'] and r.get('text','').strip().splitlines()[-1:] == ['APPLY_OK'] else 'failed'
+@@ -196,15 +313,23 @@
+     if s.get('kill_requested_at'):
+      s.update(status='failed',last_line='Stopped on request');s.pop('kill_requested_at',None)
+     if s['queue']:s['status']='queued'
++    elif s['status']=='done' and veto_revision is None:
++     if managed:self._queue_publication(data,s,'blocked','ted review','complete',section='up_next')
++     else:publish_live(s['card_id'],'blocked','ted review',section='up_next')
+    running=sum(s['status']=='running' for s in data['sessions'].values())
+    claude_running=sum(s['status']=='running' and s.get('engine')=='claude' for s in data['sessions'].values())
+    sonnet_running=sum(s['status']=='running' and s.get('engine')=='sonnet' for s in data['sessions'].values())
+-   overloaded=os.getloadavg()[0]>2*(os.cpu_count() or 8)
+-   for s in data['sessions'].values():
+-    if running>=64 or overloaded:break
+-    if s['status']=='running' or not s['queue']:continue
+-    if s.get('engine')=='claude' and s['queue'][0]['kind']!='review' and claude_running>=2:continue
+-    if s.get('engine')=='sonnet' and sonnet_running>=8:continue
++   overloaded=False if managed else os.getloadavg()[0]>2*(os.cpu_count() or 8)
++   host=admission_state() if managed else None
++   pending=sorted(data['sessions'].values(),key=priority_key) if managed else data['sessions'].values()
++   for s in pending:
++    if not managed and (running>=64 or overloaded):break
++    if s['status']=='running' or not s['queue'] or s.get('failure_publish_pending'):continue
++    if managed:
++     if s.get('status')=='dead_letter' or stamp(s.get('retry_at'))>time.time():continue
++     if not can_admit(s,s['queue'][0],[other for other in data['sessions'].values() if other['status']=='running'],host['cap']):continue
++    elif s.get('engine')=='claude' and s['queue'][0]['kind']!='review' and claude_running>=2:continue
++    if not managed and s.get('engine')=='sonnet' and sonnet_running>=8:continue
+     turn=s['queue'][0]
+     if s['status']=='waiting_approval' and turn['kind']!='review':continue
+     if turn['kind']=='review':
+@@ -220,6 +345,11 @@
+      s['reviewing']=a['id'];a.update(status='reviewing',sync_status=True)
+      s['review_context']='You are the fresh Ted approval reviewer. Sebastian explicitly approved ONLY the exact artifact below. Re-read the actual files in cwd and confirm they match. For DB changes require a usable backup, rollback, and explicit identity guards in apply.sql. Refuse missing or unsafe safeguards. For email/spend require exact recipient, text, amount, and executable instructions; refuse ambiguity. Execute only the approved action. Never broaden the scope, reveal secrets, or send unrelated messages. End with a line exactly APPLY_OK only after verified success, otherwise REVIEW_BLOCKED with the reason. No em dash.\nApproved snapshot:\n'+a['content']
+     s['queue'].pop(0);s['turn']=turn['id'];s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
++    s['active_turn']=dict(turn);s.setdefault('retry_count',0);s.pop('retry_at',None);s.pop('recovery_required',None)
++    if managed:
++     now=time.time();token=uuid.uuid4().hex
++     s.update(lease_token=token,lease_expires_at=now+LEASE_SECONDS,lease=dict(token=token,turn=turn['id'],pid=None,identity='',renewed_at=now,expires_at=now+LEASE_SECONDS))
++    s.pop('failure_kind',None)
+     s.pop('veto_outcome',None)
+     if turn.get('veto_proposal_id'):s['active_veto_revision']=turn['veto_card_revision']
+     prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
+@@ -230,24 +360,44 @@
+       os.chmod(log.name,0o600)
+       p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
+      s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=s.get('engine')=='claude';sonnet_running+=s.get('engine')=='sonnet'
++     if managed:s['lease'].update(pid=s['pid'],identity=s['identity'])
+      line=review_live_line(a['kind']) if turn['kind']=='review' else ('started: '+s['title'].lower().replace(chr(8212),','))[:240]
+-     publish_live(s['card_id'],'running',line,section='ted_doing')
++     if managed:self._queue_publication(data,s,'running',line,'start',section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {}))
++     elif publish_live(s['card_id'],'running',line,section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {})):
++      s.pop('recovery_section',None)
+     except OSError:
+-     s.update(status='failed',pid=None);self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
++     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s,data if managed else None)
+      veto_revision=s.pop('active_veto_revision',None)
+      if veto_revision is not None:s['veto_outcome']=dict(status='failed',revision=veto_revision)
+      if turn['kind']=='review':a.update(status='failed',reason='reviewer could not start',sync_status=True);s.pop('reviewing',None)
++  if managed:self._flush_publications()
+  def flush(self):
++  if reconciler_enabled():
++   # Board note tokens make replay safe after a crash between delivery and ack.
++   with (self.root/'.outbox.lock').open('a') as lock:
++    os.chmod(lock.name,0o600)
++    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++    except BlockingIOError:return
++    with self.locked() as data:pending=json.loads(json.dumps(data['outbox']))
++    for item in pending:
++     try:confirmed=deliver(item)
++     except (OSError,RuntimeError):confirmed=False
++     if not confirmed:continue
++     with self.locked() as data:
++      # Preserve concurrently added or modified entries, even with the same token.
++      if item in data['outbox']:data['outbox'].remove(item)
++   return
+   with self.locked() as data:
+    remaining=[]
+    for item in data['outbox']:
+     if not deliver(item):remaining.append(item)
+    data['outbox']=remaining
+- def collect_approvals(self):
++ def collect_approvals(self,reconcile=False):
++  if reconciler_enabled() and not reconcile:return
+   with self.locked() as data:
+    db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
+    for s in data['sessions'].values():
+-    if s['status'] in ('running','queued'):continue
++    if s['status'] in ('running','queued','failed') or s.get('failure_kind'):continue
+     for kind in ('db','email','spend'):
+      try:a=artifact(s['cwd'],kind)
+      except (ValueError,OSError):
+@@ -255,6 +405,10 @@
+       db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
+       break
+      if not a or a['digest'] in s['seen_artifacts']:continue
++     if not approval_line(kind,s.get('decision_scope') or {}):
++      s['seen_artifacts'].append(a['digest']);s['last_line']='ted review needed for the prepared packet'
++      self._out(data,s,'Ted review: a prepared packet needs operational review. It is not a Sebastian decision.','ted-packet-'+a['digest'])
++      continue
+      if kind=='db' and db_busy:s['status']='waiting_approval';s['last_line']='Waiting for the current DB approval to finish';continue
+      aid='approval-'+uuid.uuid4().hex
+      a.update(id=aid,card_id=s['card_id'],summary={'db':'Apply database SQL after a fresh safety review','email':'Send the exact drafted email','spend':'Execute the exact proposed spend'}[kind],status='pending')

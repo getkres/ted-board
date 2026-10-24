@@ -1,0 +1,84 @@
+--- live_status.py
++++ live_status.py
+@@ -5,10 +5,10 @@
+ import sys
+ import board_client
+ from board_client import call
++from inbox_policy import decision, failure_kind, FAILURE_LINE, TED_LINE
+ 
+ STATES=('running','blocked','waiting_on_you','done')
+-SECTIONS=('done','needs_you','ted_doing')
+-REAPER_APPROVAL_LINE='review the pending approval on this card'
++SECTIONS=('done','needs_you','ted_doing','up_next')
+ REAPER_BLOCKED_LINE='rule review needed before asking you'
+ 
+ 
+@@ -17,21 +17,42 @@
+  if state not in STATES or (section is not None and section not in SECTIONS):raise ValueError('Invalid state or section')
+  if not isinstance(line,str) or not line.strip() or len(line)>240 or re.search(r'[\x00-\x1f\x7f\u2014]',line):raise ValueError('Use one short status line, at most 240 characters')
+  accepted_reason=None
++ if failure_kind(line) and section!='needs_you' and state!='waiting_on_you':
++  card=next((item for item in board_client.cards() if item.get('id')==card_id),None)
++  if card and card.get('section')=='up_next' and card.get('live_state')=='blocked' and card.get('live_status')==FAILURE_LINE:return card
++  if not card or card.get('section') not in ('ted_doing','needs_you'):raise RuntimeError('Failure handoff scope could not be confirmed')
++  body=dict(card_id=card_id,state='blocked',line=FAILURE_LINE,section='up_next',expected_section=card['section'],expected_updated_at=card.get('updated_at'))
++  body.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
++  result=call('live_status',**body)
++  if not result.get('ok') or not result.get('card'):raise RuntimeError('Failure handoff was not confirmed')
++  return result['card']
+  if section=='needs_you' or state=='waiting_on_you':
+   card=next((item for item in board_client.cards() if item.get('id')==card_id),None)
+   if not card or not isinstance(card.get('project'),str):raise RuntimeError('Card scope could not be confirmed')
+   if card.get('section')!='ted_doing':raise RuntimeError('Card is no longer in Ted doing')
++  mockups=[]
++  if re.search(r'\b(?:mockup|design|batch|pick|choose|copy|headline|write|type)\b',line,re.I):
++   from mockup_client import call as mockup_call
++   payload=mockup_call()
++   if not isinstance(payload,dict) or not isinstance(payload.get('mockups'),list):raise RuntimeError('Mockup scope could not be confirmed')
++   mockups=payload['mockups']
++  if decision(card,line,mockups) is None:
++   body=dict(card_id=card_id,state='blocked',line=FAILURE_LINE if failure_kind(line) else TED_LINE,section='up_next',expected_section='ted_doing',expected_updated_at=card.get('updated_at'))
++   body.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
++   result=call('live_status',**body)
++   if not result.get('ok') or not result.get('card'):raise RuntimeError('Ted review handoff was not confirmed')
++   return result['card']
++  section='needs_you'
++  if state!='waiting_on_you':state='waiting_on_you'
+   stored_kind=card.get('decision_kind') or 'other'
+   if kind is not None and card.get('decision_kind') and kind!=card['decision_kind']:raise ValueError('Decision kind differs from the card')
+   reaper=guards.get('expected_updated_at') is not None
+-  if reaper and line.strip().lower()==REAPER_APPROVAL_LINE and apply_rule_id is None and ask_anyway_reason is None:
+-   ask_anyway_reason='A pending approval artifact needs Sebastian to review its exact contents.'
+   try:
+    resolution=board_client.resolve_rule(card['project'],kind or stored_kind,card_id,apply_rule_id,ask_anyway_reason)
+   except board_client.RuleResolutionRequired:
+    if not reaper:raise
+    if card.get('live_state')=='blocked' and card.get('live_status')==REAPER_BLOCKED_LINE:return card
+-   blocked=dict(card_id=card_id,state='blocked',line=REAPER_BLOCKED_LINE,expected_section='ted_doing')
++   blocked=dict(card_id=card_id,state='blocked',line=REAPER_BLOCKED_LINE,section='up_next',expected_section='ted_doing')
+    blocked.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
+    result=call('live_status',**blocked)
+    if not result.get('ok') or not result.get('card'):raise RuntimeError('Rule review hold was not confirmed')
+@@ -51,7 +72,9 @@
+ def instructions(card_id):
+  command='python3 '+str(__import__('pathlib').Path(__file__).resolve())+' '+card_id
+  return ("Every time you start a meaningful step, run "+command+" running '<what you are doing now>'. "
+-         "When you finish: if done, "+command+" done '<one line result>' --section done; "
++         "When a worker turn finishes successfully, "+command+" blocked 'ted review' --section up_next; "
++         "Worker failures and operational blockers belong in up_next with state blocked, never needs_you. "
++         "Needs you is only for spending, email sends, legal or contract decisions, pricing, gated production writes, fresh mockup taste picks, and copy Sebastian writes. "
+          "if you need Sebastian, "+command+" waiting_on_you '<exact thing he must do>' --section needs_you. "
+          "If a matching rule exists, choose --apply-rule <rule-id> to record its use without an ask, or --ask-anyway-reason '<why the rule does not settle this>' to make the ask; "
+          "if stuck, "+command+" blocked '<why>'. Use short lowercase copy, never include secrets, URLs with keys, or raw logs. "
+@@ -59,9 +82,9 @@
+          "Write the same final state and one-line reason at the top of REPORT.md as LIVE_STATE: <state> and LIVE_STATUS: <line>.")
+ 
+ 
+-def publish_live(card_id,state,line,section=None):
++def publish_live(card_id,state,line,section=None,**guards):
+  """Best effort at spawn. The reaper retries when transport is unavailable."""
+- try:update(card_id,state,line,section)
++ try:update(card_id,state,line,section,**guards)
+  except (RuntimeError,ValueError):return False
+  return True
+ 

@@ -1,0 +1,18 @@
+--- card.py
++++ card.py
+@@ -73,6 +73,15 @@
+  cid=card_id if card_id is not None else 'c-'+uuid.uuid4().hex[:10]
+  if not needs_you and (apply_rule_id is not None or ask_anyway_reason is not None):raise ValueError('Rule resolution requires a Needs you card')
+  if needs_you:
++  from inbox_policy import decision
++  candidate=dict(id=cid,project=project,title=title,body=body,decision_kind=kind,section='needs_you')
++  mockups=[]
++  if re.search(r'\b(?:mockup|design|batch|pick|choose|copy)\b',body,re.I):
++   from mockup_client import call as mockup_call
++   payload=mockup_call()
++   if not isinstance(payload,dict) or not isinstance(payload.get('mockups'),list):raise RuntimeError('Current mockup evidence required')
++   mockups=payload['mockups']
++  if decision(candidate,body,mockups) is None:raise ValueError('Operational work belongs to Ted, not the decision inbox')
+   kind=kind or 'other'
+   resolution=resolve_rule(project,kind,cid,apply_rule_id,ask_anyway_reason)
+   if resolution['outcome']=='rule_applied':return resolution

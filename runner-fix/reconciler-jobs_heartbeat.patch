@@ -1,0 +1,33 @@
+--- jobs_heartbeat.py
++++ jobs_heartbeat.py
+@@ -6,6 +6,7 @@
+ import re
+ import subprocess
+ import sys
++from runner_admission import reconciler_enabled
+ import time
+ from board_client import call
+ from sessions import Store, identity
+@@ -35,7 +36,9 @@
+ 
+ 
+ def main():
+- store=Store();store.controls(call('control').get('commands',[]));store.tick();store.collect_approvals();store.sync_approval_status();store.flush()
++ store=Store()
++ if not reconciler_enabled():
++  store.controls(call('control').get('commands',[]));store.tick();store.collect_approvals();store.sync_approval_status();store.flush()
+  jobs,approvals=store.snapshot();jobs+=untracked(jobs)
+  # Avoid a removed card making the whole heartbeat fail.
+  from board_client import cards
+@@ -48,6 +51,11 @@
+  clearance=call('veto_clear_due')
+  if not isinstance(clearance,dict) or clearance.get('ok') is not True or not isinstance(clearance.get('cleared'),list):
+   raise RuntimeError('Veto clearance was not confirmed')
++ if not reconciler_enabled():
++  try:
++   from mockup_autoarchive import heartbeat_pass
++   heartbeat_pass()
++  except Exception as exc:print('Mockup auto-archive failed: '+type(exc).__name__,file=sys.stderr)
+  print('Heartbeat published: '+str(len(jobs))+' jobs, '+str(len(approvals))+' pending approvals.')
+  return 0
+ 
