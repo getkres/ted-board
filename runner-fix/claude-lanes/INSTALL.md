@@ -1,6 +1,6 @@
 # Ted's operator install steps
 
-Run these only after reviewing the PR, on the Mac mini, from the same shell. The preparation job does not execute them. Keep the lane flag false throughout this procedure. Do not use the older cap-3 or cap-16 backups as the rollback source; take a fresh backup of tonight's runner.
+Run these only after reviewing the PR, on the Mac mini, from the same shell. The preparation job does not execute them. Keep the lane flag false throughout this procedure. The revised disabled runner returns through the pre-PR paths and preserves the existing login environment, default engine, review-cap exemptions, and model arguments. Do not use the older cap-3 or cap-16 backups as the rollback source; take a fresh backup of tonight's runner.
 
 1. **Pin the reviewed bundle, and pause the existing routines.** Confirm the commit shown is the one reviewed. Avoid manual `card.py` creation or other dispatcher invocations during the install window. These four labels were read from the installed mini LaunchAgents. No new routine is created.
 

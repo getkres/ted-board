@@ -36,7 +36,7 @@ Run on the Mac mini after Ted reviews and installs the current runner bundle. Ac
 
 After the next heartbeat, new managed Opus, Sonnet, research, art, and review conversations use account 2. Aggregate caps become 4 Opus and 16 Sonnet workers when account 2 verifies, subject to the global 64-worker limit and load guard. Existing main-account conversations keep their original account and conservative 2/8 ceilings.
 
-Later, repeat steps 1 and 2 with `lane_account=3` and a different Max identity. No second flag change is needed. After the next successful account 3 readiness probe, only new research, analysis, and review conversations use account 3. Existing account 2 conversations remain pinned there. If account 3 is absent or fails verification, new research and review conversations continue on account 2; conversations already pinned to account 3 wait for it instead of moving.
+Later, repeat steps 1 and 2 with `lane_account=3` and a different Max identity. No second flag change is needed. Readiness is cached for 60 seconds. After the next successful account 3 readiness probe, only new research, analysis, and review conversations use account 3. Existing account 2 conversations remain pinned there. If account 3 is absent or fails verification, new research and review conversations continue on account 2; conversations already pinned to account 3 wait for it instead of moving.
 
 To disable future dedicated launches, Ted may repeat step 3 with `False`. Running processes finish on their current account. Queued dedicated conversations wait until reenabled. Account-wide subscription usage and interactive usage are unavailable in the Jobs telemetry; use each account's interactive `/usage` screen for those details.
 
