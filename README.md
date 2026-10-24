@@ -2,6 +2,12 @@
 
 A static, phone-first board for Sebastian and Ted. GitHub Pages serves the root of `main`, with no build step. Work on this eight-PR stack stays on its feature branches, in draft, until Ted reviews and integrates it.
 
+Phones narrower than 760px open Inbox in Decide: one card, real recorded choices, Tell Ted, and Later. Decisions disappear into a five-second cancellation window, then use the existing action API. Undo cancels every decision still in that window. Failed saves restore the card. Confirmed dismissals stay on this browser until the ask changes; Later lasts only for the page session. FYI cards share one updates pile, cleared with one Got it through the existing card actions. Reloading cancels actions still in the window.
+
+List opens the full board in one tap. The choice lasts for the browser tab session. Desktop starts in List, with a Decide button for the same stack. Explicit deep links to other views retain their target.
+
+Inbox List groups waiting cards by project, with counts and the busiest projects first. At 1400px and wider, project columns fill the screen and wrap into rows. Narrower screens retain the vertical list. Skip, or S, rotates a decision to the end of this tab's local queue and focuses the next card. Within its project, the skipped card appears last. Queue order uses guarded sessionStorage, while the small skipped tag clears on reload. Skip is also available in Decide and never records an answer or calls the action API. Not yet, Snooze, and Later retain their existing actions.
+
 The four primary tabs are Inbox, Spaces, Roadmap, and Mockups. Inbox defaults to Yours, with Ted decided, Routines, and Woke alongside it. Spaces follows the authenticated line directory into pods and agents. Roadmap shows Now, Next, Later, and Shipped. Mockups includes the review wall, rounds, compare modes, triage, and markup.
 
 Private access stays in `#k=` and is remembered on the device. Deep routes use `#tab=inbox`, `spaces`, `space:line3`, `pod:line3/media`, `agent:line3/meta-media-buyer`, `roadmap`, `roadmap:line1`, `mockups`, or `mockups:<encoded batch key>`. Browser Back and Forward work. Never publish a keyed URL.
@@ -31,8 +37,16 @@ QA_THEME=light QA_OUT=qa/pr7/light node qa/run.cjs
 QA_THEME=dark QA_OUT=qa/pr7/dark node qa/run.cjs
 ```
 
+`qa/decide.cjs` covers 390x844 decisions, Undo, Later, updates, the empty bear, existing action payloads, failed saves, account resets, new asks during the grace period, keyboard isolation, reduced motion, the 760px boundary, and horizontal overflow. Legacy list tests explicitly select List through the shared fixture.
+
+`qa/inbox-projects.cjs` covers project counts, ordering, the 1399/1400px boundary, 375/1440/2560px layouts, and Skip through buttons and S. It checks cross-project focus, reload persistence, cleared badges, denied storage, account isolation, unchanged card data, zero write requests, Not yet, H Snooze, editable fields, and focused phone decisions.
+
 `PLAYWRIGHT_MODULE` may name an installed Playwright module. Set it in the environment for every browser command when the machine's default fixture path is unavailable. Screenshots and JSON reports are under `qa/pr1/` through `qa/pr7/`. Run the theme suites sequentially. `QA_THEME` controls browser color preference, and `QA_OUT` preserves earlier evidence. The Kres theme group also checks explicit overrides, locally loaded fonts, and live stamp counts. Reports contain synthetic data only. Live authorization, private handler integration, server-side receipts, watchers, and database migrations require separate staging verification by Ted.
 
 Additional existing action contracts remain documented in [MOCKUPS.md](MOCKUPS.md), [FRONTDOOR.md](FRONTDOOR.md), [REPLIES.md](REPLIES.md), and [APPLY.md](APPLY.md).
 
 Final verification notes and review resolutions are in [CONTROL-CENTER-V3-QA.md](docs/CONTROL-CENTER-V3-QA.md). The complete local fixture suite is `node qa/run.cjs`.
+
+## Supabase table grants
+
+New public Supabase tables require explicit grants and RLS in their creating migration. Ted Board uses `service_role` only. See [AGENTS.md](AGENTS.md) for the SQL template, the offline check (`python3 scripts/check_data_api_grants.py`), and the local backend boundary, and [the grant audit](docs/data-api-grants-audit.md) for historical coverage.

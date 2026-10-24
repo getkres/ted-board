@@ -81,3 +81,7 @@ dialog::backdrop{background:var(--v3-backdrop)}
 .chip{background:var(--v3-ink);color:var(--v3-paper);border-color:var(--v3-ink);border-radius:0}
 .approval{border:2px solid var(--v3-ink);border-radius:0}
 @media(max-width:800px){.masthead .tab-wrap{border-top-style:solid}.v3-stream{border-left:0;border-top:2px solid var(--v3-ink)}}
+/* Worker summaries follow the current Jobs view and retained project sections. */
+.work-summary{font-size:.8rem;line-height:1.5;color:var(--muted);margin:0 0 18px}
+.section[data-section=ted_doing] .section-heading{flex-wrap:wrap}
+.section[data-section=ted_doing] .work-summary{order:2;flex-basis:100%;margin:0}

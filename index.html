@@ -26,6 +26,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <link rel="stylesheet" href="spaces-v3.css">
 <link rel="stylesheet" href="roadmap-v3.css">
 <link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="decide-stack.css">
 <link rel="icon" href="assets/ted.svg" type="image/svg+xml">
 </head>
 <body>
@@ -36,6 +37,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <nav class="tab-wrap" aria-label="Projects"><div class="tabs" role="tablist" aria-label="Projects" id="tabs"></div></nav>
 <div id="notice" class="status" role="status" aria-live="polite"></div>
 <p id="fresh-status" class="fresh-status" role="status" aria-live="polite"></p>
+<p id="ted-health" class="fresh-status" role="alert" hidden></p>
 <main id="main" role="tabpanel" tabindex="-1"><p class="loading">Opening your board…</p></main>
 <footer><span><span class="footer-mark" aria-hidden="true">●</span> you pick, i do the rest.</span><button id="change-key" class="quiet access-button">Access</button></footer>
 </div>
@@ -47,17 +49,19 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <script src="markup-v3.js"></script>
 <script>installMarkupV3(MockupsV3);</script>
 <script src="control-center.js"></script>
+<script src="board-status.js"></script>
 <script src="theme.js"></script>
 <script src="spaces-v3.js"></script>
 <script src="roadmap-v3.js"></script>
 <script src="v3.js"></script>
+<script src="decide-stack.js"></script>
 <script>
 'use strict';
 const ENDPOINT='https://wqnrortftkffmbeugjky.supabase.co/functions/v1/ted-board';
 const POD_PULSE_ERROR='Pod updates could not load. Refresh to try again.';
 const SECTIONS=[['needs_you','Needs you'],['ted_doing',"Ted’s doing"],['up_next','Up next'],['done','Done']];
 const $=id=>document.getElementById(id);
-const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],jobsLoaded:false,jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
+const state={cards:[],podPulse:[],podPulseError:false,openPods:new Set(),jobs:[],approvals:[],jobsLoaded:false,loadError:'',jobsError:'',jobsLoading:false,jobsRequestId:0,freshRequestId:0,project:'All',loaded:false,loading:false,loadRequestId:0,busy:new Set(),drafts:Object.create(null),guide:null,revision:0,threads:new Set(),readCards:new Set()};
 const memory=new Map();let storageUnavailable=false;
 const storage={get(k){try{return localStorage.getItem(k)??memory.get(k)??null}catch{storageUnavailable=true;return memory.get(k)??null}},set(k,v){memory.set(k,v);try{localStorage.setItem(k,v);return true}catch{storageUnavailable=true;return false}},remove(k){memory.delete(k);try{localStorage.removeItem(k)}catch{storageUnavailable=true}}};
 let key=storage.get('ted-board-key')||'';
@@ -73,9 +77,15 @@ function updateTedChat(raw){
  try{const u=new URL(raw);if(u.origin==='https://claude.ai'&&!u.username&&!u.password&&!u.search&&!u.hash&&/^\/code(?:\/session_[A-Za-z0-9_-]+)?\/?$/.test(u.pathname))url=u.href}catch{}
  $('talk-ted').href=url;
 }
+function freshDoneRecently(){const stamp=Date.parse(freshState?.completed_at||freshState?.finished_at||freshState?.updated_at||'');const age=Date.now()-stamp;return Number.isFinite(stamp)&&age>=0&&age<600000}
 function renderFresh(){
+ const health=state.jobs.find(j=>j.id==='fresh-ted-health');
+ const stale=health&&(!health.heartbeat_at||!Number.isFinite(Date.parse(health.heartbeat_at))||Date.now()-Date.parse(health.heartbeat_at)>120000);
+ const warning=stale?'Live Ted health is stale. Check the mini.':health?.status==='failed'?(health.last_line||'Live Ted is offline. Start fresh Ted.'):'';
+ const alert=$('ted-health');alert.hidden=!warning;if(alert.textContent!==warning)alert.textContent=warning;
+ alert.style.color='var(--red, #b42318)';
  const b=$('fresh-ted');const pending=freshSending||['pending','running'].includes(freshState?.status);b.disabled=!key||!freshState||pending;b.classList.toggle('due',freshState?.due===true);b.setAttribute('aria-busy',String(pending));
- $('fresh-status').textContent=freshState?.status==='failed'?(freshState.error||'Fresh Ted could not start. Tap the red button to retry.'):pending?(freshState?.stage||'Requesting fresh Ted…'):freshState?.status==='done'?'Fresh Ted is up. Open the new Ted chat.':'';
+ $('fresh-status').textContent=freshState?.status==='failed'?(freshState.error||'Fresh Ted could not start. Tap the red button to retry.'):pending?(freshState?.stage||'Requesting fresh Ted…'):freshState?.status==='done'&&!warning&&freshDoneRecently()?'Fresh Ted is up. Open the new Ted chat.':'';
 }
 $('fresh-ted').addEventListener('click',async()=>{
  if(freshSending||['pending','running'].includes(freshState?.status))return;
@@ -157,10 +167,10 @@ function applyPodPulse(data){
  state.podPulse=Array.isArray(data.pod_pulse)?data.pod_pulse:[];
 }
 function resetForKeyChange(){
- v3.reset();
+ decide.reset();v3.reset();
  state.busy.clear();state.drafts=Object.create(null);state.threads.clear();state.readCards.clear();state.guide=null;$('guide').close();$('step-note').value='';
  state.loadRequestId++;
- state.loading=false;state.loaded=false;state.cards=[];
+ state.loading=false;state.loaded=false;state.loadError='';state.jobsError='';state.cards=[];
  state.podPulse=[];state.podPulseError=false;state.openPods.clear();
  state.jobsRequestId++;state.jobsLoading=false;state.jobsLoaded=false;state.jobs=[];state.approvals=[];
  state.freshRequestId++;freshSending=false;freshState=null;
@@ -233,10 +243,12 @@ function renderCard(card){
 }
 function render(){
  renderFresh();renderTabs();const main=$('main');
+ const deciding=Boolean(key)&&decide.active();document.body.classList.toggle('deciding',deciding);main.setAttribute('role',deciding?'main':'tabpanel');if(deciding)main.removeAttribute('aria-labelledby');
  /* Keep each mockup row's horizontal position and the page position across the 10s and 20s polls, which rebuild this tab. */
  const rowScroll=new Map();main.querySelectorAll('.mockup-row[aria-label]').forEach(r=>rowScroll.set(r.getAttribute('aria-label'),r.scrollLeft));const pageY=window.scrollY;
  main.replaceChildren();
  if(!key){renderAccess();return}
+ if(deciding){decide.render(main);return}
  if(v3.render(main,state.project))return;
  if(ControlCenterV3.isMockups(state.project)){mockups.render(main);if(rowScroll.size){main.querySelectorAll('.mockup-row[aria-label]').forEach(r=>{const x=rowScroll.get(r.getAttribute('aria-label'));if(x){r.style.scrollSnapType='none';r.scrollLeft=x;requestAnimationFrame(()=>{r.style.scrollSnapType=''})}});window.scrollTo(0,pageY)}return}
  if(!state.loaded){main.append(el('p','loading',state.loading?'Opening your board…':'Your board could not be loaded. Tap Refresh to try again.'));return}
@@ -250,27 +262,28 @@ function render(){
  (state.project==='All'?[SECTIONS[0]]:SECTIONS).forEach(([id,label])=>{
   const matching=cards.filter(c=>c.section===id&&(id!=='done'||recent(c)||unread(c)||state.readCards.has(c.id)));
   if(state.project==='All'&&!matching.length)return;
-  const section=el('section','section');section.dataset.section=id;const heading=el('div','section-heading');heading.append(el('h2',null,label),el('span','count',matching.length));if(id==='done')heading.append(el('span','count','last 7 days + unread'));section.append(heading);
+  const section=el('section','section');section.dataset.section=id;const heading=el('div','section-heading');heading.append(el('h2',null,label),el('span','count',matching.length));if(id==='ted_doing'){const counts=BoardStatus.doingCounts(matching,state.jobs,state.jobsLoaded);heading.append(el('span','work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale':'checking workers'))}if(id==='done')heading.append(el('span','count','last 7 days + unread'));section.append(heading);
   if(matching.length)matching.forEach(c=>section.append(renderCard(c)));else section.append(el('p','empty-section',({needs_you:'nothing on you here.',ted_doing:'nothing running here right now.',up_next:'nothing queued yet.',done:'nothing shipped this week yet.'})[id]));board.append(section);
  });
  if(state.project!=='All'){const killed=cards.filter(c=>c.section==='killed');const d=el('details','killed');const sum=el('summary');sum.append(el('span',null,'Killed'),el('span','count',killed.length));if(killed.some(unread))sum.append(replyDot());d.append(sum);if(killed.length)killed.forEach(c=>d.append(renderCard(c)));else d.append(el('p','empty-section','nothing killed.'));board.append(d)}
  main.append(board);
 }
 function renderAccess(){
+ document.body.classList.remove('deciding');
  const main=$('main');main.replaceChildren();const box=el('section','state');box.append(el('h2',null,'Your board, one private link.'),el('p',null,'Open the personal link Ted gave you, or paste it below. Access is remembered on this device.'));
  const form=el('form','key-form');const input=el('input');input.type='password';input.autocomplete='off';input.placeholder='Private link or access key';input.setAttribute('aria-label','Private link or access key');input.required=true;const submit=button('Open board','primary',()=>{});submit.type='submit';form.append(input,submit);form.addEventListener('submit',e=>{e.preventDefault();let value=input.value.trim();try{const u=new URL(value);value=new URLSearchParams(u.hash.slice(1)).get('k')||''}catch{}if(!value){announce('Paste the full private link or its access key.',true);return}key=value;storage.set('ted-board-key',key);saveTab();resetForKeyChange();mockups.reset();mockups.load();load()});box.append(form);main.append(box);
 }
-async function api(method,body,resource=''){
+async function api(method,body,resource='',transport={}){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),20000);
- try{const r=await fetch(ENDPOINT+(method==='GET'?'?key='+encodeURIComponent(key)+(resource?'&resource='+encodeURIComponent(resource):''):''),{method,headers:method==='GET'?{}:{'Content-Type':'text/plain'},body:body?JSON.stringify({key,...body}):undefined,cache:'no-store',referrerPolicy:'no-referrer',signal:controller.signal});let data;try{data=await r.json()}catch{throw new Error('The service returned an unreadable response. Try again.')}
+ try{const r=await fetch(ENDPOINT+(method==='GET'?'?key='+encodeURIComponent(key)+(resource?'&resource='+encodeURIComponent(resource):''):''),{method,headers:method==='GET'?{}:{'Content-Type':'text/plain'},body:body?JSON.stringify({key,...body}):undefined,cache:'no-store',referrerPolicy:'no-referrer',signal:controller.signal,...transport});let data;try{data=await r.json()}catch{throw new Error('The service returned an unreadable response. Try again.')}
  if(!r.ok){if([401,403].includes(r.status)){const error=new Error('Access key not accepted. Tap Access to open your private link again.');error.authFailed=true;throw error;}throw new Error(data.error||'Could not save. Try again.')}
  return data;
  }catch(e){if(e.name==='AbortError')throw new Error('The connection timed out. Refresh to check whether your answer arrived.');if(e instanceof TypeError)throw new Error('Could not connect. Check your connection and try again.');throw e}finally{clearTimeout(timeout)}
 }
 async function load(force=false){
- if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;const requestId=++state.loadRequestId,requestKey=key,revision=state.revision;$('refresh').disabled=true;announce('');render();
+ if(!key){render();return}if(state.loading&&!force)return;if(force)state.revision++;state.loading=true;state.loadError='';const requestId=++state.loadRequestId,requestKey=key,revision=state.revision;$('refresh').disabled=true;announce('');render();
  try{const data=await api('GET');if(!Array.isArray(data.cards))throw new Error('Could not read your cards. Try refreshing.');if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.cards=data.cards;applyPodPulse(data);v3.accept(data);const requestedTab=new URLSearchParams(location.hash.slice(1)).get('tab');if(requestedTab)state.project=deepTab(requestedTab);state.loaded=true;render();loadJobs();const time=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('refresh').title='Updated '+time;announce(state.podPulseError?POD_PULSE_ERROR:storageUnavailable?'Storage is unavailable. Keep your private link to reopen this board.':'',state.podPulseError)}
- catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.loading=false;if(e.authFailed)v3.authFailed();announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
+ catch(e){if(requestId!==state.loadRequestId||requestKey!==key||revision!==state.revision)return;state.loading=false;state.loadError=e.message;if(e.authFailed)v3.authFailed();announce(e.message,true);render()}finally{if(requestId===state.loadRequestId&&requestKey===key){state.loading=false;$('refresh').disabled=false}}
 }
 async function pollCards(){
  if(!key||document.hidden||state.loading||state.polling||state.busy.size)return;
@@ -297,9 +310,9 @@ async function pollCards(){
 setInterval(pollCards,20000);
 setInterval(updatePodPulseAges,60000);
 function setCardBusy(id,busy){if(busy)state.busy.add(id);else state.busy.delete(id);document.querySelectorAll('[data-card-id]').forEach(e=>{if(e.dataset.cardId===id)e.querySelectorAll('button,select,textarea').forEach(c=>c.disabled=busy)})}
-async function act(card,action,value='',note=''){
- if(state.busy.has(card.id))return false;const requestKey=key,generation=v3.generation;setCardBusy(card.id,true);announce('Saving…');
- try{const data=await api('POST',{card_id:card.id,action,value,note});if(requestKey!==key||generation!==v3.generation)return false;if(!data.ok||!data.card)throw new Error('Save was not confirmed. Refresh to check your answer.');state.revision++;const i=state.cards.findIndex(c=>c.id===card.id);if(i>=0)state.cards[i]=data.card;if(action==='note')delete state.drafts[card.id];render();announce(action==='stuck'?'Ted has your note.':action==='steps_done'?'All steps finished. Sent to Ted.':'Sent to Ted.');return true}
+async function act(card,action,value='',note='',transport={}){
+ if(state.busy.has(card.id))return false;decide.cancelQueued(card.id);const requestKey=key,generation=v3.generation;setCardBusy(card.id,true);announce('Saving…');
+ try{const data=await api('POST',{card_id:card.id,action,value,note},'',transport);if(requestKey!==key||generation!==v3.generation)return false;if(!data.ok||!data.card)throw new Error('Save was not confirmed. Refresh to check your answer.');state.revision++;const i=state.cards.findIndex(c=>c.id===card.id);if(i>=0)state.cards[i]=data.card;if(action==='note')delete state.drafts[card.id];render();announce(action==='stuck'?'Ted has your note.':action==='steps_done'?'All steps finished. Sent to Ted.':'Sent to Ted.');return true}
  catch(e){if(requestKey!==key||generation!==v3.generation)return false;announce(e.message,true);if(state.guide)$('guide-status').textContent=e.message;return false}
  finally{if(requestKey===key&&generation===v3.generation)setCardBusy(card.id,false)}
 }
@@ -311,22 +324,43 @@ function renderApprovals(card,article){
  }
 }
 async function loadJobs(){
- if(!key||state.jobsLoading)return;state.jobsLoading=true;const requestId=++state.jobsRequestId,requestKey=key;
- try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);renderFresh();state.jobs=Array.isArray(data.jobs)?data.jobs:[];state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
+ if(!key||state.jobsLoading)return;state.jobsLoading=true;state.jobsError='';const requestId=++state.jobsRequestId,requestKey=key;
+ try{const data=await api('GET',undefined,'jobs');if(requestId!==state.jobsRequestId||requestKey!==key)return;freshState=data.fresh_ted||null;updateTedChat(data.ted_chat_url);state.jobs=Array.isArray(data.jobs)?data.jobs:[];renderFresh();state.approvals=Array.isArray(data.approvals)?data.approvals:[];state.jobsLoaded=true;renderTabs();
  // Preserve the open artifact views and drafts during polling.
  const opened=[...document.querySelectorAll('details[open]:not(.pod-row)')].map(e=>e.dataset.approvalId||e.className);
  const focused=document.activeElement;const editing=focused&&['TEXTAREA','INPUT','SELECT'].includes(focused.tagName);
  /* Mockups shows no jobs data, so a rebuild there only resets the swipe the viewer is in. */
  if(ControlCenterV3.isMockups(state.project))renderFresh();
  else if(!editing&&!state.busy.size){render();document.querySelectorAll('details:not(.pod-row)').forEach(e=>{if(opened.includes(e.dataset.approvalId||e.className))e.open=true})}
- }catch(e){if(requestId===state.jobsRequestId&&requestKey===key&&state.project==='Jobs')announce(e.message,true)}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
+ }catch(e){if(requestId===state.jobsRequestId&&requestKey===key){state.jobsError=e.message;state.jobsLoaded=false;if(state.project==='Jobs'||decide.active()){announce(e.message,true);render();}}}finally{if(requestId===state.jobsRequestId&&requestKey===key)state.jobsLoading=false}
 }
-async function control(action,body){
- try{await api('POST',{action,...body});announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');if(action==='approval')await load(true);else await loadJobs()}catch(e){announce(e.message,true)}
+async function control(action,body,transport={}){
+ if(action==='approval'){const cardId=state.approvals.find(a=>a.id===body.approval_id)?.card_id;if(cardId)decide.cancelQueued(cardId);}
+ const requestKey=key,generation=v3.generation;
+ try{const data=await api('POST',{action,...body},'',transport);if(requestKey!==key||generation!==v3.generation)return false;if(!data.ok)throw new Error('Decision was not confirmed. Refresh to check it.');announce(action==='kill'?'Stop requested. The mini will process it on its next heartbeat.':'Decision saved.');if(action==='approval')await load(true);else await loadJobs();return true}catch(e){if(requestKey===key&&generation===v3.generation)announce(e.message,true);return false}
 }
 function renderJobs(main){
  const intro=el('div','board-intro');intro.append(el('h2',null,'Jobs'),el('p',null,'Refreshes every 10 seconds'));main.append(intro);
- const list=el('div','job-list');const active=state.jobs.filter(j=>['running','queued','waiting_approval','untracked'].includes(j.status));
+ const laneRows=state.jobs.filter(j=>j.lane_summary===true&&['claude-lane-main','claude-lane-design','claude-lane-research'].includes(j.id));
+ if(laneRows.length){
+  const lanes=el('section','claude-lanes');lanes.setAttribute('aria-label','Claude account lanes');lanes.append(el('h3',null,'Claude account lanes'),el('p','job-meta','Usage from dispatched jobs only. Plan-wide usage unavailable from CLI.'));
+  const rows=el('div','job-list');
+  for(const j of laneRows){
+   const row=el('article','card claude-lane-summary');const names={'claude-lane-main':'Account 1: Ted and interactive work','claude-lane-design':'Account 2: design, art, and design review','claude-lane-research':'Account 3: research, analysis, and review gates'};
+   row.append(el('h4',null,names[j.id]),el('p','job-meta',j.last_line||'Limit status unknown'));
+   const usage=j.lane_usage||{},valid=n=>Number.isFinite(n)&&n>=0&&typeof n==='number';
+   const counts=[['input_tokens','input'],['output_tokens','output'],['cache_read_input_tokens','cache read'],['cache_creation_input_tokens','cache write']].filter(([key])=>valid(usage[key])).map(([key,label])=>usage[key].toLocaleString()+' '+label);
+   const tokenText=counts.length>1?counts.slice(0,-1).join(', ')+(counts.length>2?', and ':' and ')+counts[counts.length-1]:counts[0];
+   row.append(el('p','card-body',counts.length?'Observed tokens: '+tokenText+'.':'Usage not yet observed.'));
+   if(valid(usage.observed_at))row.append(el('p','job-meta','Last observed '+new Date(usage.observed_at*1000).toLocaleString()));
+   if(valid(usage.resets_at)&&usage.resets_at*1000>Date.now())row.append(el('p','job-meta','Reset reported for '+new Date(usage.resets_at*1000).toLocaleString()));
+   if(!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000||!Number.isFinite(Date.parse(j.heartbeat_at)))row.append(el('p','job-warning','Mini heartbeat is stale. Lane status may be out of date.'));
+   rows.append(row);
+  }
+  lanes.append(rows);main.append(lanes);
+ }
+ const counts=BoardStatus.workerCounts(state.cards,state.jobs,state.jobsLoaded);main.append(el('p','work-summary jobs-work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale in Ted doing':'Checking workers'));
+ const list=el('div','job-list');const active=state.jobs.filter(j=>j.id!=='fresh-ted-health'&&j.lane_summary!==true&&['running','queued','waiting_approval','untracked'].includes(j.status));
  if(!state.jobsLoaded)list.append(el('p','status','Loading jobs…'));else if(!active.length)list.append(el('p','status','No active jobs.'));
  for(const j of active){const box=el('article','card');box.dataset.status=j.status;box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',j.engine+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
   const stale=!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000;if(stale)box.append(el('p','job-warning','Mini heartbeat is stale. Controls will wait for it to reconnect.'));
@@ -362,9 +396,10 @@ async function guideSend(action){
  if(ok&&action==='steps_done'){storage.remove(progressKey(g.card));$('guide').close();state.guide=null;$('main').focus();return}
  if(ok)$('guide-status').textContent='Ted has your note. You can keep going or close this for now.';drawGuide();
 }
-const v3=new ControlCenterV3({el,button,api,getState:()=>state,getKey:()=>key,mockups,renderCard,select:selectProject,redraw:render,notice:announce,storage});
+const v3=new ControlCenterV3({el,button,api,getState:()=>state,getKey:()=>key,mockups,renderCard,select:selectProject,redraw:render,notice:announce,storage,deciding:()=>decide.active()});
 mockups.v3=v3;
 const controlCenter=new ControlCenter({api,getCards:()=>state.cards,answer:act,reloadCards:load,redraw:render,notice:announce,select:()=>{state.project='Control';saveTab();render()}});
+const decide=new DecideStack({el,button,storage,getState:()=>state,getKey:()=>key,options,needsYou:card=>v3.needsYou(card),inboxQueue:()=>v3.inboxQueue(),skipCard:card=>v3.skipCard(card),skipOrder:()=>v3.skipOrder,wasSkipped:card=>v3.skipped.has(card.id),projectCount:card=>v3.inboxGroups().find(group=>group.cards.some(c=>c.id===card.id))?.cards.length||0,answer:act,approve:(payload,transport)=>control('approval',{approval_id:payload.approval_id,decision:payload.decision},transport),refresh:()=>load(true),access:()=>renderAccess(),select:selectProject,redraw:render,notice:announce,renderThread,safeURL,openCard:card=>{v3.item=card.id;v3.split='yours';render()}});
 function positionTedControls(){const nav=document.querySelector('.tab-wrap');nav.classList.toggle('under-controls',nav.getBoundingClientRect().top<=0)}
 window.addEventListener('scroll',positionTedControls,{passive:true});
 window.addEventListener('pageshow',positionTedControls);
@@ -372,8 +407,10 @@ window.addEventListener('resize',positionTedControls);
 positionTedControls();
 $('refresh').addEventListener('click',()=>{if(ControlCenterV3.isMockups(state.project))mockups.load();else{load();if(state.project==='Control')controlCenter.load()}});
 $('change-key').addEventListener('click',()=>{if(state.busy.size||state.loading||mockups.busy.size)return;announce('');renderAccess()});
+window.addEventListener('pagehide',()=>decide.flush());
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')decide.flush();});
 window.addEventListener('online',()=>{if(key&&!state.busy.size)load()});
-v3.setup();render();if(key){load();mockups.load();controlCenter.load()}
+v3.setup();$('refresh').before(button('Decide','decide-entry',()=>decide.view('decide')));render();if(key){load();mockups.load();controlCenter.load()}
 </script>
 </body>
 </html>
