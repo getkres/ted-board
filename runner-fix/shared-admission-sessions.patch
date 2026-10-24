@@ -1,21 +1,52 @@
 --- a/sessions.py
 +++ b/sessions.py
-@@ -13,1 +13,2 @@
+@@ -13,1 +13,4 @@
 -import uuid
 +import uuid
 +from scripts import shared_admission
-@@ -231,1 +231,1 @@
++
++ADMISSION_WARN_SECONDS=15*60
+@@ -202,1 +202,0 @@
+-   overloaded=os.getloadavg()[0]>2*(os.cpu_count() or 8)
+@@ -204,1 +206,1 @@
+-    if running>=64 or overloaded:break
++    if running>=64:break
+@@ -225,1 +227,1 @@
+-    prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
++    prefix=Path(s['cwd'])/s['turn']
+@@ -228,5 +230,7 @@
+-    try:
+-     with open(str(prefix)+'.log','a') as log:
+-      os.chmod(log.name,0o600)
 -      p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
+-     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=s.get('engine')=='claude';sonnet_running+=s.get('engine')=='sonnet'
++    try:
++     atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
++     with open(str(prefix)+'.log','a') as log:
++      os.chmod(log.name,0o600)
 +      p=shared_admission.Gate().spawn([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],lane='board',cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
-@@ -235,1 +235,10 @@
++     s.pop('admission_deferred',None)
++     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=s.get('engine')=='claude';sonnet_running+=s.get('engine')=='sonnet'
+@@ -235,2 +239,20 @@
 -    except OSError:
-+    except shared_admission.Deferred:
+-     s.update(status='failed',pid=None);self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
++    except shared_admission.Deferred as exc:
 +     # Keep the exact turn queued, and revalidate approved artifacts next tick.
 +     s['queue'].insert(0,turn)
-+     s.update(status='queued',pid=None,last_line='queued: shared resource budget')
++     s.update(status='queued',pid=None,last_line='queued: admission '+exc.diagnostic.lower())
 +     s.pop('active_veto_revision',None)
 +     if turn['kind']=='review':
 +      a.update(status='approved',sync_status=True)
 +      s.pop('reviewing',None);s.pop('review_context',None)
-+     break
-+    except OSError:
++     now=time.time();waiting=s.get('admission_deferred',{})
++     if waiting.get('turn')!=turn['id']:waiting=dict(turn=turn['id'],since=now,count=0,alerted=False)
++     waiting.update(count=waiting.get('count',0)+1,reason=exc.reason_code,error=exc.error_name)
++     s['admission_deferred']=waiting
++     print('admission deferred: '+exc.diagnostic,file=sys.stderr)
++     if now-waiting['since']>=ADMISSION_WARN_SECONDS and not waiting.get('alerted'):
++      waiting['alerted']=bool(publish_live(s['card_id'],'blocked','admission delayed: '+exc.diagnostic.lower()))
++     if exc.capacity:break
++     continue
++    except OSError as exc:
++     s.pop('admission_deferred',None)
++     s.update(status='failed',pid=None,last_line='worker could not start: '+type(exc).__name__.lower());self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
