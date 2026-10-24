@@ -85,7 +85,7 @@ class ClientReview(unittest.TestCase):
                 result=live.update('x','blocked','Worker stopped without a final result.',section='up_next')
                 self.assertEqual(result['section'],section)
                 send.assert_not_called()
-        with patch.object(client,'cards',return_value=[]),self.assertRaises(RuntimeError):
+        with patch.object(client,'cards',return_value=[]),self.assertRaises(client.BoardGone):
             live.update('x','blocked','Worker could not start')
 
 

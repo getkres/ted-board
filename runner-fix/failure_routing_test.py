@@ -95,8 +95,8 @@ class Routing(unittest.TestCase):
             self.assertEqual(result['outcome'],'rule_applied');send.assert_not_called()
 
     def test_lost_failure_ack_is_idempotently_confirmed(self):
-        with patch.object(client,'cards',return_value=[card(section='up_next',live_state='blocked',live_status='worker failed, ted will review recovery from the job files')]),patch.object(live,'call') as send:
-            result=live.update('x','blocked','worker failed, ted will review recovery from the job files',section='up_next')
+        with patch.object(client,'cards',return_value=[card(section='up_next',live_state='blocked',live_status='worker failed, ted owns recovery from the job files')]),patch.object(live,'call') as send:
+            result=live.update('x','blocked','Worker stopped without a final result.',section='up_next')
             self.assertEqual(result['section'],'up_next');send.assert_not_called()
 
     def test_matching_rule_holds_for_ted_without_an_automatic_override_reason(self):
@@ -312,30 +312,29 @@ class Steward(unittest.TestCase):
     def action(self, c, mockups=()):
         return steward.plan([c], list(mockups), [], 2000000000)['actions']
 
-    def test_failures_override_old_options_and_other_kind(self):
+    def test_steward_retains_failures_with_options_and_a_decision_kind(self):
         for text in ('Worker exceeded the three-hour limit. Reply to continue.',
                      'Worker stopped without a final result. Reply to retry.',
                      'Worker could not start. Reply to retry.', 'Worker failed: OSError. Reply to retry.'):
             c = card(section='needs_you',decision_kind='other',options=['retry'],
                      messages=[dict(who='ted',at='2026-10-22T00:00:00Z',text=text)])
             actions=self.action(c)
-            self.assertEqual(len(actions),1,text)
-            self.assertEqual(actions[0]['to'],'up_next')
+            self.assertEqual(actions,[],text)
 
     def test_archived_batch_and_explicit_supersession_leave_inbox(self):
-        c=card(section='needs_you',decision_kind='approve_design',title='Review mockups',body='Pick batch "Launch v2"')
+        c=card(section='needs_you',title='Retired mockups',body='Batch "Launch v2" is archived.')
         rows=[dict(id='m',project='Fixture',batch='Launch v2',status='archived',created_at='2026-10-01T00:00:00Z')]
         self.assertEqual(self.action(c,rows)[0]['to'],'done')
-        c=card(section='needs_you',decision_kind='other',live_status='superseded by the new launch card')
+        c=card(section='needs_you',live_status='superseded by the new launch card')
         self.assertEqual(self.action(c)[0]['to'],'done')
 
-    def test_fyi_with_historical_money_or_other_kind_has_no_ask(self):
+    def test_fyi_with_historical_money_or_other_kind_remains_protected(self):
         c=card(section='needs_you',decision_kind='other',title='Payment receipt for $25',body='Payment completed. No action required.')
-        self.assertEqual(self.action(c)[0]['to'],'done')
+        self.assertEqual(self.action(c),[])
 
-    def test_only_running_worker_evidence_moves_an_unclassified_report(self):
+    def test_running_worker_and_unclassified_reports_remain_protected(self):
         c=card(section='needs_you',live_state='running',live_status='checking the native build')
-        self.assertEqual(self.action(c)[0]['to'],'up_next')
+        self.assertEqual(self.action(c),[])
         c=card(section='needs_you',live_state='blocked',live_status='pr 42 awaits ted review and deployment')
         self.assertEqual(self.action(c),[])
 
@@ -354,10 +353,10 @@ class Steward(unittest.TestCase):
                          dict(who='ted',at='2026-10-22T00:00:00Z',text='Please sign the contract')])
         self.assertEqual(self.action(c),[])
 
-    def test_archived_copy_is_not_mistaken_for_pricing_due_to_background_text(self):
+    def test_archived_copy_ask_is_retained_despite_background_pricing(self):
         c=card(section='needs_you',body='Batch "Launch v2". Type your version of the headline. I need to confirm the current price first.')
         rows=[dict(id='m',project='Fixture',batch='Launch v2',status='archived',created_at='2026-10-01T00:00:00Z')]
-        self.assertEqual(self.action(c,rows)[0]['to'],'done')
+        self.assertEqual(self.action(c,rows),[])
 
     def test_unclassified_reports_and_unrelated_questions_are_retained(self):
         for text in ('Uploaded the screens. The monthly paywall says $9.99.',

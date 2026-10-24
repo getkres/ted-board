@@ -3,14 +3,13 @@ from datetime import datetime
 import re
 
 TED_LINE = 'ted review needed, this is not a sebastian decision'
-FAILURE_LINE = 'worker failed, ted will review recovery from the job files'
+FAILURE_LINE = 'worker failed, ted owns recovery from the job files'
 FAILURES = re.compile(r'\bworker (?:exceeded|timed out|timeout|stopped|could not start|failed|crashed|returned no final)|'
                       r'\bno worker on this|\bapproval artifact (?:is unsafe|needs fixing|failed)', re.I)
 ASK = re.compile(r'\?|\b(?:approve|approval|review|sign|choose|pick|decide|write|type|your call|your version|'
                  r'you decide|flat fee|must|please|action required|needed|pending)\b', re.I)
 FYI = re.compile(r'\b(?:fyi|receipts?|confirmations?|payment completed|export completed|welcome|subscription notice)\b', re.I)
 OPERATIONAL = re.compile(r'\b(?:ted review|pr \d+[^.!?\n]*review|pending ted review|worker slot|waiting for CI)\b', re.I)
-RECOVERY = re.compile(r'^\s*(?:reply to (?:retry|continue)|please (?:retry|continue)|review (?:the )?(?:logs|job files|report|artifacts))\b', re.I)
 
 
 def stamp(value):
@@ -34,12 +33,12 @@ def current_text(card):
 
 
 def failure_kind(text):
-    """Classify failure sentences only when no independent ask follows or precedes them."""
+    """Classify a failure only when every sentence is free of ask wording."""
     result = None
     for sentence in re.split(r'(?<=[.!?])\s+|\n+', str(text or '')):
+        if ASK.search(sentence):
+            return None
         if not FAILURES.search(sentence):
-            if ASK.search(sentence) and not OPERATIONAL.search(sentence) and not RECOVERY.search(sentence):
-                return None
             continue
         if re.search(r'could not start', sentence, re.I):
             kind = 'start_failure'
@@ -112,11 +111,13 @@ def approval_line(kind, card):
 def disposition(card, mockups=(), line=None):
     """Mechanical inbox move, or a reason to retain a real or ambiguous ask."""
     text = current_text(card) if line is None else str(line)
-    if failure_kind(text):
-        return 'up_next', FAILURE_LINE
     family = decision(card, text, mockups)
     if family:
         return None, 'sebastian decision: '+family
+    if any(ASK.search(sentence) for sentence in re.split(r'(?<=[.!?])\s+|\n+',text)):
+        return None, 'ambiguous, retain'
+    if failure_kind(text):
+        return 'up_next', FAILURE_LINE
     rows = linked_mockups(card, mockups)
     if rows and all(m.get('status') == 'archived' for m in rows):
         return 'done', 'linked mockup batch is archived'
@@ -126,8 +127,6 @@ def disposition(card, mockups=(), line=None):
     without_notice = re.sub(r'\bno action (?:required|needed)\b', '', content, flags=re.I)
     if FYI.search(content) and not ASK.search(without_notice):
         return 'done', 'pure fyi, no action required'
-    asks = [sentence for sentence in re.split(r'(?<=[.!?])\s+|\n+', text)
-            if ASK.search(sentence) and not OPERATIONAL.search(sentence) and not RECOVERY.search(sentence)]
-    if card.get('live_state') == 'running' and not asks:
+    if card.get('live_state') == 'running':
         return 'up_next', 'ted review, no sebastian decision'
     return None, 'ambiguous, retain'

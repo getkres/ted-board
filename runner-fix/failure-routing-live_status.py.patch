@@ -9,7 +9,7 @@
 @@ -19,0 +20,9 @@
 + if failure_kind(line):
 +  card=next((item for item in board_client.cards() if item.get('id')==card_id),None)
-+  if not card:raise RuntimeError('Failure handoff scope could not be confirmed')
++  if not card:raise board_client.BoardGone('Card no longer exists')
 +  if card.get('section') not in ('ted_doing','needs_you'):return card
 +  body=dict(card_id=card_id,state='blocked',line=FAILURE_LINE,section='up_next',expected_section=card['section'],expected_updated_at=card.get('updated_at'))
 +  body.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
@@ -45,7 +45,10 @@
 +         "Needs you is only for spending, email sends, legal or contract decisions, pricing, gated production writes, fresh mockup taste picks, and copy Sebastian writes. "
 @@ -62 +86 @@
 -def publish_live(card_id,state,line,section=None):
-+def publish_live(card_id,state,line,section=None,**guards):
-@@ -64 +88 @@
++def publish_live(card_id,state,line,section=None,raise_gone=False,**guards):
+@@ -64 +88,4 @@
 - try:update(card_id,state,line,section)
 + try:update(card_id,state,line,section,**guards)
++ except board_client.BoardGone:
++  if raise_gone:raise
++  return False
