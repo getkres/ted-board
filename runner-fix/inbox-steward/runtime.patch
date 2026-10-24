@@ -1,0 +1,58 @@
+--- a/inbox_steward.py
++++ b/inbox_steward.py
+@@ -22 +22,3 @@
+-REPORT = re.compile(r'\b(finished|opened\s+(?:a\s+)?pr\b|uploaded|applied|merged|(?:is|now|went)\s+live)\b', re.I)
++REPORT = re.compile(r'\b(finished|opened\s+(?:a\s+)?pr\b|uploaded|applied|merged|deployed|'
++                    r'(?:is|now|went)\s+live|pr\s*#\d+\s+(?:is\s+)?open|'
++                    r'(?:is|are)\s+up\s+(?:on|in)|(?:implementation|work|build|patch)\s+(?:is\s+)?completed)\b', re.I)
+@@ -24,4 +26,7 @@
+-REQUEST = re.compile(r'\?|\b(approval (?:needed|required|pending)|awaiting (?:your|a decision)|waiting (?:on|for) you|'
+-                     r'please\b|must\b|verify\b|(?:payment|charge) failed|outstanding balance|cancellation required|renewal required|choose\b|pick (?:one|a|the|your)|your (?:pick|decision|approval|call)|'
+-                     r'approve (?:each|the|this)|tap yes|tell me|update your|action required|'
+-                     r'needs? (?:your |an? )?(?:approval|decision|signature)|pending approval)\b', re.I)
++REQUEST = re.compile(r'\b(approval (?:needed|required|pending)|awaiting (?:your|a decision)|waiting (?:on|for) you|'
++                     r'(?:please|must)\s+(?:review|approve|choose|pick|verify|confirm|decide|sign|pay|respond|reply|update|renew|cancel)|'
++                     r'(?:can|could|would)\s+you\s+(?:review|approve|choose|pick|confirm|decide|sign|pay)|'
++                     r'verify (?:your|the account)|(?:payment|charge) failed|outstanding balance|'
++                     r'cancellation required|renewal required|choose\b|pick (?:one|a|the|your)|'
++                     r'should (?:i|we)|which (?:one|option|route|design)|your (?:pick|choice|decision|approval|call)|approve (?:each|the|this)|tap yes|tell me|'
++                     r'type your (?:version|copy|answer)|say a letter|update your|action required|needs? (?:your |an? )?(?:approval|decision|signature)|pending approval)\b', re.I)
+@@ -30,4 +35,6 @@
+-                       r'approve (?:the )?(?:charge|payment)|flat fee|\$\s*\d)\b|\$\s*\d', re.I)
+-NEGATED_REPORT = re.compile(r'\b(?:not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
+-                            r'(?:finished|opened|uploaded|applied|merged|live)\b|'
+-                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}(?:upload|finish|apply|merge|open)\b', re.I)
++                       r'approve (?:the )?(?:charge|payment)|flat fee)\b', re.I)
++MONEY_REQUEST = re.compile(r'\b(?:approve|authorize|pay|spend|charge|purchase)\b[^.\n]{0,80}\$\s*\d', re.I)
++NEGATED_REPORT = re.compile(r'\b(?:if|unless|no|not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
++                            r'(?:finished|opened|uploaded|applied|merged|deployed|live)\b|'
++                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}'
++                            r'(?:upload(?:ed)?|finish(?:ed)?|appl(?:y|ied)|merge(?:d)?|open(?:ed)?)\b', re.I)
+@@ -72,0 +80,2 @@
++    if card.get('live_state') == 'running':
++        return 'worker is still running'
+@@ -97 +106 @@
+-    if SENSITIVE.search(content):
++    if SENSITIVE.search(content) or MONEY_REQUEST.search(content):
+@@ -104 +113,4 @@
+-    if REQUEST.search(content):
++    current_text = str((last or {}).get('text') or '')
++    current_text = re.sub(r'https?://\S+', '', current_text)
++    current_text = re.sub(r'"[^"]*"|[\u201c][^\u201d]*[\u201d]|`[^`]*`', '', current_text)
++    if '?' in current_text or REQUEST.search(content):
+@@ -119 +131,5 @@
+-    if NEGATED_REPORT.search(text):
++    negated = list(NEGATED_REPORT.finditer(text))
++    if any(not any(n.start() <= report.start() < n.end() for n in negated)
++           for report in REPORT.finditer(text)):
++        return 'up_next', 'Ted review'
++    if negated:
+@@ -121,2 +136,0 @@
+-    if REPORT.search(text):
+-        return 'up_next', 'Ted review'
+@@ -270,2 +284,3 @@
+-    ranked = sorted((review_row(c, now, 'keep', classify_card(c, now)[1]) for c in cards
+-                     if c.get('section') == 'needs_you'), key=lambda r: (-r['age_hours'], r['id']))
++    remaining = sorted((c for c in cards if c.get('section') == 'needs_you'),
++                       key=lambda c: (activity(c), c.get('id', '')))
++    ranked = [review_row(c, now, 'keep', classify_card(c, now)[1]) for c in remaining]

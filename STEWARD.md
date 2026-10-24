@@ -1,6 +1,6 @@
 # Inbox steward
 
-The Mac mini runs `co.ted.inbox-steward` every 15 minutes. The standard-library Python runner uses existing private `board_client` and `mockup_client` modules from the operational checkout. These transports and their credentials are deliberately absent from the public repository. The runner only calls the existing move and archive actions. It has no SQL, send, spending, or deletion path.
+The Mac mini runs `co.ted.inbox-steward` every 15 minutes. The standard-library Python runner uses existing private `board_client` and `mockup_client` modules from the operational checkout. The operational scripts, launch agent, transports, and credentials remain local. The public [review bundle](runner-fix/inbox-steward/README.md) contains a focused patch and synthetic regression tests. The runner only calls the existing move and archive actions. It has no SQL, send, spending, or deletion path.
 
 Worker reports go from needs_you to up_next with the exact note `Ted review`. Pure FYIs go to done. Real decisions, approvals, money metadata, recent Sebastian replies and answers, unanswered choices, and guided steps remain. Existing `card.py new --needs-you` always sets decision_kind, which the steward protects regardless of age. If a future API supplies explicit creation metadata, the seven-day creator protection applies too. Undated messages remain for review.
 
@@ -27,13 +27,14 @@ PYTHONPATH="$HOME/ted-ops/ted-board" python3 steward_review.py
 ## Verify and install
 
 ```sh
-python3 -m unittest discover -s tests -p '*_test.py' -v
-plutil -lint launchd/co.ted.inbox-steward.plist
+TED_STEWARD_RUNTIME=/absolute/path/to/private/candidate python3 runner-fix/inbox-steward/steward_test.py
+python3 scripts/check_data_api_grants.py
+python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 ```
 
 The tests mock all network boundaries and use synthetic data. Run `node qa/run.cjs` with the static fixture server and Playwright as described in README.md for the existing UI regression suite.
 
-On the mini, copy the two Python scripts into a release directory at `~/ted-ops/ted-board/steward-runtime/<commit>/`, then atomically point `steward-runtime/current` to that directory. Keep previous releases for rollback. Copy the plist into `~/Library/LaunchAgents/`, ensure `~/ted-ops/logs/` exists, and bootstrap it in the user's GUI domain. The template follows the existing co.ted Python interpreter, logging, background process, and private umask patterns. The runtime checks ComputerName for mini before executing. Never load it on the MacBook.
+On the mini, prepare and test a candidate with the review bundle, then copy its two Python scripts into a release directory at `~/ted-ops/ted-board/steward-runtime/<commit>/`, then atomically point `steward-runtime/current` to that directory. Keep previous releases for rollback. Preserve the installed `~/Library/LaunchAgents/co.ted.inbox-steward.plist`, ensure `~/ted-ops/logs/` exists, and reload it in the user's GUI domain. The existing agent follows the co.ted Python interpreter, logging, background process, and private umask patterns. The runtime checks ComputerName for mini before executing. Never load it on the MacBook.
 
 Inspect `launchctl print gui/$(id -u)/co.ted.inbox-steward` for the 900-second interval and a zero exit status. Logs are in `~/ted-ops/logs/inbox-steward-launchd.log`.
 

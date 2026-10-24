@@ -1,0 +1,7 @@
+{
+  "baseline_release": "b7a4092689d42418b9fd43a2838a5159bcf8aad0",
+  "files": {
+    "inbox_steward.py": "6588b8d15c691ba5ec7b3330418f3c641c1041719e97d9ea2935e3f228d9bcb0",
+    "steward_review.py": "60b7ec5933fe280eb2b5dc10b36dd32ced02acea83f2863acb56f6237f50a3b6"
+  }
+}

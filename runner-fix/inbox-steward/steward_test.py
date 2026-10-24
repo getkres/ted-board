@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import json
 import sys
 import tempfile
@@ -8,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+SOURCE = Path(os.environ.get('TED_STEWARD_RUNTIME', Path.home() / 'ted-ops/ted-board/steward-runtime/current'))
+sys.path.insert(0, str(SOURCE))
 import inbox_steward as steward
 import steward_review
 
@@ -105,6 +107,60 @@ class CardRules(unittest.TestCase):
         actions = self.target(card(text='Finished the export service. Uploaded the receipt for the job.'))
         self.assertEqual(actions[0]['to'], 'up_next')
         self.assertEqual(self.target(card(text='Not finished yet. Receipt attached.')), [])
+
+    def test_product_prices_and_ui_questions_do_not_make_reports_approvals(self):
+        cases = [
+            ('Uploaded the final screens. The monthly paywall says $9.99.', 'Build the monthly paywall.'),
+            ('Finished the search screen. Its label is "Is my character here?".', 'Implement search.'),
+            ('Uploaded the hero. The reference caption says "please welcome the cast".', 'Build the hero.'),
+            ('Finished the page.', 'Can you build a settings page?'),
+            ('Uploaded the screens. The layout must show five locked worlds.', 'Build the closet.'),
+        ]
+        for text, body in cases:
+            with self.subTest(text=text):
+                c = card(text=text); c['body'] = body
+                self.assertEqual([a['to'] for a in self.target(c)], ['up_next'])
+
+    def test_real_legacy_requests_remain_protected(self):
+        for text, body in [
+            ('Finished the draft. Please approve the $500 payment.', 'Prepare the proposal.'),
+            ('Uploaded. Can you choose a design?', 'Build a design.'),
+            ('Finished. Awaiting your approval.', 'Build the page.'),
+            ('Uploaded the deck.', 'Authorize a $500 payment.'),
+            ('Uploaded the proposals.', 'You pick one, then we build it.'),
+            ('Finished. Which route is best?', 'Build a proposal.'),
+            ('Uploaded. Should I send this?', 'Prepare a proposal.'),
+        ]:
+            with self.subTest(text=text):
+                c = card(text=text); c['body'] = body
+                self.assertEqual(self.target(c), [])
+
+    def test_delivery_assurances_do_not_negate_a_positive_report(self):
+        for text in [
+            'Finished the page. It is not live yet.',
+            'Uploaded the screens. No code was merged.',
+            'Opened PR #14. The patch has not been applied.',
+        ]:
+            self.assertEqual([a['to'] for a in self.target(card(text=text))], ['up_next'])
+        for text in ['The patch has not been applied.', 'Not finished yet.', 'I will upload the screens tomorrow.', 'I will have finished tomorrow.', 'No code was merged.']:
+            self.assertEqual(self.target(card(text=text)), [])
+
+    def test_completed_report_variants_are_recognized(self):
+        for text in ['PR #14 is open.', 'The screens are up on the board.', 'Implementation completed.',
+                     'The page has been deployed.']:
+            with self.subTest(text=text):
+                self.assertEqual([a['to'] for a in self.target(card(text=text))], ['up_next'])
+
+    def test_pending_copy_choices_are_not_completed_worker_reports(self):
+        c = card(text='The batch is up in Mockups. Pin a box and type your version, or say a letter.')
+        c['body'] = 'Three starter drafts. Pin and type your version.'
+        self.assertEqual(self.target(c), [])
+
+    def test_active_workers_are_not_moved_by_incidental_report_words(self):
+        self.assertEqual(self.target(card(text='The PR was merged, continuing the release audit.', live_state='running')), [])
+
+    def test_conditional_merge_instructions_are_not_completed_reports(self):
+        self.assertEqual(self.target(card(text='PR will follow. Include the result only if merged by 04:00.')), [])
 
 
 class MockupRules(unittest.TestCase):
@@ -299,6 +355,17 @@ class Runner(unittest.TestCase):
                 steward.require_mini()
         with patch.object(steward.subprocess, 'run', return_value=types.SimpleNamespace(stdout='Sebastian Mac Mini')):
             steward.require_mini()
+
+    def test_overflow_sorts_actual_activity_before_rounding_display_age(self):
+        rows = [card(str(i), text='Needs judgment.') for i in range(13)]
+        for row in rows:
+            row['updated_at'] = '2026-10-01T00:00:00Z'
+            row['messages'][0]['at'] = '2026-10-01T00:00:00Z'
+        rows[0]['updated_at'] = '2026-10-01T00:01:00Z'
+        with tempfile.TemporaryDirectory() as root:
+            steward.write_overflow(Path(root), rows, NOW)
+            result = json.loads((Path(root)/'steward-overflow.json').read_text())
+            self.assertEqual(result['ranked'][-1]['id'], '0')
 
     def test_review_prints_compact_ambiguous_rows_and_redacts_sensitive_text(self):
         c = card(text='See https://example.test/#k=private and token=hidden.')
