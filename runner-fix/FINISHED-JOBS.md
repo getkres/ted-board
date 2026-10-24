@@ -1,5 +1,7 @@
 # Finished worker handoff
 
+The combined package in [RUNNER-FAILURES.md](RUNNER-FAILURES.md) now supersedes these individual patches. Use its installation instructions and candidate tests. It includes the successful handoff below and keeps failed jobs out of Needs you.
+
 A successful worker turn is ready for Ted to review. It does not mean the card has shipped or that Sebastian must approve something. These patches put terminal successful jobs in Up next with the status note "Ted review". The live-status transport normalizes that note to lowercase. The delivery state stays blocked until the remaining review, merge, deployment, or application is complete.
 
 The private runtime is intentionally excluded from this public repository. This follows the existing runner-fix patch convention. These changes are staged for Ted review. They have not been installed or deployed.

@@ -24,7 +24,7 @@ class TerminalCardReconciliation(unittest.TestCase):
     def card(self):
         return dict(id='c-test', section='ted_doing', updated_at='1970-01-01T00:00:00Z')
 
-    def test_dead_worker_without_report_moves_to_needs_you(self):
+    def test_dead_worker_without_report_moves_to_up_next(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             directory = root / 'card-c-test'
@@ -36,14 +36,14 @@ class TerminalCardReconciliation(unittest.TestCase):
                 changed, failed = board_live.reap([self.card()], root, now=30000)
             self.assertEqual((changed, failed), (1, 0))
             self.assertEqual(update.call_args.args[1], 'blocked')
-            self.assertEqual(update.call_args.kwargs['section'], 'needs_you')
-            self.assertTrue(update.call_args.kwargs['ask_anyway_reason'])
+            self.assertEqual(update.call_args.kwargs['section'], 'up_next')
+            self.assertNotIn('ask_anyway_reason', update.call_args.kwargs)
 
-    def test_orphaned_card_moves_to_needs_you_after_six_hours(self):
+    def test_orphaned_card_moves_to_up_next_after_six_hours(self):
         with tempfile.TemporaryDirectory() as temp:
             with patch.object(board_live, 'update') as update:
                 board_live.reap([self.card()], temp, now=30000)
-            self.assertEqual(update.call_args.kwargs['section'], 'needs_you')
+            self.assertEqual(update.call_args.kwargs['section'], 'up_next')
 
     def test_successful_job_reports_move_to_up_next_for_ted_review(self):
         for report_text, expected_state, expected_section in (
