@@ -1,23 +1,13 @@
 --- a/job_watchdog.py
 +++ b/job_watchdog.py
-@@ -14,6 +14,7 @@
- import sys
- import time
- import uuid
+@@ -16 +16,2 @@
+-import uuid
++import uuid
 +from scripts.bounded_json_log import append_rows
- 
- BOARD = Path.home() / 'ted-ops/ted-board'
- LOG = Path.home() / 'ted-ops/logs/job-watchdog.log'
-@@ -389,10 +390,8 @@
- 
- def log(rows, dry_run):
-     LOG.parent.mkdir(parents=True, exist_ok=True)
+@@ -392,4 +393,2 @@
 -    with open(LOG, 'a', opener=lambda p, f: os.open(p, f, 0o600)) as stream:
 -        for row in rows:
 -            stream.write(json.dumps(dict(at=time.time(), dry_run=dry_run, **row), sort_keys=True) + '\n')
 -    LOG.chmod(0o600)
 +    append_rows(LOG, [dict(at=time.time(), dry_run=dry_run, **row) for row in rows],
 +                max_bytes=5_000_000, backups=3)
- 
- 
- def main(argv=None):
