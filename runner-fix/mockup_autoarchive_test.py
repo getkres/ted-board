@@ -36,25 +36,88 @@ archive = load('candidate_autoarchive', 'mockup_autoarchive.py')
 
 
 def frame(id='a', batch='Home v1', project='Fictora', **extra):
-    return {**dict(id=id, project=project, batch=batch, title='Home screen',
-                   status='open', verdict=None, verdict_change=None, created_at=OLD), **extra}
+    row = dict(id=id, project=project, batch=batch, title='Home screen',
+               status='open', verdict=None, verdict_change=None, created_at=OLD)
+    if extra.get('verdict'):
+        row['verdict_change'] = dict(at=OLD)
+    elif extra.get('status') == 'picked':
+        row['picked_at'] = OLD
+    return {**row, **extra}
 
 
 class Policy(unittest.TestCase):
-    def candidates(self, rows, cards=None):
+    def candidates(self, rows, cards=None, pins=None):
+        if pins is not None:
+            return archive.candidates(rows, cards or [], NOW, pins=pins)
         return archive.candidates(rows, cards or [], NOW)
 
-    def test_all_reviewable_verdicts_include_needs_work_and_legacy_picks(self):
+    def test_terminal_reviewable_verdicts_and_legacy_picks_archive(self):
         rows = [frame(str(i), verdict=v) for i, v in enumerate(
-            ['approved', 'needs_work', 'scrapped', 'picked'])]
+            ['approved', 'scrapped', 'picked'])]
         rows += [frame('legacy', status='picked'), frame('note', title='Notes'),
                  frame('who', title='Who made and checked this')]
         result = self.candidates(rows)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]['reason'], 'all_reviewed')
-        self.assertEqual(result[0]['reviewable'], 5)
+        self.assertEqual(result[0]['reviewable'], 4)
         self.assertEqual(result[0]['ignored'], 2)
         self.assertEqual(set(result[0]['ids']), {r['id'] for r in rows})
+
+    def test_needs_work_waits_for_new_round_even_with_other_terminal_verdicts(self):
+        for rows in ([frame(verdict='needs_work')],
+                     [frame(verdict='approved'), frame('b', verdict='needs_work')],
+                     [frame(status='picked', verdict='needs_work')]):
+            self.assertEqual(self.candidates(rows), [])
+
+    def test_needs_work_can_archive_via_terminal_card_or_stale_supersession(self):
+        for section in ('done', 'killed'):
+            result = self.candidates([frame(verdict='needs_work', card_id='x')],
+                [dict(id='x', project='Fictora', section=section, title='Work')])
+            self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+        result = self.candidates([frame(verdict='needs_work'),
+            frame('new', batch='Home v2', created_at=RECENT)])
+        self.assertEqual(result[0]['reason'], 'stale_superseded')
+
+    def test_24_hour_floor_applies_to_creation_and_every_verdict_clock(self):
+        cutoff = NOW - timedelta(hours=24)
+        for field in ('created_at', 'verdict_at', 'picked_at', 'verdict_change'):
+            for delta, expected in ((timedelta(), 1), (timedelta(microseconds=1), 0)):
+                at = (cutoff + delta).isoformat()
+                value = dict(at=at) if field == 'verdict_change' else at
+                rows = [frame(verdict='approved', **{field: value})]
+                self.assertEqual(len(self.candidates(rows)), expected, field)
+
+    def test_24_hour_floor_protects_terminal_cards_and_informational_frames(self):
+        fresh = (NOW - timedelta(hours=23)).isoformat()
+        cards = [dict(id='x', project='Fictora', section='done', title='build approved: Home v1')]
+        for row in (frame(created_at=fresh), frame(verdict='needs_work', verdict_change=dict(at=fresh))):
+            self.assertEqual(self.candidates([row], cards), [])
+        for metadata in (frame('note', title='Notes', created_at=fresh),
+                         frame('note', title='Who made and checked this', verdict_change=dict(at=fresh))):
+            self.assertEqual(self.candidates([frame(verdict='approved'), metadata]), [])
+
+    def test_invalid_or_missing_clock_blocks_every_reason(self):
+        cards = [dict(id='x', project='Fictora', section='done', title='build approved: Home v1')]
+        for row in (frame(verdict='approved', created_at=None),
+                    frame(verdict='approved', created_at='invalid'),
+                    frame(verdict='approved', verdict_change=None),
+                    frame(verdict='approved', verdict_change=dict(at='invalid'))):
+            self.assertEqual(self.candidates([row], cards), [])
+
+    def test_unresolved_pin_blocks_all_reasons_including_archived_frames(self):
+        rows = [frame(verdict='approved'), frame('old', status='archived')]
+        for mockup_id in ('a', 'old'):
+            self.assertEqual(self.candidates(rows, pins=[dict(mockup_id=mockup_id, resolved=False)]), [])
+        cards = [dict(id='x', project='Fictora', section='done', title='build approved: Home v1')]
+        pin = dict(mockup_id='a', resolved=False)
+        self.assertEqual(self.candidates([frame()], cards, pins=[pin]), [])
+        self.assertEqual(self.candidates([frame(), frame('new', batch='Home v2', created_at=RECENT)],
+                                         pins=[pin]), [])
+
+    def test_resolved_or_unrelated_pins_allow_an_archive(self):
+        for pin in (dict(mockup_id='a', resolved=True), dict(mockup_id='other', resolved=False)):
+            self.assertEqual(self.candidates([frame(verdict='approved')], pins=[pin])[0]['reason'],
+                             'all_reviewed')
 
     def test_metadata_labels_are_case_insensitive_title_segments(self):
         for title in ('Notes: what changed', 'Hair v13: Notes, what changed and why',
@@ -145,7 +208,7 @@ class Policy(unittest.TestCase):
     def test_missing_or_invalid_activity_does_not_claim_staleness(self):
         for old in (frame(created_at=None), frame(created_at='invalid'),
                     frame(verdict_change={'at': 'invalid'}),
-                    frame(verdict='approved')):
+                    frame(verdict='approved', verdict_change=None)):
             rows = [old, frame('pending'), frame('new', batch='Home v2', created_at=RECENT)]
             self.assertEqual(self.candidates(rows), [])
 
@@ -165,7 +228,7 @@ class Policy(unittest.TestCase):
 
 
 class Runner(unittest.TestCase):
-    def run_pass(self, rows=None, cards=None, dry_run=True, responder=None):
+    def run_pass(self, rows=None, cards=None, pins=None, dry_run=True, responder=None):
         calls = []
         rows = [frame(verdict='approved')] if rows is None else rows
 
@@ -174,8 +237,8 @@ class Runner(unittest.TestCase):
             if responder:
                 return responder(action, payload, len(calls))
             if action is None:
-                return dict(mockups=rows, pins=[])
-            return dict(ok=True, archived=len(rows))
+                return dict(mockups=rows, pins=pins or [])
+            return dict(ok=True, archived=len(payload.get('ids', rows)))
 
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / 'archive.jsonl'
@@ -191,12 +254,96 @@ class Runner(unittest.TestCase):
         self.assertEqual(result[0]['event'], 'would_archive')
         self.assertEqual(events[0]['reason'], 'all_reviewed')
 
-    def test_apply_rechecks_and_logs_confirmed_exact_batch(self):
+    def test_apply_rechecks_and_logs_confirmed_explicit_ids(self):
         result, calls, events = self.run_pass(dry_run=False)
         self.assertEqual(calls, [(None, {}), (None, {}),
-            ('archive', dict(project='Fictora', batch='Home v1'))])
+            ('archive', dict(ids=['a']))])
         self.assertEqual([e['event'] for e in events], ['archive_attempt', 'archived'])
         self.assertEqual(result[0]['archived'], 1)
+
+    def test_receipt_count_uses_active_ids_and_leaves_archived_rows_out(self):
+        rows = [frame(verdict='approved'), frame('old', status='archived')]
+        result, calls, events = self.run_pass(rows=rows, dry_run=False)
+        self.assertEqual(calls[-1], ('archive', dict(ids=['a'])))
+        self.assertEqual(result[0]['event'], 'archived')
+        self.assertEqual(result[0]['archived'], 1)
+
+    def test_explicit_id_requests_respect_the_500_id_api_limit(self):
+        rows = [frame(str(i), verdict='approved') for i in range(501)]
+        requested = []
+        def response(action, payload, count):
+            if action is None:
+                return dict(mockups=rows, pins=[])
+            self.assertEqual(set(payload), {'ids'})
+            self.assertLessEqual(len(payload['ids']), 500)
+            requested.extend(payload['ids'])
+            return dict(ok=True, archived=len(payload['ids']))
+        result, calls, events = self.run_pass(rows=rows, dry_run=False, responder=response)
+        self.assertEqual(result[0]['event'], 'archived')
+        self.assertEqual(result[0]['archived'], 501)
+        self.assertEqual(len(requested), 501)
+        self.assertEqual(set(requested), {row['id'] for row in rows})
+
+    def test_failed_later_id_chunk_logs_only_the_confirmed_partial_count(self):
+        rows = [frame(str(i), verdict='approved') for i in range(501)]
+        def response(action, payload, count):
+            if action is None:
+                return dict(mockups=rows, pins=[])
+            if count == 4:
+                return dict(ok=True, archived=0)
+            return dict(ok=True, archived=len(payload['ids']))
+        result, calls, events = self.run_pass(rows=rows, dry_run=False, responder=response)
+        self.assertEqual(result[0]['event'], 'archive_failed')
+        self.assertEqual(result[0]['archived'], 500)
+
+    def test_frame_uploaded_after_final_get_is_never_archived_unseen(self):
+        server = [frame(verdict='approved')]
+        def response(action, payload, count):
+            if action is None:
+                return dict(mockups=[dict(row) for row in server], pins=[])
+            server.append(frame('unseen', created_at=NOW.isoformat()))
+            matched = [row for row in server if row['id'] in payload['ids']] if 'ids' in payload else server
+            for row in matched:
+                row['status'] = 'archived'
+            return dict(ok=True, archived=len(matched))
+        result, calls, events = self.run_pass(dry_run=False, responder=response)
+        self.assertEqual(server[-1]['status'], 'open')
+        self.assertEqual(result[0]['event'], 'archived')
+        self.assertEqual(result[0]['archived'], 1)
+
+    def test_pin_feed_is_checked_on_initial_read_and_recheck(self):
+        pin = dict(mockup_id='a', resolved=False)
+        result, calls, events = self.run_pass(pins=[pin], dry_run=False)
+        self.assertEqual(result, [])
+        self.assertEqual([action for action, payload in calls], [None])
+        def response(action, payload, count):
+            self.assertIsNone(action)
+            return dict(mockups=[frame(verdict='approved')], pins=[pin] if count > 1 else [])
+        result, calls, events = self.run_pass(dry_run=False, responder=response)
+        self.assertEqual(result[0]['event'], 'skipped_changed')
+        self.assertEqual([action for action, payload in calls], [None, None])
+
+    def test_recent_verdict_on_recheck_prevents_archive(self):
+        def response(action, payload, count):
+            self.assertIsNone(action)
+            changed_at = NOW.isoformat() if count > 1 else OLD
+            return dict(mockups=[frame(verdict='approved', verdict_change=dict(at=changed_at))], pins=[])
+        result, calls, events = self.run_pass(dry_run=False, responder=response)
+        self.assertEqual(result[0]['event'], 'skipped_changed')
+        self.assertEqual([action for action, payload in calls], [None, None])
+
+    def test_missing_or_malformed_pin_feed_fails_closed_before_apply(self):
+        for pins in (None, 'invalid', [None], [dict(mockup_id='a')],
+                     [dict(mockup_id='a', resolved='false')]):
+            calls = []
+            def response(action, payload, count):
+                calls.append(action)
+                return dict(mockups=[frame(verdict='approved')], pins=pins)
+            with self.assertRaises(ValueError):
+                self.run_pass(dry_run=False, responder=response)
+            self.assertEqual(calls, [None])
+        with self.assertRaises(ValueError):
+            self.run_pass(dry_run=False, responder=lambda *args: dict(mockups=[frame(verdict='approved')]))
 
     def test_disabled_apply_fails_before_transport_and_heartbeat_does_nothing(self):
         def forbidden(*args, **kwargs):
@@ -209,7 +356,7 @@ class Runner(unittest.TestCase):
     def test_changed_batch_is_not_archived(self):
         def response(action, payload, count):
             self.assertIsNone(action)
-            return dict(mockups=[frame(verdict='approved')] + ([frame('new')] if count > 1 else []))
+            return dict(mockups=[frame(verdict='approved')] + ([frame('new')] if count > 1 else []), pins=[])
         result, calls, events = self.run_pass(dry_run=False, responder=response)
         self.assertEqual([c[0] for c in calls], [None, None])
         self.assertEqual(result[0]['event'], 'skipped_changed')
@@ -222,7 +369,7 @@ class Runner(unittest.TestCase):
                 {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
             def transport(action=None, **payload):
                 calls.append(action)
-                return dict(mockups=[frame()])
+                return dict(mockups=[frame()], pins=[])
             result = archive.run_pass(dry_run=False, mockup_call=transport,
                 cards_call=lambda: next(cards), log_path=Path(tmp)/'log', now=NOW)
         self.assertEqual(calls, [None, None])
@@ -233,7 +380,7 @@ class Runner(unittest.TestCase):
                         dict(ok=True, archived=0), dict(ok=True, archived=True)):
             def response(action, payload, count):
                 if action is None:
-                    return dict(mockups=[frame(verdict='approved')])
+                    return dict(mockups=[frame(verdict='approved')], pins=[])
                 if isinstance(receipt, Exception):
                     raise receipt
                 return receipt
@@ -251,20 +398,20 @@ class Runner(unittest.TestCase):
         rows = [frame(verdict='approved'), frame('b', batch='Other v1', verdict='approved')]
         def response(action, payload, count):
             if action is None:
-                return dict(mockups=rows)
-            if payload['batch'] == 'Home v1':
+                return dict(mockups=rows, pins=[])
+            if ('a' in payload.get('ids', []) or payload.get('batch') == 'Home v1'):
                 raise RuntimeError('private details')
             return dict(ok=True, archived=1)
         result, calls, events = self.run_pass(rows=rows, dry_run=False, responder=response)
         self.assertEqual([r['event'] for r in result], ['archive_failed', 'archived'])
-        self.assertEqual([payload['batch'] for action, payload in calls if action == 'archive'],
-                         ['Home v1', 'Other v1'])
+        self.assertEqual([payload['ids'] for action, payload in calls if action == 'archive'],
+                         [['a'], ['b']])
 
     def test_log_failure_prevents_archive(self):
         calls = []
         def transport(action=None, **payload):
             calls.append(action)
-            return dict(mockups=[frame(verdict='approved')])
+            return dict(mockups=[frame(verdict='approved')], pins=[])
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,
                 {'TED_MOCKUP_AUTOARCHIVE_ENABLED': 'true'}):
             with self.assertRaises(OSError):

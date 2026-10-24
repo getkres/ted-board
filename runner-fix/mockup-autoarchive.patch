@@ -1,6 +1,6 @@
 --- /dev/null
 +++ mockup_autoarchive.py
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,227 @@
 +#!/usr/bin/env python3
 +"""Archive reviewed, completed, or stale superseded mockup batches on the mini.
 +
@@ -16,7 +16,7 @@
 +
 +ENABLE_FLAG = 'TED_MOCKUP_AUTOARCHIVE_ENABLED'
 +LOG_PATH = Path.home() / 'ted-ops/ted-board/mockup-autoarchive.jsonl'
-+VERDICTS = {'approved', 'needs_work', 'scrapped', 'picked'}
++VERDICTS = {'approved', 'scrapped', 'picked'}
 +META_TITLE = re.compile(r'(?:^|:\s*)(?:notes\s*(?=$|[:,])|who made and checked this\b)', re.I)
 +REVISION = re.compile(r'(?<!\w)(?:v(?:ersion)?\s*\d+(?:\.\d+)*|round\s*\d+|'
 +                      r'\d{8}|\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2})(?!\w)', re.I)
@@ -55,6 +55,8 @@
 +            return None
 +        dates.append(created)
 +        change = row.get('verdict_change') or {}
++        if not isinstance(change, dict):
++            return None
 +        values = [row.get('verdict_at'), row.get('picked_at'), change.get('at')]
 +        activity = [_time(value) for value in values if value is not None]
 +        if any(date is None for date in activity) or (_verdict(row) and not activity):
@@ -76,10 +78,16 @@
 +    return False
 +
 +
-+def candidates(mockups, cards, now):
++def candidates(mockups, cards, now, *, pins=None):
 +    """Return exact active batches and their evidence, without side effects."""
 +    if not isinstance(mockups, list) or not isinstance(cards, list):
 +        raise ValueError('Invalid archive snapshot')
++    pins = [] if pins is None else pins
++    if not isinstance(pins, list) or any(
++            not isinstance(pin, dict) or not isinstance(pin.get('mockup_id'), str)
++            or not pin['mockup_id'] or type(pin.get('resolved')) is not bool for pin in pins):
++        raise ValueError('Invalid pin snapshot')
++    unresolved = {pin['mockup_id'] for pin in pins if not pin['resolved']}
 +    groups = {}
 +    seen = set()
 +    for row in mockups:
@@ -97,6 +105,11 @@
 +        active = [row for row in rows if row['status'] != 'archived']
 +        if not active or _undo_pending(active, now):
 +            continue
++        if any(row['id'] in unresolved for row in rows):
++            continue
++        activity = _activity(rows)
++        if activity is None or now - activity < timedelta(hours=24):
++            continue
 +        reviewable = [row for row in active if not META_TITLE.search(row['title'])]
 +        decision = dict(project=project, batch=batch, ids=sorted(row['id'] for row in active),
 +                        total=len(rows), reviewable=len(reviewable), ignored=len(active)-len(reviewable))
@@ -112,7 +125,6 @@
 +            reason = 'linked_card_killed' if any(card['section'] == 'killed' for card in linked) else 'linked_card_done'
 +            result.append(dict(decision, reason=reason, card_ids=sorted(card['id'] for card in linked)))
 +            continue
-+        activity = _activity(rows)
 +        created = _created(rows)
 +        prefix = _prefix(batch)
 +        if activity is None or created is None or not prefix or now - activity < timedelta(days=5):
@@ -148,9 +160,10 @@
 +
 +    def read(at):
 +        snapshot = mockup_call()
-+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get('mockups'), list):
++        if (not isinstance(snapshot, dict) or not isinstance(snapshot.get('mockups'), list)
++                or not isinstance(snapshot.get('pins'), list)):
 +            raise ValueError('Invalid mockup response')
-+        return candidates(snapshot['mockups'], cards_call(), at)
++        return candidates(snapshot['mockups'], cards_call(), at, pins=snapshot['pins'])
 +
 +    planned = read(now)
 +    events = []
@@ -170,15 +183,20 @@
 +                continue
 +            # A durable intent is required before the network write.
 +            _log(log_path, dict(event, event='archive_attempt'))
++            confirmed = 0
 +            try:
-+                receipt = mockup_call('archive', project=candidate['project'], batch=candidate['batch'])
-+                if (not isinstance(receipt, dict) or receipt.get('ok') is not True
-+                        or type(receipt.get('archived')) is not int
-+                        or receipt['archived'] != candidate['total']):
-+                    raise RuntimeError('Archive was not confirmed')
-+                event.update(event='archived', archived=receipt['archived'])
++                # The existing API accepts at most 500 explicit IDs per request.
++                for start in range(0, len(candidate['ids']), 500):
++                    ids = candidate['ids'][start:start+500]
++                    receipt = mockup_call('archive', ids=ids)
++                    if (not isinstance(receipt, dict) or receipt.get('ok') is not True
++                            or type(receipt.get('archived')) is not int
++                            or receipt['archived'] != len(ids)):
++                        raise RuntimeError('Archive was not confirmed')
++                    confirmed += receipt['archived']
++                event.update(event='archived', archived=confirmed)
 +            except Exception as exc:
-+                event.update(event='archive_failed', error_type=type(exc).__name__)
++                event.update(event='archive_failed', archived=confirmed, error_type=type(exc).__name__)
 +            _log(log_path, event)
 +        events.append(event)
 +    return events
