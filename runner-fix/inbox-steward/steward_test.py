@@ -36,14 +36,13 @@ class CardRules(unittest.TestCase):
 
     def test_worker_reports_go_to_ted_review(self):
         for text in ['Finished.', 'Opened PR #3.', 'Uploaded the screens.',
-                     'The patch was applied.', 'Merged PR #3.', 'The page is live.']:
+                     'The patch was applied.', 'Merged PR #3.', 'The page is live.', 'Uploaded 3 screens.']:
             with self.subTest(text=text):
                 actions = self.target(card(text=text))
                 self.assertEqual([(a['to'], a['reason']) for a in actions], [('up_next', 'Ted review')])
 
     def test_fyi_goes_done_only_without_an_action(self):
-        for text in ['Export completed. No action required.', 'Payment receipt. Thank you.',
-                     'Welcome to the newsletter.', 'Subscription confirmation. No action needed.']:
+        for text in ['Export completed. No action required.', 'Export completed. Receipt attached.']:
             with self.subTest(text=text):
                 self.assertEqual(self.target(card(text=text))[0]['to'], 'done')
         for text in ['Receipt attached. Please approve the charge.',
@@ -94,9 +93,9 @@ class CardRules(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.target(card(text=text)), [])
 
-    def test_fyi_without_messages_can_use_card_body(self):
+    def test_fyi_without_a_dated_worker_message_stays_for_review(self):
         c = card(); c.update(messages=[], title='Export completed', body='Export completed. No action needed.')
-        self.assertEqual(self.target(c)[0]['to'], 'done')
+        self.assertEqual(self.target(c), [])
 
     def test_snapshot_protection_checks_draft_and_veto_metadata(self):
         for fields in [dict(approval={'status': 'cleared'}), dict(veto={'status': 'pending'}),
@@ -108,10 +107,8 @@ class CardRules(unittest.TestCase):
         self.assertEqual(actions[0]['to'], 'up_next')
         self.assertEqual(self.target(card(text='Not finished yet. Receipt attached.')), [])
 
-    def test_product_prices_and_ui_questions_do_not_make_reports_approvals(self):
+    def test_ordinary_completed_reports_without_decision_signals_can_move(self):
         cases = [
-            ('Uploaded the final screens. The monthly paywall says $9.99.', 'Build the monthly paywall.'),
-            ('Finished the search screen. Its label is "Is my character here?".', 'Implement search.'),
             ('Uploaded the hero. The reference caption says "please welcome the cast".', 'Build the hero.'),
             ('Finished the page.', 'Can you build a settings page?'),
             ('Uploaded the screens. The layout must show five locked worlds.', 'Build the closet.'),
@@ -161,6 +158,56 @@ class CardRules(unittest.TestCase):
 
     def test_conditional_merge_instructions_are_not_completed_reports(self):
         self.assertEqual(self.target(card(text='PR will follow. Include the result only if merged by 04:00.')), [])
+
+    def test_uploaded_logo_options_stay_in_needs_you(self):
+        self.assertEqual(self.target(card(text='Uploaded 3 logo options for you to look at.')), [])
+
+    def test_uploaded_mockups_requesting_sebastian_choice_stay(self):
+        self.assertEqual(self.target(card(text='Uploaded the mockups. Tell Sebastian which he likes.')), [])
+
+    def test_finished_work_waiting_for_sign_off_stays(self):
+        self.assertEqual(self.target(card(text='Finished. Ready for your sign-off.')), [])
+
+    def test_uploaded_work_requesting_favorite_stays(self):
+        self.assertEqual(self.target(card(text='Uploaded. Reply with your favorite')), [])
+
+    def test_finished_pricing_change_waiting_for_agreement_stays(self):
+        self.assertEqual(self.target(card(text='Finished the new pricing page, price goes to $39 if you agree.')), [])
+
+    def test_open_pr_with_monthly_price_change_stays(self):
+        self.assertEqual(self.target(card(text='Opened PR #9 to change the price to 19.99 monthly')), [])
+
+    def test_finished_work_with_daily_ad_budget_stays(self):
+        self.assertEqual(self.target(card(text='Finished; ad budget raised to 500 per day')), [])
+
+    def test_report_only_gate_rejects_each_ambiguous_input_family(self):
+        for tail in ['You can inspect it.', 'Your asset is attached.', 'Sebastian received it.',
+                     'Any update?', 'Pick a color.', 'Favorite attached.', 'Prefer the blue.',
+                     'Looks like the draft.', 'One option attached.', 'Sign-off pending.',
+                     'Approve it.', 'Agree to proceed.', 'Thoughts attached.',
+                     'Price unchanged.', 'Pricing is documented.', 'Budget documented.',
+                     'Spend is zero.', '500 per day.', '19.99 monthly.', '$39.',
+                     'The label is "Any questions?".', 'See https://example.test/?view=1']:
+            with self.subTest(tail=tail):
+                self.assertEqual(self.target(card(text='Finished. '+tail)), [])
+
+    def test_a_receipt_cannot_bypass_the_report_only_gate(self):
+        self.assertEqual(self.target(card(text='Receipt attached. Reply with a favorite.')), [])
+        self.assertEqual(self.target(card(text='Payment receipt. Thank you.')), [])
+        self.assertEqual(self.target(card(text='Welcome to the newsletter.')), [])
+
+    def test_completion_evidence_is_required_before_any_move(self):
+        for text in ['The artifact is attached.', 'Receipt attached.', 'Not completed yet.']:
+            self.assertEqual(self.target(card(text=text)), [])
+
+    def test_prices_and_quoted_ui_questions_stay_for_review(self):
+        for text in ['Uploaded the final screens. The monthly paywall says $9.99.',
+                     'Finished the search screen. Its label is "Is my character here?".']:
+            self.assertEqual(self.target(card(text=text)), [])
+
+    def test_bare_dollar_amount_in_card_context_is_protected(self):
+        c = card(text='Finished.'); c['body'] = 'Reference amount: $39.'
+        self.assertEqual(self.target(c), [])
 
 
 class MockupRules(unittest.TestCase):
@@ -366,6 +413,15 @@ class Runner(unittest.TestCase):
             steward.write_overflow(Path(root), rows, NOW)
             result = json.loads((Path(root)/'steward-overflow.json').read_text())
             self.assertEqual(result['ranked'][-1]['id'], '0')
+
+    def test_ambiguous_cards_are_listed_for_ted_even_below_the_cap(self):
+        rows = [card('choice', text='Uploaded 3 logo options for you to look at.')]
+        with tempfile.TemporaryDirectory() as root:
+            steward.write_overflow(Path(root), rows, NOW)
+            result = json.loads((Path(root)/'steward-overflow.json').read_text())
+            self.assertEqual(result['excess_count'], 0)
+            self.assertEqual([r['id'] for r in result['ranked']], ['choice'])
+            self.assertEqual([r['id'] for r in result['ambiguous']], ['choice'])
 
     def test_review_prints_compact_ambiguous_rows_and_redacts_sensitive_text(self):
         c = card(text='See https://example.test/#k=private and token=hidden.')

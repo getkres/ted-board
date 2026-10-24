@@ -22,37 +22,80 @@
 -NEGATED_REPORT = re.compile(r'\b(?:not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
 -                            r'(?:finished|opened|uploaded|applied|merged|live)\b|'
 -                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}(?:upload|finish|apply|merge|open)\b', re.I)
-+                       r'approve (?:the )?(?:charge|payment)|flat fee)\b', re.I)
++                       r'approve (?:the )?(?:charge|payment)|flat fee)\b|\$\s*\d', re.I)
 +MONEY_REQUEST = re.compile(r'\b(?:approve|authorize|pay|spend|charge|purchase)\b[^.\n]{0,80}\$\s*\d', re.I)
 +NEGATED_REPORT = re.compile(r'\b(?:if|unless|no|not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
-+                            r'(?:finished|opened|uploaded|applied|merged|deployed|live)\b|'
++                            r'(?:finished|completed|opened|uploaded|applied|merged|deployed|live)\b|'
 +                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}'
-+                            r'(?:upload(?:ed)?|finish(?:ed)?|appl(?:y|ied)|merge(?:d)?|open(?:ed)?)\b', re.I)
-@@ -72,0 +80,2 @@
++                            r'(?:upload(?:ed)?|finish(?:ed)?|complete(?:d)?|appl(?:y|ied)|merge(?:d)?|open(?:ed)?)\b', re.I)
+@@ -34,0 +42,32 @@
++
++
++# Auto-routing is an allow decision. Every ambiguity check must pass first.
++REPORT_ADDRESS_WORDS = frozenset({'you', 'your', 'yours', 'yourself', 'sebastian'})
++REPORT_CHOICE_PREFIXES = ('pick', 'favorit', 'favourit', 'prefer', 'like', 'liking',
++                          'option', 'approv', 'agre', 'thought', 'signoff')
++REPORT_MONEY_PREFIXES = ('pric', 'budget', 'spend', 'spent')
++COMPLETION = re.compile('(?:'+REPORT.pattern+r'|\bcompleted\b)', re.I)
++
++
++def positive_completion(text, pattern=COMPLETION):
++    negated = list(NEGATED_REPORT.finditer(text))
++    return any(not any(n.start() <= match.start() < n.end() for n in negated)
++               for match in pattern.finditer(text))
++
++
++def report_only_reason(text):
++    """Return a hold reason unless the entire message satisfies report-only policy."""
++    words = tuple(re.findall(r'[a-z]+', text.casefold()))
++    pairs = set(zip(words, words[1:]))
++    if set(words) & REPORT_ADDRESS_WORDS:
++        return 'report addresses sebastian or the reader, ted judgment required'
++    if '?' in text or chr(0xff1f) in text:
++        return 'report contains a question, ted judgment required'
++    if any(word.startswith(REPORT_CHOICE_PREFIXES) for word in words) or ('sign', 'off') in pairs:
++        return 'report contains choice or approval language, ted judgment required'
++    if (any(word.startswith(REPORT_MONEY_PREFIXES) for word in words)
++            or 'monthly' in words or ('per', 'day') in pairs or re.search(r'\$\s*\d', text)):
++        return 'report contains money or pricing language, ted judgment required'
++    if not positive_completion(text):
++        return 'no unambiguous completion evidence, ted judgment required'
++    return None
+@@ -72,0 +112,2 @@
 +    if card.get('live_state') == 'running':
 +        return 'worker is still running'
-@@ -97 +106 @@
+@@ -97 +138 @@
 -    if SENSITIVE.search(content):
 +    if SENSITIVE.search(content) or MONEY_REQUEST.search(content):
-@@ -104 +113,4 @@
+@@ -104 +145,4 @@
 -    if REQUEST.search(content):
 +    current_text = str((last or {}).get('text') or '')
 +    current_text = re.sub(r'https?://\S+', '', current_text)
 +    current_text = re.sub(r'"[^"]*"|[\u201c][^\u201d]*[\u201d]|`[^`]*`', '', current_text)
 +    if '?' in current_text or REQUEST.search(content):
-@@ -119 +131,5 @@
+@@ -114,2 +157,0 @@
+-    if last == {} and FYI.search(str(card.get('title', ''))+' '+str(card.get('body', ''))):
+-        return 'done', 'pure fyi, no action required'
+@@ -119,5 +161,4 @@
 -    if NEGATED_REPORT.search(text):
-+    negated = list(NEGATED_REPORT.finditer(text))
-+    if any(not any(n.start() <= report.start() < n.end() for n in negated)
-+           for report in REPORT.finditer(text)):
-+        return 'up_next', 'Ted review'
-+    if negated:
-@@ -121,2 +136,0 @@
+-        return None, 'unfinished or future work, ted judgment required'
 -    if REPORT.search(text):
 -        return 'up_next', 'Ted review'
-@@ -270,2 +284,3 @@
+-    if FYI.search(text):
++    reason = report_only_reason(text)
++    if reason:
++        return None, reason
++    if FYI.search(text) and not positive_completion(text, REPORT):
+@@ -125 +166 @@
+-    return None, 'ambiguous, ted judgment required'
++    return 'up_next', 'Ted review'
+@@ -270,2 +311,3 @@
 -    ranked = sorted((review_row(c, now, 'keep', classify_card(c, now)[1]) for c in cards
 -                     if c.get('section') == 'needs_you'), key=lambda r: (-r['age_hours'], r['id']))
 +    remaining = sorted((c for c in cards if c.get('section') == 'needs_you'),
 +                       key=lambda c: (activity(c), c.get('id', '')))
 +    ranked = [review_row(c, now, 'keep', classify_card(c, now)[1]) for c in remaining]
+@@ -274 +316,2 @@
+-                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked if excess else [])
++                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked,
++                   ambiguous=[row for c, row in zip(remaining, ranked) if classify_card(c, now)[0] is None])

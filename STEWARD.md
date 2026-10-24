@@ -2,7 +2,9 @@
 
 The Mac mini runs `co.ted.inbox-steward` every 15 minutes. The standard-library Python runner uses existing private `board_client` and `mockup_client` modules from the operational checkout. The operational scripts, launch agent, transports, and credentials remain local. The public [review bundle](runner-fix/inbox-steward/README.md) contains a focused patch and synthetic regression tests. The runner only calls the existing move and archive actions. It has no SQL, send, spending, or deletion path.
 
-Worker reports go from needs_you to up_next with the exact note `Ted review`. Pure FYIs go to done. Real decisions, approvals, money metadata, recent Sebastian replies and answers, unanswered choices, and guided steps remain. Existing `card.py new --needs-you` always sets decision_kind, which the steward protects regardless of age. If a future API supplies explicit creation metadata, the seven-day creator protection applies too. Undated messages remain for review.
+Only report-only messages can move cards out of needs_you. The latest dated worker message must have positive completion evidence and contain no second-person address, question mark, choice or approval words, money or pricing words, daily or monthly rate signal, or dollar amount. Quoted UI copy and URLs receive the same checks. The explicit gate runs before every routing branch, including FYIs. Ambiguity stays in needs_you for Ted.
+
+Eligible worker reports go to up_next with the exact note `Ted review`. Clear completed FYIs go to done. A receipt or welcome message without completion evidence remains for review. Existing approval metadata, decision kinds, recent Sebastian replies and answers, active workers, unanswered choices, and guided steps retain their protection. Existing `card.py new --needs-you` sets decision_kind, which is protected regardless of age. Explicit creation metadata also receives the seven-day protection.
 
 Mockup archival is scoped to the exact project and batch. Version normalization only removes standalone `v2`, `v3`, `final`, and `restart` tags. A replacement must have strictly newer creation times. Complete verdicts include approved, needs_work, scrapped, and legacy picked states. Pending builds, related decision cards, unresolved feedback, and Sebastian feedback or verdicts in the last 48 hours block archival. Only study batch names containing reference lock, inventory, side-by-side, or just-looking evidence qualify for seven-day inactivity archival. A product screen named Inventory does not qualify. The last pin, reply, verdict, and upload count as activity. Archived data is retained by the existing API.
 
@@ -10,7 +12,7 @@ The planner uses a fresh snapshot before each action. Changed actions are deferr
 
 Every attempted and confirmed action appends to the private `~/ted-ops/ted-board/steward-log.jsonl`, with card or batch ID, from, to, reason, timestamp, and outcome. An uncertain network outcome is recorded without error bodies. The next pass reads current state before considering a retry. A dry run writes neither the action journal nor overflow.
 
-After a live pass, `steward-overflow.json` contains the actual remaining needs_you count, the excess above 12, the oldest excess candidates, and the full remaining list in stale-first order. Entries include compact, sanitized review context. Overflow never authorizes a move. An empty result clears an earlier overflow file.
+After a live pass, `steward-overflow.json` contains the actual remaining needs_you count, the excess above 12, the oldest excess candidates, and the full remaining list in stale-first order. The full ranked list and an ambiguous list remain present even below the cap, so Ted can review held cards without an overflow event. Entries include compact, sanitized review context. Overflow never authorizes a move. An empty result clears an earlier overflow file.
 
 ## Run and review
 
