@@ -1,0 +1,498 @@
+--- a/inbox_steward.py
++++ b/inbox_steward.py
+@@ -2 +2 @@
+-"""Mechanical inbox maintenance. Uses only existing board move and archive APIs."""
++"""Mechanical card inbox maintenance. Uses the existing board move API."""
+@@ -4 +4,2 @@
+-from collections import defaultdict
++from contextvars import ContextVar
++from dataclasses import dataclass
+@@ -20,3 +21,3 @@
+-TERMINAL = {'done', 'killed'}
+-VERDICTS = {'approved', 'needs_work', 'scrapped'}
+-REPORT = re.compile(r'\b(finished|opened\s+(?:a\s+)?pr\b|uploaded|applied|merged|(?:is|now|went)\s+live)\b', re.I)
++REPORT = re.compile(r'\b(finished|opened\s+(?:a\s+)?pr\b|uploaded|applied|merged|deployed|'
++                    r'(?:is|now|went)\s+live|pr\s*#\d+\s+(?:is\s+)?open|'
++                    r'(?:is|are)\s+up\s+(?:on|in)|(?:implementation|work|build|patch)\s+(?:is\s+)?completed)\b', re.I)
+@@ -24,4 +25,7 @@
+-REQUEST = re.compile(r'\?|\b(approval (?:needed|required|pending)|awaiting (?:your|a decision)|waiting (?:on|for) you|'
+-                     r'please\b|must\b|verify\b|(?:payment|charge) failed|outstanding balance|cancellation required|renewal required|choose\b|pick (?:one|a|the|your)|your (?:pick|decision|approval|call)|'
+-                     r'approve (?:each|the|this)|tap yes|tell me|update your|action required|'
+-                     r'needs? (?:your |an? )?(?:approval|decision|signature)|pending approval)\b', re.I)
++REQUEST = re.compile(r'\b(approval (?:needed|required|pending)|awaiting (?:your|a decision)|waiting (?:on|for) you|'
++                     r'(?:please|must)\s+(?:review|approve|choose|pick|verify|confirm|decide|sign|pay|respond|reply|update|renew|cancel)|'
++                     r'(?:can|could|would)\s+you\s+(?:review|approve|choose|pick|confirm|decide|sign|pay)|'
++                     r'verify (?:your|the account)|(?:payment|charge) failed|outstanding balance|'
++                     r'cancellation required|renewal required|choose\b|pick (?:one|a|the|your)|'
++                     r'should (?:i|we)|which (?:one|option|route|design)|your (?:pick|choice|decision|approval|call)|approve (?:each|the|this)|tap yes|tell me|'
++                     r'type your (?:version|copy|answer)|say a letter|update your|action required|needs? (?:your |an? )?(?:approval|decision|signature)|pending approval)\b', re.I)
+@@ -30,5 +34,59 @@
+-                       r'approve (?:the )?(?:charge|payment)|flat fee|\$\s*\d)\b|\$\s*\d', re.I)
+-NEGATED_REPORT = re.compile(r'\b(?:not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
+-                            r'(?:finished|opened|uploaded|applied|merged|live)\b|'
+-                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}(?:upload|finish|apply|merge|open)\b', re.I)
+-STUDY = re.compile(r'\b(reference locks?|inventor(?:y|ies)|side[ -]by[ -]sides?|just to look|just[ -]looking)\b', re.I)
++                       r'approve (?:the )?(?:charge|payment)|flat fee)\b|\$\s*\d', re.I)
++MONEY_REQUEST = re.compile(r'\b(?:approve|authorize|pay|spend|charge|purchase)\b[^.\n]{0,80}\$\s*\d', re.I)
++NEGATED_REPORT = re.compile(r'\b(?:if|unless|no|not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
++                            r'(?:finished|completed|opened|uploaded|applied|merged|deployed|live)\b|'
++                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}'
++                            r'(?:upload(?:ed)?|finish(?:ed)?|complete(?:d)?|appl(?:y|ied)|merge(?:d)?|open(?:ed)?)\b', re.I)
++
++
++# Case-insensitive project/section selectors. A wildcard matches every value.
++PROTECTED_SCOPES = (
++    ('personal', '*'),
++    ('money', '*'),
++    ('*', 'ted_doing'),
++    ('*', 'up_next'),
++    ('*', 'done'),
++    ('*', 'killed'),
++)
++
++
++def protected_scope(card):
++    project = str(card.get('project') or '').strip().casefold()
++    section = str(card.get('section') or '').strip().casefold()
++    return any(p in ('*', project) and s in ('*', section) for p, s in PROTECTED_SCOPES)
++
++
++def disabled(root):
++    return (ROOT / 'steward.disabled').exists() or (Path(root) / 'steward.disabled').exists()
++
++
++# Auto-routing is an allow decision. Every ambiguity check must pass first.
++REPORT_ADDRESS_WORDS = frozenset({'you', 'your', 'yours', 'yourself', 'sebastian'})
++REPORT_CHOICE_PREFIXES = ('pick', 'favorit', 'favourit', 'prefer', 'like', 'liking',
++                          'option', 'approv', 'agre', 'thought', 'signoff')
++REPORT_MONEY_PREFIXES = ('pric', 'budget', 'spend', 'spent')
++COMPLETION = re.compile('(?:'+REPORT.pattern+r'|\bcompleted\b)', re.I)
++
++
++def positive_completion(text, pattern=COMPLETION):
++    negated = list(NEGATED_REPORT.finditer(text))
++    return any(not any(n.start() <= match.start() < n.end() for n in negated)
++               for match in pattern.finditer(text))
++
++
++def report_only_reason(text):
++    """Return a hold reason unless the entire message satisfies report-only policy."""
++    words = tuple(re.findall(r'[a-z]+', text.casefold()))
++    pairs = set(zip(words, words[1:]))
++    if set(words) & REPORT_ADDRESS_WORDS:
++        return 'report addresses sebastian or the reader, ted judgment required'
++    if '?' in text or chr(0xff1f) in text:
++        return 'report contains a question, ted judgment required'
++    if any(word.startswith(REPORT_CHOICE_PREFIXES) for word in words) or ('sign', 'off') in pairs:
++        return 'report contains choice or approval language, ted judgment required'
++    if (any(word.startswith(REPORT_MONEY_PREFIXES) for word in words)
++            or 'monthly' in words or ('per', 'day') in pairs or re.search(r'\$\s*\d', text)):
++        return 'report contains money or pricing language, ted judgment required'
++    if not positive_completion(text):
++        return 'no unambiguous completion evidence, ted judgment required'
++    return None
+@@ -63 +121 @@
+-    times.extend(stamp(m.get('at')) for m in card.get('messages', []) if isinstance(m, dict))
++    times.extend(stamp(m.get('at')) for m in (card.get('messages') or []) if isinstance(m, dict))
+@@ -72,0 +131,4 @@
++    if protected_scope(card):
++        return 'protected project or section, manual review only'
++    if card.get('live_state') == 'running':
++        return 'worker is still running'
+@@ -97 +159 @@
+-    if SENSITIVE.search(content):
++    if SENSITIVE.search(content) or MONEY_REQUEST.search(content):
+@@ -104 +166,4 @@
+-    if REQUEST.search(content):
++    current_text = str((last or {}).get('text') or '')
++    current_text = re.sub(r'https?://\S+', '', current_text)
++    current_text = re.sub(r'"[^"]*"|[\u201c][^\u201d]*[\u201d]|`[^`]*`', '', current_text)
++    if '?' in current_text or REQUEST.search(content):
+@@ -114,2 +178,0 @@
+-    if last == {} and FYI.search(str(card.get('title', ''))+' '+str(card.get('body', ''))):
+-        return 'done', 'pure fyi, no action required'
+@@ -119,5 +182,4 @@
+-    if NEGATED_REPORT.search(text):
+-        return None, 'unfinished or future work, ted judgment required'
+-    if REPORT.search(text):
+-        return 'up_next', 'Ted review'
+-    if FYI.search(text):
++    reason = report_only_reason(text)
++    if reason:
++        return None, reason
++    if FYI.search(text) and not positive_completion(text, REPORT):
+@@ -125,6 +187 @@
+-    return None, 'ambiguous, ted judgment required'
+-
+-
+-def base_title(value):
+-    value = re.sub(r'\b(?:v\d+(?:\.\d+)*|final|restart)\b', ' ', value, flags=re.I)
+-    return re.sub(r'[^\w]+', ' ', value.lower()).strip()
++    return 'up_next', 'Ted review'
+@@ -144,33 +201 @@
+-def linked_cards(rows, cards):
+-    project, batch = rows[0]['project'], rows[0]['batch']
+-    ids = {r['id'] for r in rows}
+-    return [c for c in cards if c.get('project') == project and c.get('section') not in TERMINAL and
+-            (c.get('batch') == batch or batch.lower() in (str(c.get('title', ''))+'\n'+str(c.get('body', ''))).lower()
+-             or any(mid in str(c.get('body', '')) for mid in ids))]
+-
+-
+-def batch_reason(rows, pins, cards, now):
+-    attached = [p for p in pins if p.get('mockup_id') in {r['id'] for r in rows}]
+-    if any(not stamp(p.get('created_at')) or any(not stamp(m.get('at')) for m in p.get('thread', [])) for p in attached):
+-        return 'undated mockup activity', attached
+-    if any(not p.get('resolved') for p in attached):
+-        return 'unresolved mockup feedback', attached
+-    if any(recent_human(p.get('thread') or [], now) for p in attached):
+-        return 'sebastian replied within 48 hours', attached
+-    if any(r.get('verdict_change') and (not stamp(r['verdict_change'].get('at')) or
+-            now-stamp(r['verdict_change']['at']) < 2*DAY) for r in rows):
+-        return 'recent or undated sebastian verdict', attached
+-    for c in linked_cards(rows, cards):
+-        if 'build approved:' in c.get('title', '').lower() or c.get('build_pending'):
+-            return 'build is pending', attached
+-        reason = protection(c, now)
+-        if reason:
+-            return reason, attached
+-    if any(r.get('build_pending') or r.get('detail_error') for r in rows):
+-        return 'build or image detail pending', attached
+-    if any(not stamp(r.get('created_at')) for r in rows):
+-        return 'unknown batch creation time', attached
+-    return None, attached
+-
+-
+-def plan(cards, mockups, pins, now):
++def plan(cards, now):
+@@ -187,35 +211,0 @@
+-    groups = defaultdict(list)
+-    for row in mockups:
+-        if row.get('status') != 'archived' and row.get('project') and row.get('batch'):
+-            groups[(row['project'], row['batch'])].append(row)
+-    for (project, batch), rows in sorted(groups.items()):
+-        blocked, attached = batch_reason(rows, pins, cards, now)
+-        reason = None
+-        if not blocked:
+-            newest = max(stamp(r['created_at']) for r in rows)
+-            newer = [name for (proj, name), other in groups.items() if proj == project and name != batch
+-                     and base_title(name) and base_title(name) == base_title(batch)
+-                     and all(stamp(r.get('created_at')) for r in other)
+-                     and min(stamp(r['created_at']) for r in other) > newest
+-                     and not any(r.get('detail_error') for r in other)]
+-            if newer:
+-                reason = 'superseded by '+sorted(newer)[0]
+-            elif all(r.get('verdict') in VERDICTS or (not r.get('verdict') and r.get('status') == 'picked') for r in rows):
+-                reason = 'every image has a verdict, and no build is pending'
+-            elif STUDY.search(batch):
+-                touched = [stamp(r.get('created_at')) for r in rows]
+-                touched.extend(stamp((r.get('verdict_change') or {}).get('at')) for r in rows)
+-                touched.extend(stamp(p.get('created_at')) for p in attached)
+-                touched.extend(stamp(m.get('at')) for p in attached for m in p.get('thread', []))
+-                if now-max(touched) >= 7*DAY:
+-                    reason = 'just-looking study untouched for seven days'
+-        if reason:
+-            actions.append(dict(kind='archive', card_id='batch:'+project+':'+batch,
+-                                project=project, batch=batch, **{'from': 'mockups'}, to='archived',
+-                                reason=reason, basis=digest([rows, attached])))
+-        else:
+-            times = [stamp(r.get('created_at')) for r in rows]
+-            review.append(dict(id=clean('batch:'+batch), project=clean(project), title=clean(batch),
+-                               age_hours=round(max(0, now-max(times))/3600, 1),
+-                               last_message=clean(blocked or 'no mechanical archive rule applies'),
+-                               suggested_move='keep', reason=blocked or 'ted judgment required'))
+@@ -224,0 +215,33 @@
++# A run owns a short-lived, validated snapshot lease. No writer can be used
++# outside that run. The sole recovery permission writes stale health data only.
++SNAPSHOT_MAX_AGE = 30
++RUN = ContextVar('steward_run', default=None)
++
++
++class WritesDisabled(RuntimeError):
++    pass
++
++
++@dataclass
++class WriteState:
++    root: Path
++    cards: object = None
++    observed_at: object = None
++    failed_at: object = None
++
++
++def can_write(root, *, stale_only=False):
++    """Admit a fresh data write or the boundary's stale-only recovery write."""
++    if disabled(root):
++        raise WritesDisabled('Steward disabled')
++    state = RUN.get()
++    if state is None or state.root != Path(root).resolve():
++        raise RuntimeError('Run snapshot required')
++    observed = state.failed_at if stale_only else state.observed_at
++    if observed is None or not 0 <= time.monotonic()-observed <= SNAPSHOT_MAX_AGE:
++        raise RuntimeError('Fresh observation required')
++    if not stale_only and (state.failed_at is not None or state.cards is None):
++        raise RuntimeError('Complete snapshot required')
++    return state
++
++
+@@ -226,3 +249,10 @@
+-    from board_client import cards
+-    result = cards()
+-    if not isinstance(result, list) or len(result) >= 500:
++    # cards() discards the envelope and defaults a missing cards key to [].
++    from board_client import call
++    response = call(page=True, section='needs_you')
++    if (not isinstance(response, dict) or 'error' in response
++            or response.get('pod_pulse_error') is True
++            or 'cards' not in response or not isinstance(response['cards'], list)
++            or len(response['cards']) >= 500
++            or any(not isinstance(c, dict) or not isinstance(c.get('id'), str)
++                   or not c['id'] or not isinstance(c.get('project'), str)
++                   or not isinstance(c.get('section'), str) for c in response['cards'])):
+@@ -230,9 +260,12 @@
+-    return result
+-
+-
+-def fetch_mockups():
+-    from mockup_client import call
+-    result = call()
+-    if not isinstance(result, dict) or not isinstance(result.get('mockups'), list) or not isinstance(result.get('pins'), list):
+-        raise RuntimeError('Mockup snapshot incomplete')
+-    return result
++    return response['cards']
++
++
++def refresh_snapshot(state):
++    state.cards = None
++    state.observed_at = None
++    cards = fetch_cards()
++    state.cards = cards
++    state.observed_at = time.monotonic()
++    if disabled(state.root):
++        raise WritesDisabled('Steward disabled')
++    return cards
+@@ -242,0 +276,3 @@
++    state = RUN.get()
++    root = state.root if state is not None else ROOT
++    can_write(root)
+@@ -244,10 +279,0 @@
+-
+-
+-def archive_batch(project, batch):
+-    from mockup_client import call
+-    return call('archive', project=project, batch=batch)
+-
+-
+-def snapshot():
+-    cards, payload = fetch_cards(), fetch_mockups()
+-    return cards, payload['mockups'], payload['pins']
+@@ -258,2 +283,0 @@
+-    if action.get('batch'):
+-        row['batch'] = clean(action['batch'], 300)
+@@ -261 +285,3 @@
+-    path = root / 'steward-log.jsonl'
++    data = (json.dumps(row, sort_keys=True)+'\n').encode()
++    path = Path(root) / 'steward-log.jsonl'
++    can_write(root)
+@@ -263,4 +289,7 @@
+-    with os.fdopen(fd, 'a') as stream:
+-        stream.write(json.dumps(row, sort_keys=True)+'\n')
+-        stream.flush()
+-        os.fsync(stream.fileno())
++    try:
++        can_write(root)
++        if os.write(fd, data) != len(data):
++            raise OSError('Incomplete journal write')
++        os.fsync(fd)
++    finally:
++        os.close(fd)
+@@ -270,2 +299,3 @@
+-    ranked = sorted((review_row(c, now, 'keep', classify_card(c, now)[1]) for c in cards
+-                     if c.get('section') == 'needs_you'), key=lambda r: (-r['age_hours'], r['id']))
++    remaining = sorted((c for c in cards if c.get('section') == 'needs_you'),
++                       key=lambda c: (activity(c), c.get('id', '')))
++    ranked = [review_row(c, now, 'keep', classify_card(c, now)[1]) for c in remaining]
+@@ -274 +304,15 @@
+-                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked if excess else [])
++                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked,
++                   ambiguous=[row for c, row in zip(remaining, ranked) if classify_card(c, now)[0] is None])
++    payload.update(stale=False, stale_since=None)
++    can_write(root)
++    write_overflow_json(root, payload)
++    return len(ranked), excess
++
++
++def write_overflow_json(root, payload, *, stale_only=False):
++    if stale_only and payload.get('stale') is not True:
++        raise RuntimeError('Stale recovery payload required')
++    root = Path(root)
++    data = (json.dumps(payload, indent=2)+'\n').encode()
++    can_write(root, stale_only=stale_only)
++    root.mkdir(parents=True, exist_ok=True)
+@@ -276,0 +321 @@
++    can_write(root, stale_only=stale_only)
+@@ -278,5 +323,10 @@
+-    with os.fdopen(fd, 'w') as stream:
+-        json.dump(payload, stream, indent=2)
+-        stream.write('\n')
+-        stream.flush()
+-        os.fsync(stream.fileno())
++    try:
++        can_write(root, stale_only=stale_only)
++        os.fchmod(fd, 0o600)
++        can_write(root, stale_only=stale_only)
++        if os.write(fd, data) != len(data):
++            raise OSError('Incomplete overflow write')
++        os.fsync(fd)
++    finally:
++        os.close(fd)
++    can_write(root, stale_only=stale_only)
+@@ -284 +334,52 @@
+-    return len(ranked), excess
++
++
++def mark_stale(root, now):
++    path = Path(root) / 'steward-overflow.json'
++    try:
++        payload = json.loads(path.read_text())
++        if not isinstance(payload, dict):
++            raise ValueError('Invalid cached overflow')
++    except (OSError, ValueError):
++        payload = dict(at=None, needs_you=None, cap=12, excess_count=None,
++                       extras=[], ranked=[], ambiguous=[])
++    first = stamp(payload.get('stale_since')) or now
++    payload.update(stale=True, stale_since=datetime.fromtimestamp(first, timezone.utc).isoformat(),
++                   last_attempt_at=datetime.fromtimestamp(now, timezone.utc).isoformat())
++    can_write(root, stale_only=True)
++    write_overflow_json(root, payload, stale_only=True)
++
++
++def execute_run(root, counts, state, fixed_now):
++    now = time.time() if fixed_now is None else fixed_now
++    cards = refresh_snapshot(state)
++    proposed = plan(cards, now)
++    counts.update(planned_moves=len(proposed['actions']),
++                  needs_you_before=sum(c.get('section') == 'needs_you' for c in cards))
++    counts['actions'] = [{k: clean(v, 300) for k, v in a.items() if k != 'basis'} for a in proposed['actions']]
++    if counts['dry_run']:
++        remaining = counts['needs_you_before'] - counts['planned_moves']
++        counts.update(needs_you_after=remaining, overflow=max(0, remaining-12))
++        return
++    can_write(root)
++    root.mkdir(parents=True, exist_ok=True)
++    can_write(root)
++    fd = os.open(root / '.steward.lock', os.O_WRONLY | os.O_CREAT, 0o600)
++    try:
++        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        for action in proposed['actions']:
++            current_now = time.time() if fixed_now is None else fixed_now
++            current_cards = refresh_snapshot(state)
++            if action not in plan(current_cards, current_now)['actions']:
++                journal(root, action, 'deferred, state changed', now)
++                counts['deferred'] += 1
++                continue
++            journal(root, action, 'attempt', now)
++            result = move_card(action['card_id'], action['to'], action['reason'])
++            if not isinstance(result, dict) or result.get('ok') is not True:
++                raise RuntimeError('Action not confirmed')
++            counts['moved'] += 1
++            journal(root, action, 'applied', now)
++        cards = refresh_snapshot(state)
++        counts['needs_you_after'], counts['overflow'] = write_overflow(root, cards, now)
++    finally:
++        os.close(fd)
+@@ -289,12 +390,5 @@
+-    fixed_now = now
+-    now = time.time() if now is None else now
+-    cards, mockups, pins = snapshot()
+-    proposed = plan(cards, mockups, pins, now)
+-    counts = dict(dry_run=dry_run, planned_moves=sum(a['kind'] == 'move' for a in proposed['actions']),
+-                  planned_archives=sum(a['kind'] == 'archive' for a in proposed['actions']),
+-                  moved=0, archived_batches=0, archived_images=0, deferred=0, failed=0,
+-                  needs_you_before=sum(c.get('section') == 'needs_you' for c in cards))
+-    counts['actions'] = [{k: clean(v, 300) for k, v in a.items() if k != 'basis'} for a in proposed['actions']]
+-    if dry_run:
+-        remaining = counts['needs_you_before']-counts['planned_moves']
+-        counts.update(needs_you_after=remaining, overflow=max(0, remaining-12))
++    counts = dict(dry_run=dry_run, disabled=False, stale=False, planned_moves=0,
++                  moved=0, deferred=0, failed=0, needs_you_before=None,
++                  needs_you_after=None, overflow=None, actions=[])
++    if disabled(root):
++        counts['disabled'] = True
+@@ -302,9 +396,15 @@
+-    root.mkdir(parents=True, exist_ok=True)
+-    for action in proposed['actions']:
+-        current_cards, current_mockups, current_pins = snapshot()
+-        current = plan(current_cards, current_mockups, current_pins, time.time() if fixed_now is None else fixed_now)
+-        if action not in current['actions']:
+-            journal(root, action, 'deferred, state changed', now)
+-            counts['deferred'] += 1
+-            continue
+-        journal(root, action, 'attempt', now)
++    token = None
++    try:
++        state = WriteState(root.resolve())
++        token = RUN.set(state)
++        execute_run(root, counts, state, now)
++    except Exception as error:
++        # All reads, planning, and writes share this recovery boundary.
++        # Revoke data permission before the health-only stale write.
++        counts.update(stale=True, failed=counts['failed']+1,
++                      needs_you_after=None, overflow=None)
++        state = RUN.get()
++        if state is not None:
++            state.cards = None
++            state.observed_at = None
++            state.failed_at = time.monotonic()
+@@ -312,6 +412,3 @@
+-            if action['kind'] == 'move':
+-                result = move_card(action['card_id'], action['to'], action['reason'])
+-            else:
+-                result = archive_batch(action['project'], action['batch'])
+-            if not isinstance(result, dict) or result.get('ok') is not True:
+-                raise RuntimeError('Action not confirmed')
++            mark_stale(root, time.time() if now is None else now)
++        except WritesDisabled:
++            counts['disabled'] = True
+@@ -319,11 +416,7 @@
+-            journal(root, action, 'uncertain, refresh before retry', now)
+-            counts['failed'] += 1
+-            continue
+-        journal(root, action, 'applied', now)
+-        if action['kind'] == 'move':
+-            counts['moved'] += 1
+-        else:
+-            counts['archived_batches'] += 1
+-            counts['archived_images'] += int(result.get('archived', 0))
+-    cards = fetch_cards()
+-    counts['needs_you_after'], counts['overflow'] = write_overflow(root, cards, now)
++            # A broken cache cannot recursively invoke recovery.
++            counts['stale_write_failed'] = True
++        if isinstance(error, WritesDisabled):
++            counts.update(disabled=True, failed=0)
++    finally:
++        if token is not None:
++            RUN.reset(token)
+@@ -343,0 +437,3 @@
++    if disabled(args.root):
++        print(json.dumps(dict(disabled=True, moved=0, failed=0)))
++        return 0
+@@ -345,9 +441 @@
+-    args.root.mkdir(parents=True, exist_ok=True)
+-    with (args.root / '.steward.lock').open('a') as lock:
+-        os.chmod(lock.name, 0o600)
+-        try:
+-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-        except BlockingIOError:
+-            print('steward already running')
+-            return 0
+-        result = run_once(args.root, args.dry_run)
++    result = run_once(args.root, args.dry_run)
+--- a/steward_review.py
++++ b/steward_review.py
+@@ -2 +2 @@
+-"""Print ambiguous inbox cards and mockup batches for Ted's judgment pass."""
++"""Print ambiguous inbox cards for Ted's judgment pass."""
+@@ -11,2 +11 @@
+-    cards, mockups, pins = steward.snapshot()
+-    rows = steward.plan(cards, mockups, pins, time.time() if now is None else now)['review']
++    rows = steward.plan(steward.fetch_cards(), time.time() if now is None else now)['review']
