@@ -63,7 +63,7 @@ def main():
                     time.sleep(0.25)
                     continue
                 if audio is None:
-                    audio = Audio(home / "Ted Voice.app/Contents/MacOS/TedVoice", emit)
+                    audio = Audio(home / "bin/TedVoiceAudio", emit)
                     wake.reset()
                     loop = VoiceLoop(
                         home,

@@ -146,3 +146,38 @@ class ApprovalTests(unittest.TestCase):
                 self.assertEqual(
                     json.loads((home / "elevenlabs-usage.json").read_text())["characters"], 6
                 )
+
+
+class AudioDiagnosticsTests(unittest.TestCase):
+    def test_native_device_and_error_fields_reach_event_log(self):
+        import json
+        from unittest.mock import Mock, patch
+
+        from runtime import Audio
+
+        for row in [
+            dict(event="audio_ready", echo_cancelled=True, input_id=99, output_id=94),
+            dict(
+                event="engine_start_failed",
+                error_domain="com.apple.coreaudio.avfaudio",
+                error_code=-10875,
+            ),
+        ]:
+            with self.subTest(event=row["event"]):
+                audio = Audio.__new__(Audio)
+                audio.emit = Mock()
+                audio.process = Mock()
+                audio.process.poll.return_value = None
+                audio.buffer = b""
+                audio.events = b""
+                audio.play_path = None
+                audio.playing = False
+                audio.echo_clean = False
+                with (
+                    patch("select.select", return_value=([audio.process.stderr], [], [])),
+                    patch("os.read", return_value=(json.dumps(row) + "\n").encode()),
+                ):
+                    audio.pump()
+                audio.emit.assert_called_once_with(
+                    row["event"], **{k: v for k, v in row.items() if k != "event"}
+                )

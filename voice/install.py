@@ -32,6 +32,79 @@ def launchd_config(home, python):
     )
 
 
+def install_native(source, home):
+    """Update audio without replacing the launcher's approved microphone identity."""
+    helper = home / "bin/TedVoiceAudio"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["/usr/bin/swiftc", "-O", str(source / "Audio.swift"), "-o", str(helper)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        [
+            "/usr/bin/codesign",
+            "--force",
+            "--sign",
+            "-",
+            "--identifier",
+            "co.ted.voice.audio",
+            str(helper),
+        ],
+        check=True,
+    )
+    app = home / "Ted Voice.app"
+    bundle = app / "Contents"
+    launcher = bundle / "MacOS/TedVoice"
+    if not launcher.exists() or not (bundle / "Info.plist").exists():
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        info = dict(
+            CFBundleIdentifier="co.ted.voice",
+            CFBundleName="Ted Voice",
+            CFBundleDisplayName="Ted Voice",
+            CFBundleExecutable="TedVoice",
+            CFBundlePackageType="APPL",
+            CFBundleVersion="1",
+            LSUIElement=True,
+            NSMicrophoneUsageDescription="Ted listens locally for hey Ted, then transcribes your request on this Mac.",
+        )
+        (bundle / "Info.plist").write_bytes(plistlib.dumps(info))
+        shutil.copy2(helper, launcher)
+        subprocess.run(
+            [
+                "/usr/bin/codesign",
+                "--force",
+                "--sign",
+                "-",
+                "--identifier",
+                "co.ted.voice",
+                str(app),
+            ],
+            check=True,
+        )
+    for target in [helper, app]:
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(target)], check=True)
+    # LaunchServices registration supplies the approved app context to launchd.
+    # Device enumeration does not open the microphone or request permission.
+    subprocess.run(
+        [
+            "/usr/bin/open",
+            "-n",
+            "-g",
+            "-W",
+            str(app),
+            "--stdout",
+            "/dev/null",
+            "--stderr",
+            "/dev/null",
+            "--args",
+            "--devices",
+        ],
+        check=True,
+        timeout=15,
+    )
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--home", type=Path, default=Path.home() / "ted-ops/voice")
@@ -64,42 +137,7 @@ def main():
         shutil.copy2(source / "README.md", home / "README.md")
     for name in ["hey_ted.onnx", "training.json"]:
         shutil.copy2(a.models / name, home / "models" / name)
-    bundle = home / "Ted Voice.app/Contents"
-    (bundle / "MacOS").mkdir(parents=True, exist_ok=True)
-    info = dict(
-        CFBundleIdentifier="co.ted.voice",
-        CFBundleName="Ted Voice",
-        CFBundleDisplayName="Ted Voice",
-        CFBundleExecutable="TedVoice",
-        CFBundlePackageType="APPL",
-        CFBundleVersion="1",
-        LSUIElement=True,
-        NSMicrophoneUsageDescription="Ted listens locally for hey Ted, then transcribes your request on this Mac.",
-    )
-    (bundle / "Info.plist").write_bytes(plistlib.dumps(info))
-    subprocess.run(
-        [
-            "/usr/bin/swiftc",
-            "-O",
-            str(source / "Audio.swift"),
-            "-o",
-            str(bundle / "MacOS/TedVoice"),
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        [
-            "/usr/bin/codesign",
-            "--force",
-            "--sign",
-            "-",
-            "--identifier",
-            "co.ted.voice",
-            str(home / "Ted Voice.app"),
-        ],
-        check=True,
-    )
+    install_native(source, home)
     import math
     import struct
     import wave

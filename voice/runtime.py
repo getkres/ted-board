@@ -296,7 +296,7 @@ class Audio:
                         self.last_done = time.monotonic()
                         if self.play_path and self.play_path.name.startswith("speech-"):
                             self.play_path.unlink(missing_ok=True)
-                    self.emit(name)
+                    self.emit(name, **{key: value for key, value in row.items() if key != "event"})
         if self.process.poll() is not None:
             raise RuntimeError("audio helper stopped")
         frames = []

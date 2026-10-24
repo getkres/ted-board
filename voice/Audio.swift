@@ -43,11 +43,51 @@ func preferred(_ list: [[String: Any]], _ kind: String, _ selector: AudioObjectP
     if let item = list.first(where: { ($0["name"] as? String ?? "").lowercased().contains("jabra") && $0[kind] as? Bool == true }) { return item["id"] as! AudioDeviceID }
     return property(AudioObjectID(kAudioObjectSystemObject), selector)
 }
-func assign(_ node: AVAudioIONode, _ device: AudioDeviceID) throws {
-    guard let unit = node.audioUnit else { throw NSError(domain: "audio-unit", code: 1) }
+func selectDefault(_ selector: AudioObjectPropertySelector, _ device: AudioDeviceID) throws {
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    if device == 0 || property(system, selector) == device { return }
+    var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     var value = device
-    let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &value, UInt32(MemoryLayout<AudioDeviceID>.size))
-    if status != noErr { throw NSError(domain: "device-route", code: Int(status)) }
+    let status = AudioObjectSetPropertyData(system, &address, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &value)
+    if status != noErr { throw NSError(domain: "default-device-route", code: Int(status)) }
+}
+func currentDevice(_ node: AVAudioIONode) -> UInt32 {
+    guard let unit = node.audioUnit else { return 0 }
+    var device: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
+    AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, &size)
+    return device
+}
+func formatFields(_ format: AVAudioFormat) -> [String: Any] {
+    return ["sample_rate": format.sampleRate, "channels": format.channelCount,
+            "common_format": format.commonFormat.rawValue, "interleaved": format.isInterleaved]
+}
+func routeFields(_ engine: AVAudioEngine, _ inputID: AudioDeviceID, _ outputID: AudioDeviceID, _ capture: Bool) -> [String: Any] {
+    var fields: [String: Any] = ["input_id": inputID, "output_id": outputID,
+        "input_name": devices().first(where: { $0["id"] as? UInt32 == inputID })?["name"] ?? "none",
+        "output_name": devices().first(where: { $0["id"] as? UInt32 == outputID })?["name"] ?? "none",
+        "default_input_id": property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice),
+        "default_output_id": property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice),
+        "output_au_device": currentDevice(engine.outputNode),
+        "output_input_format": formatFields(engine.outputNode.inputFormat(forBus: 0)),
+        "output_hardware_format": formatFields(engine.outputNode.outputFormat(forBus: 0))]
+    if capture {
+        fields["input_au_device"] = currentDevice(engine.inputNode)
+        fields["input_hardware_format"] = formatFields(engine.inputNode.inputFormat(forBus: 0))
+        fields["input_output_format"] = formatFields(engine.inputNode.outputFormat(forBus: 0))
+        fields["shared_io_unit"] = engine.inputNode.audioUnit == engine.outputNode.audioUnit
+    }
+    return fields
+}
+func eventError(_ name: String, _ error: Error, _ fields: [String: Any] = [:]) {
+    let error = error as NSError
+    var row = fields
+    row["error_domain"] = error.domain; row["error_code"] = error.code
+    row["error_description"] = error.localizedDescription
+    row["error_debug_description"] = error.userInfo[NSDebugDescriptionErrorKey] as? String ?? ""
+    if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+        row["underlying_error_domain"] = underlying.domain; row["underlying_error_code"] = underlying.code
+    }
+    event(name, row)
 }
 let args = CommandLine.arguments
 if args.contains("--devices") {
@@ -62,12 +102,20 @@ if let index = args.firstIndex(of: "--supervise"), args.count > index + 2 {
     term.setEventHandler { child.terminate() }; term.resume()
     child.waitUntilExit(); exit(child.terminationStatus)
 }
-let engine = AVAudioEngine()
-let player = AVAudioPlayerNode()
 let list = devices()
 let capture = !args.contains("--play") && !args.contains("--output-only")
+let inputID = capture ? preferred(list, "input", kAudioHardwarePropertyDefaultInputDevice) : 0
+let outputID = preferred(list, "output", kAudioHardwarePropertyDefaultOutputDevice)
+// VoiceProcessingIO shares one AudioUnit between both nodes. Let CoreAudio build
+// its duplex device from the default pair; assigning each node overwrites the
+// same CurrentDevice property and disconnects one side of a split USB device.
+do {
+    if capture { try selectDefault(kAudioHardwarePropertyDefaultInputDevice, inputID) }
+    try selectDefault(kAudioHardwarePropertyDefaultOutputDevice, outputID)
+} catch { eventError("device_selection_failed", error); exit(75) }
+let engine = AVAudioEngine()
+let player = AVAudioPlayerNode()
 if capture {
-    let inputID = preferred(list, "input", kAudioHardwarePropertyDefaultInputDevice)
     guard inputID != 0 else { event("no_input"); exit(75) }
     let status = AVCaptureDevice.authorizationStatus(for: .audio)
     if status == .notDetermined {
@@ -78,16 +126,13 @@ if capture {
     }
     guard status == .authorized else { event("microphone_permission_required"); exit(77) }
     do {
-        try assign(engine.inputNode, inputID)
         try engine.inputNode.setVoiceProcessingEnabled(true)
-        try assign(engine.inputNode, inputID)
-    } catch { event("input_setup_failed"); exit(75) }
+    } catch { eventError("input_setup_failed", error); exit(75) }
 }
-let outputID = preferred(list, "output", kAudioHardwarePropertyDefaultOutputDevice)
-do { try assign(engine.outputNode, outputID) } catch { event("output_setup_failed"); exit(75) }
 engine.attach(player)
 engine.connect(player, to: engine.mainMixerNode, format: nil)
-let outputFormat = engine.outputNode.inputFormat(forBus: 0)
+// Voice processing requires identical formats on the input and output sides.
+let outputFormat = capture ? engine.inputNode.outputFormat(forBus: 0) : engine.outputNode.inputFormat(forBus: 0)
 engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)
 if capture {
     let node = engine.inputNode
@@ -108,8 +153,12 @@ if capture {
         }
     }
 }
-do { try engine.start() } catch { event("engine_start_failed"); exit(75) }
-event("audio_ready", ["capture": capture, "echo_cancelled": capture && engine.inputNode.isVoiceProcessingEnabled, "output_id": outputID])
+event("engine_configured", routeFields(engine, inputID, outputID, capture))
+do { try engine.start() } catch { eventError("engine_start_failed", error, routeFields(engine, inputID, outputID, capture)); exit(75) }
+var readyFields = routeFields(engine, inputID, outputID, capture)
+readyFields["capture"] = capture
+readyFields["echo_cancelled"] = capture && engine.inputNode.isVoiceProcessingEnabled
+event("audio_ready", readyFields)
 var playbackGeneration = 0
 func play(_ path: String) {
     do {
