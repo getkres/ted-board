@@ -1,0 +1,21 @@
+--- a/sessions.py
++++ b/sessions.py
+@@ -13,1 +13,2 @@
+-import uuid
++import uuid
++from scripts import shared_admission
+@@ -231,1 +231,1 @@
+-      p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
++      p=shared_admission.Gate().spawn([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],lane='board',cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
+@@ -235,1 +235,10 @@
+-    except OSError:
++    except shared_admission.Deferred:
++     # Keep the exact turn queued, and revalidate approved artifacts next tick.
++     s['queue'].insert(0,turn)
++     s.update(status='queued',pid=None,last_line='queued: shared resource budget')
++     s.pop('active_veto_revision',None)
++     if turn['kind']=='review':
++      a.update(status='approved',sync_status=True)
++      s.pop('reviewing',None);s.pop('review_context',None)
++     break
++    except OSError:

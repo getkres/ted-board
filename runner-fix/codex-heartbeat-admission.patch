@@ -1,0 +1,10 @@
+--- a/run.sh
++++ b/run.sh
+@@ -16 +16 @@
+-perl -e 'alarm 5400; exec @ARGV' /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex exec -m gpt-6-sol \
++python3 "$HOME/ted-ops/ted-board/scripts/shared_admission.py" run --lane launchd -- perl -e 'alarm 5400; exec @ARGV' /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex exec -m gpt-6-sol \
+@@ -19 +19,3 @@
+-print "$(date '+%F %T') exit $?" >> $LOG
++RUN_STATUS=$?
++print "$(date '+%F %T') exit $RUN_STATUS" >> $LOG
++exit $RUN_STATUS
