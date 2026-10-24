@@ -11,3 +11,5 @@ The notan keeps the composer distinct without competing with the mockup art. Rec
 Three color comps retain the current token system: the existing light palette is chosen, the existing dark palette remains supported, and an all-ink Send variant was rejected because the red action matches the board's established controls. The light is flat screen light, with no invented warm or cool material shading.
 
 The clean drawing fixes the hierarchy of big, medium, and small forms before rendering. Final render and critique follow the implemented screenshots. This board contains synthetic data and is an offline review artifact, not a live upload.
+
+Review revision: the batch dismissal label is now Sebastian's exact words, Not relevant anymore. It retains the same one-tap Archive action and five-second Undo. The composer is absent before the private capability is enabled. Its enabled layout, value structure, and compact viewer remain as studied. Updated final screenshots include the enabled and held-rollout states.

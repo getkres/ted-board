@@ -16,3 +16,13 @@ export async function handleMockupBatchNote(body:Record<string,unknown>,principa
   return {status:200,body:{ok:true,pin,decision_id:result.decision_id}};
  }catch{return {status:503,body:{error:'Comment was not confirmed. Refresh before sending again. Your draft is kept.'}};}
 }
+
+// Calls the reviewed wrapper of the existing pin transaction, never a separate
+// marker update after committing a receipt. Missing SQL fails closed.
+export function createMockupBatchNoteStore(db:{rpc:(name:string,args:Record<string,unknown>)=>any}):BatchNoteStore{
+ return {async post({mockup_id,text}){
+  const {data,error}=await db.rpc('ted_mockup_batch_note',{p_action:'pin',p_mockup:mockup_id,p_text:text});
+  if(error||!data)throw Error('Batch feedback transaction unavailable');
+  return data;
+ }};
+}

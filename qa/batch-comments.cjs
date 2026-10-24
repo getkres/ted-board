@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
 const {chromium,fixture,clip}=require('./browser.cjs');
 const {mockups:seed}=require('./fixtures.cjs');
 async function setup(width=1440,{enabled=true,archived=false}={}){
- const browser=await chromium.launch(),page=await browser.newPage({viewport:{width,height:width===375?844:900}});
+ const browser=await chromium.launch(),page=await browser.newPage({viewport:{width,height:width<=390?844:900}});
  page.setDefaultTimeout(2500);await fixture(page);
  const rows=structuredClone(seed),posts=[],errors=[],pins=[
   {id:'batch-thread',mockup_id:'frame1',batch_note:true,resolved:false,created_at:'2026-10-20T12:00:00Z',thread:[{who:'seb',text:'Keep the shorter headline for this batch.',at:'2026-10-20T12:00:00Z'},{who:'ted',text:'I will use the shorter headline in the next pass.',at:'2026-10-20T12:01:00Z'}]},
@@ -13,9 +13,9 @@ async function setup(width=1440,{enabled=true,archived=false}={}){
  ];
  rows.push({...rows.find(m=>m.id==='frame1'),id:'outside',project:'Other project'});
  if(archived)rows.find(m=>m.id==='frame1').status='archived';
- page.on('pageerror',e=>errors.push(e.message));let fail=false,malformed=false,missingReceipt=false,hold=null;
+ page.on('pageerror',e=>errors.push(e.message));let fail=false,malformed=false,missingReceipt=false,hold=null,capability=enabled;
  await page.route('**/functions/v1/ted-mockups*',async route=>{
-  if(route.request().method()==='GET')return route.fulfill({json:{mockups:rows,pins,verdicts_enabled:true,approve_batch_enabled:true,archive_enabled:true,batch_comments_enabled:enabled}});
+  if(route.request().method()==='GET')return route.fulfill({json:{mockups:rows,pins,verdicts_enabled:true,approve_batch_enabled:true,archive_enabled:true,capabilities:{batch_comments:capability},batch_comments_enabled:true}});
   const {key,...body}=route.request().postDataJSON();posts.push(body);
   if(hold)await hold;
   if(fail)return route.fulfill({status:503,json:{error:'Comment could not be sent. Refresh before trying again.'}});
@@ -25,7 +25,7 @@ async function setup(width=1440,{enabled=true,archived=false}={}){
  await page.goto('http://127.0.0.1:8763/#k=fixture-only&tab=mockups');await page.waitForSelector('.mk3-wall');
  if(archived)await page.getByRole('button',{name:'Archived',exact:true}).click();
  await page.evaluate(()=>mockups.openBatch(mockups.batches().find(b=>b.kind==='set'&&b.project==='Test line 1')));
- return {browser,page,rows,pins,posts,errors,fail:()=>fail=true,malformed:()=>malformed=true,missingReceipt:()=>missingReceipt=true,hold:p=>hold=p};
+ return {browser,page,rows,pins,posts,errors,fail:()=>fail=true,malformed:()=>malformed=true,missingReceipt:()=>missingReceipt=true,hold:p=>hold=p,setCapability:value=>capability=value};
 }
 // A wrong batch selector, leaking image pins, or textContent replaced by HTML must fail here.
 test('batch conversation shows only exact-batch notes and Ted replies, and never becomes image pins',async()=>{
@@ -50,11 +50,18 @@ test('Send posts a batch-scoped pin through feedback, displays it, clears its dr
   await p.evaluate(()=>mockups.load());assert.match(await p.getByRole('list',{name:'Batch conversation'}).innerText(),/Use this headline/);
  }finally{await f.browser.close();}
 });
-test('unsupported backends preserve a local draft and disable Send without blocking history',async()=>{
- const f=await setup(375,{enabled:false});try{const p=f.page,input=p.getByRole('textbox',{name:'Comment on this batch'});
-  await input.fill('A local draft');assert.equal(await p.getByRole('button',{name:'Send',exact:true}).isDisabled(),true);
-  await p.evaluate(()=>mockups.load());assert.equal(await input.inputValue(),'A local draft');assert.equal(f.posts.length,0);
-  assert.match(await p.getByRole('list',{name:'Batch conversation'}).innerText(),/shorter headline/);
+test('composer is absent without capabilities.batch_comments, even with the legacy flag present',async()=>{
+ for(const width of [375,1440]){const f=await setup(width,{enabled:false});try{const p=f.page;
+  for(const kind of ['set','round','stack']){await p.evaluate(kind=>mockups.openBatch(mockups.batches().find(b=>b.kind===kind)),kind);assert.equal(await p.locator('.mk3-batch-comments').count(),0);}
+  await p.evaluate(()=>mockups.load());assert.equal(await p.getByRole('button',{name:'Send',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  await p.evaluate(()=>mockups.openBatch(mockups.batches().find(b=>b.kind==='set'&&b.project==='Test line 1')));await p.evaluate(()=>document.fonts.ready);
+  await p.screenshot({path:path.join(process.env.QA_BATCH_OUT||path.join(__dirname,'../docs/mockup-batch-comments-review'),'unsupported-'+width+'.png'),fullPage:true});
+ }finally{await f.browser.close();}}
+});
+test('a rollout capability change hides the composer and preserves its existing session draft',async()=>{
+ const f=await setup();try{const p=f.page;await p.getByRole('textbox',{name:'Comment on this batch'}).fill('Keep this draft through a rollout');
+  f.setCapability(false);await p.evaluate(()=>mockups.load());assert.equal(await p.locator('.mk3-batch-comments').count(),0);
+  f.setCapability(true);await p.evaluate(()=>mockups.load());assert.equal(await p.getByRole('textbox',{name:'Comment on this batch'}).inputValue(),'Keep this draft through a rollout');
  }finally{await f.browser.close();}
 });
 test('failed or unconfirmed saves retain the draft and do not claim delivery',async()=>{
@@ -85,12 +92,12 @@ test('in-flight saves block double submits and ignore old-key acknowledgements',
   assert.equal(await p.evaluate(()=>mockups.pins.length),0);assert.equal(await p.evaluate(()=>mockups.drafts.size),0);assert.equal(f.posts.length,1);assert.doesNotMatch(await p.locator('#notice').innerText(),/Sent to Ted/);
  }finally{release?.();await f.browser.close();}
 });
-test('batch comments fit 375 and 1440 pixels with the compact viewer unchanged',async()=>{
+test('batch comments fit 375, 390, and 1440 pixels with the compact viewer unchanged',async()=>{
  const out=process.env.QA_BATCH_OUT||path.join(__dirname,'../docs/mockup-batch-comments-review');
- for(const width of [375,1440]){const f=await setup(width);try{const p=f.page;await p.evaluate(()=>document.fonts.ready);
+ for(const width of [375,390,1440]){const f=await setup(width);try{const p=f.page;await p.evaluate(()=>document.fonts.ready);
   const qa=await clip(p);assert.equal(qa.scrollWidth,width);assert.deepEqual(qa.clips,[]);assert.deepEqual(qa.gradients,[]);assert.equal(qa.emDash,false);assert.deepEqual(f.errors,[]);
   await p.screenshot({path:path.join(out,'after-'+width+'.png'),fullPage:true});
-  await p.getByRole('button',{name:'Open frame1',exact:true}).click();const head=await p.locator('.mockup-dialog-head').boundingBox();assert.ok(head.height<= (width===375?100:56));
+  await p.getByRole('button',{name:'Open frame1',exact:true}).click();const head=await p.locator('.mockup-dialog-head').boundingBox();assert.ok(head.height<= (width<=390?100:56));
   assert.equal(await p.locator('.mockup-dialog .mk3-batch-comments').count(),0);await p.screenshot({path:path.join(out,'viewer-'+width+'.png'),fullPage:true});
  }finally{await f.browser.close();}}
 });
@@ -105,9 +112,17 @@ test('batch history sorts real instants across timezone offsets and keeps notes 
 });
 test('a poll started before Send cannot erase the acknowledged batch note',async()=>{
  const f=await setup();let release;try{const p=f.page;let started;const ready=new Promise(r=>started=r),hold=new Promise(r=>release=r);const stale=structuredClone(f.pins);
-  await p.route('**/functions/v1/ted-mockups*',async route=>{if(route.request().method()!=='GET')return route.fallback();started();await hold;return route.fulfill({json:{mockups:f.rows,pins:stale,batch_comments_enabled:true}});});
+  await p.route('**/functions/v1/ted-mockups*',async route=>{if(route.request().method()!=='GET')return route.fallback();started();await hold;return route.fulfill({json:{mockups:f.rows,pins:stale,capabilities:{batch_comments:true}}});});
   await p.evaluate(()=>void mockups.load());await ready;await p.getByRole('textbox',{name:'Comment on this batch'}).fill('Keep the acknowledged note');await p.getByRole('button',{name:'Send',exact:true}).click();
   await p.waitForFunction(()=>mockups.pins.some(p=>p.id==='new-note-1'));release();await p.waitForFunction(()=>!mockups.loading);
   assert.match(await p.getByRole('list',{name:'Batch conversation'}).innerText(),/Keep the acknowledged note/);
  }finally{release?.();await f.browser.close();}
+});
+
+test('unchanged Ted read markers are not rewritten by batch polling',async()=>{
+ const f=await setup();try{const p=f.page;await p.evaluate(()=>{const set=mockups.storage.set.bind(mockups.storage);window.batchReadWrites=0;mockups.storage.set=(key,value)=>{if(key.startsWith('ted-mockup-read:'))window.batchReadWrites++;return set(key,value);};});
+  await p.evaluate(()=>mockups.load());await p.evaluate(()=>mockups.load());assert.equal(await p.evaluate(()=>window.batchReadWrites),0);
+  f.pins[0].thread.push({who:'ted',text:'A new reply for the batch.',at:'2026-10-21T12:00:00Z'});await p.evaluate(()=>mockups.load());assert.equal(await p.evaluate(()=>window.batchReadWrites),1);
+  await p.evaluate(()=>mockups.load());assert.equal(await p.evaluate(()=>window.batchReadWrites),1);
+ }finally{await f.browser.close();}
 });

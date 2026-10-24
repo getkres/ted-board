@@ -1,49 +1,69 @@
-# Batch comments QA, October 24, 2026
+# Not relevant anymore and batch comments QA, October 24, 2026
 
-The final revision passed all 23 groups in `node qa/run.cjs`, with Google Chrome
-on the Mac mini. The suite intercepted fixture endpoints, and the offline guard
-blocked any unmatched external request. No live feedback or database write was
-sent. A local Chrome-only preload selected `channel:'chrome'` for every browser
-launch. Safari and bundled Chromium were not used.
+The final complete `qa/run.cjs` run passed all 24 verification groups in Google
+Chrome on the Mac mini. Browser fixture routes and the offline network guard
+prevented live requests. SQL tests used isolated in-memory PGlite PostgreSQL,
+and watcher tests used fake transports and temporary queue files. No SQL was
+applied to Supabase, and no live feedback was sent.
 
-The new tests are `qa/batch-comments.cjs` (10 cases) and
-`backend-integration/mockup-batch-comments.test.ts` (2 cases). Initial UI cases
-failed before implementation. Author review found that lexical timestamp sorting
-misordered equivalent formats with timezone offsets; its regression failed,
-then passed after comparing parsed instants. A poll held across a successful
-Send also retains the acknowledged note.
+## Review fixes covered
 
-Coverage includes exact project and batch isolation, separating image pins,
-Ted's reply history, escaped HTML-like text, batch pin posting, positive receipt
-acknowledgements, empty and unsupported Send, failure and malformed-response draft
-retention, double-submit prevention, batch navigation, polling focus and caret,
-identity reset, archived history, all three batch layouts, and preserved compact
-viewer heights. Posting sends an ordinary pin payload with a batch marker and
-never sends an approval, verdict, pick, or build action. This fixture check does
-not prove the private worker's behavior. The existing Archive and Restore suite
-remains green and provides the dismissal behavior from PR #42.
+- Batch covers and every batch layout use the exact Not relevant anymore label.
+  Existing Archive tests verify immediate hiding, five-second Undo, one archive
+  request, Restore, failures, identity isolation, and no verdict or build action.
+  Dismissal asks for no reason.
+- The complete composer is absent unless GET returns
+  `capabilities.batch_comments:true`, even when the old flat flag is true.
+  Rollout changes preserve existing session drafts. Enabled conversations remain
+  isolated by exact project and batch, and archived history stays read-only.
+- The actual private handler candidate intercepts marked batch pins before image
+  coordinate validation. Its adapter calls the proposed atomic wrapper of the
+  existing pin RPC. Invalid markers and missing SQL cannot become image pins.
+- Image and batch notes produce real local mockups/pin receipts. The actual
+  watcher candidate routes both into one temporary design queue, where the batch
+  note is labeled `Feedback scope: whole-batch` and replies use its same pin ID.
+  A regression reproduced the approved-anchor scope bug; the worker patch now
+  preserves a batch-level note without changing art status or approving a build.
+- Repeated polling does not rewrite unchanged Ted read markers. A new Ted reply
+  causes one marker write.
+- The proposed SQL check rejects a 1201-character Sebastian batch message while
+  preserving Ted's existing 2000-character reply allowance. Local SQL tests also
+  cover service-role-only function access, rate-limit rollback, missing capability
+  probes, and a manual rollback that refuses to lose notes and retains its backup.
 
-Before and after screenshots use 375x844 and 1440x900 viewports. Layout checks
-found no horizontal overflow, clipped text, gradients, prohibited punctuation,
-or page errors. The [review board](mockup-batch-comments-review/index.html) places
-all six process sheets beside the screenshots, with the chosen composition,
-value study, construction, color choices, and critique. Its images and responsive
-layout were checked in Google Chrome at both widths. Data is synthetic.
+New coverage comprises 12 browser cases, 2 seam cases, and 8 private integration
+cases. The private group explicitly skips in public clones without the required
+private sources, fixture, apply.sql, and PGlite configuration. In the recorded
+final run it executed all 8 cases, with zero skips. The handler and worker patches
+were applied to temporary baseline copies and reproduced the private candidates.
+The canonical server module matches the private candidate copy, and Deno and
+Python checks passed.
 
-Additional verification: 17 grant-guard regression tests, JavaScript syntax,
-Deno checking of the server seam, and diff whitespace checks passed. The normal
-migration scanner found zero future files in its three configured roots, so the
-new `migrations/` proposal was checked directly with its offline SQL guard.
-Read-only live checks found no marker column and no migration history row for
-version `20261023020000` before the unapplied proposal was reduced.
+Before and after screenshots include 375x844, 390x844, and 1440x900. Enabled and
+held-rollout screenshots, compact viewer screenshots, and the process strip are
+on the [offline review board](mockup-batch-comments-review/index.html). Layout
+checks found no horizontal overflow, clipped text, gradients, prohibited
+punctuation, or page errors. The board's images and layout were checked in Google
+Chrome at 375 and 1440 pixels. All data is synthetic; no live upload occurred.
 
-`migrations/` is never automatically applied by this repository. The checked
-workflows perform offline checks only. GitHub Pages reports a legacy static
-source at `main`, path `/`. The frontend and workflows contain no migration
-runner or database application command. The job's reduced `apply.sql` exits
-unless Ted explicitly selects its backup, apply, or rollback phase.
+All 17 grant-guard regression tests passed, and the proposal passed the offline
+SQL guard directly. The standard guard scans three other configured migration
+roots, so its zero-file result is not counted as coverage of this proposal.
+Whitespace, new-file punctuation, JavaScript syntax, and private-handler type
+checks passed. The current proposal matches the apply phase in the job's SQL.
 
-Review was performed by the author; no independent worker was delegated. SQL was
-not executed, and no private handler was deployed. Ted must review the draft,
-integrate and verify the existing atomic feedback transaction and reply worker,
-and apply the reduced prerequisite before enabling batch comment posting.
+An earlier parallel browser run had a Chrome launch termination. An initial full
+run also failed the existing pin-placement assertion in `qa/markup.cjs`. The
+unchanged markup check passed by itself, and the final complete run then passed
+all 24 groups. No markup production code or assertion was changed to mask it.
+Both earlier failures remain in the private job evidence.
+
+`migrations/` is not automatically applied to Supabase. Repository workflows run
+offline Python checks, and Pages uses a legacy static source from `main`, path
+`/`. Explicit local SQL tests use disposable memory only. The job's `apply.sql`
+exits unless Ted selects backup, apply, or rollback manually.
+
+Author review only, with no independent worker delegated. The PR is still held
+for Ted's SQL review and private deployment. Full private handler and watcher
+source remain local; the public PR contains the reusable adapter and scoped
+rollout patches. No new routine, merge, or private deployment was performed.

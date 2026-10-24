@@ -9,6 +9,7 @@ class MockupBatchComments {
  anchor(batch){return this.images(batch).filter(m=>m.status!=='archived'&&!this.view.archives.hidden(m)).sort((a,b)=>this.view.imageOrder(a,b))[0];}
  writable(batch){const v=this.view;return v.capabilities.batch_comments===true&&!batch.archived&&!!this.anchor(batch)&&!this.images(batch).some(m=>v.busy.has(m.id))&&!v.batchBusy.has(v.batchKey(batch.project,batch.title));}
  render(batch){
+  if(this.view.capabilities.batch_comments!==true)return document.createDocumentFragment();
   const v=this.view,key=this.key(batch),owner=v.getKey(),box=v.el('section','mk3-batch-comments');
   box.setAttribute('aria-label','Batch comments');box.dataset.batchKey=key;
   box.append(v.el('h2',null,'Batch comments'));
@@ -22,7 +23,7 @@ class MockupBatchComments {
     const date=new Date(m.at);if(!Number.isNaN(+date)){const time=v.el('time',null,v.date(m.at));time.dateTime=date.toISOString();row.append(time);}list.append(row);
    }
    box.append(list);
-   for(const pin of pins)v.storage.set('ted-mockup-read:'+pin.id,v.marker(pin));
+   for(const pin of pins){const key='ted-mockup-read:'+pin.id,marker=v.marker(pin);if(v.storage.get(key)!==marker)v.storage.set(key,marker);}
   }else box.append(v.el('p','mk3-batch-empty','No batch comments yet.'));
   const form=v.el('form','mk3-batch-comment-form'),input=v.el('textarea');
   input.setAttribute('aria-label','Comment on this batch');input.placeholder='A note for Ted about the whole batch.';input.maxLength=1200;input.rows=3;input.value=v.drafts.get(key)||'';
@@ -35,7 +36,7 @@ class MockupBatchComments {
   input.addEventListener('blur',e=>{if(e.relatedTarget)this.focus=null;});
   form.addEventListener('submit',e=>{e.preventDefault();if(owner===v.getKey())this.send(batch,input.value);});
   form.append(input,send);box.append(form);
-  const status=v.el('p','mk3-batch-comment-status',saving?'Sending to Ted…':batch.archived?'Restore this batch to send another comment.':v.capabilities.batch_comments!==true?'Batch comments are not available yet. Your draft stays here.':'');
+  const status=v.el('p','mk3-batch-comment-status',saving?'Sending to Ted…':batch.archived?'Restore this batch to send another comment.':'');
   status.setAttribute('role','status');box.append(status);
   if(this.focus?.key===key&&!saving){const selection={...this.focus};requestAnimationFrame(()=>{if(box.isConnected&&owner===v.getKey()&&document.activeElement===document.body){input.focus({preventScroll:true});input.setSelectionRange(selection.start,selection.end);}});}
   return box;

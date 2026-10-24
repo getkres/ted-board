@@ -73,35 +73,43 @@ The scoped page archive integration is documented in [MOCKUP-ARCHIVE-QA.md](../d
 
 ## Whole-batch comments, held for Ted review
 
-The batch conversation UI sends the existing page pin action with
-`{mockup_id,batch_note:true,text}`. Invoke `handleMockupBatchNote` before legacy
-pin validation or fallback, after the existing credential and size checks. A pin
-request containing `batch_note` must be intercepted even when the marker is
-invalid. Never let a missing integration silently save it as an image pin.
-The returned safe error or body uses the handler's existing CORS and no-store
-headers. Ordinary pin and reply payloads keep their existing routes.
+The existing page pin route accepts `{mockup_id,batch_note:true,text}`.
+`handleMockupBatchNote` intercepts it before ordinary `actionArgs` pin validation.
+The isolated private handler candidate already has this wiring; its exact patch
+is `mockup-batch-handler.patch`. Copy the canonical
+`mockup-batch-comments.ts` beside the private handler before deployment. Full
+private source remains local, and no candidate is deployed by this PR.
 
-Supply a server-only `BatchNoteStore.post({mockup_id,text})` backed by the existing
-private pin and feedback receipt transaction. Inside that transaction, lock and
-validate the active anchor mockup, derive its project and batch from the row,
-create a pin with `batch_note=true`, append the Sebastian message, and commit the
-ordinary pin feedback receipt with explicit whole-batch context. Retain the
-existing rate limit and text bounds. Return its positive decision ID and the
-saved marked pin only after commit. Reuse the same pin ID for Ted's existing
-reply command and ordinary reply handling. The worker must deliver a batch
-comment as feedback to Ted or the originating card, never as an approval or build
-request. Do not bolt a second marker update onto an already committed ordinary
-pin, because a worker could see the wrong scope between those writes.
+`createMockupBatchNoteStore` calls the proposed `ted_mockup_batch_note` RPC.
+That SQL wrapper calls the unchanged `ted_mockup_act` pin transaction, sets the
+batch marker, and labels its existing receipt whole-batch before commit. The
+worker receives the ordinary mockups/pin receipt and replies to the same pin ID.
+The wrapper retains the underlying lock, archive check, and rate limit. Missing
+SQL fails closed; it never silently saves an image pin. The seam confirms the
+marked pin, saved text, and positive receipt ID before acknowledging delivery.
 
-This repo deliberately provides no speculative database adapter for that private
-transaction. The reduced migration adds only the marker column; Ted still owns
-transaction integration and private routing verification. GET must preserve the
-marker and thread fields on authenticated pins and return
-`batch_comments_enabled:true` only after that durable hook and worker path pass
-staging checks. Keep it false on missing storage, missing integration, or an
-unreachable capability probe. The UI never infers support from a column.
+Authenticated GET probes this wrapper and returns
+`capabilities:{batch_comments:true}` only when it is available. Missing or
+unreachable SQL returns false. The frontend ignores the old flat flag and hides
+the entire composer until the nested capability is true. Existing session drafts
+are kept across capability changes. The marker alone never enables the UI.
 
-Run `node --test backend-integration/mockup-batch-comments.test.ts` for offline
-seam authorization, validation, and acknowledgement tests. These do not execute
-SQL or prove delivery by the private worker. The proposed marker migration and
-manual-only rollout are documented in `docs/mockups-batch-review-gate.md`.
+`mockup-batch-worker.patch` is applied from the private `ted-ops` root. It keeps a
+batch-level comment from becoming an image-only request when its anchor is final
+art. It preserves final, scrapped, and archived review states and grants no build
+approval. No new watcher or routine is introduced.
+
+The proposed SQL adds the marker, a 1200-character check for Sebastian's batch
+messages, an immutable validation helper, and the transactional wrapper. Both new
+functions allow service-role execution only. Ted replies retain the existing
+2000-character limit. `migrations/` is never auto-applied to Supabase; Ted owns review,
+backup, application, and deployment. See `docs/mockups-batch-review-gate.md`.
+
+Offline checks: `mockup-batch-comments.test.ts` covers seam validation.
+`mockup-batch-handler.test.ts` uses PGlite, the actual private handler, and a
+network-isolated watcher test with a temporary design queue. Set `PGLITE_MODULE`
+to an installed PGlite module, prepare the private candidate and legacy RPC
+fixture and the matching job `apply.sql`, and set `MOCKUP_WORKER_PATH` to the reviewed watcher candidate. The suite
+skips explicitly when the private sources are omitted from a public clone; it
+never substitutes a fake passing private handler. Local tests execute SQL only
+in isolated memory, not on Supabase.

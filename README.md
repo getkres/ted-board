@@ -24,7 +24,7 @@ Existing card, guided-mode, control, pod-pulse, pin, reply, verdict, whole-batch
 
 Snapshot feeds and new mockup writes are optional and capability-gated. Missing data says not logged. A local drawing remains a draft until the backend acknowledges its exact normalized path and crop. Needs work requires a reason before saving. Round approval requires a reason and the supported round transaction. Existing five-second verdict and whole-batch Undo tokens remain owned by the original API.
 
-The public clone omits the private backend and workers. Read [backend integration](backend-integration/README.md) before enabling snapshots, review choices, Good, one fix, round picks, or saved strokes. Proposed SQL is in `migrations/`, which is never auto-applied by this repository or its static Pages deployment. The build job contains `apply.sql` with opt-in backup and apply phases, plus manual rollback instructions. SQL was not run by this build.
+The public clone omits the private backend and workers. Read [backend integration](backend-integration/README.md) before enabling snapshots, review choices, Good, one fix, round picks, or saved strokes. Proposed SQL is in `migrations/`, which is never applied to Supabase by this repository or its static Pages deployment. The build job contains `apply.sql` with opt-in backup and apply phases, plus manual rollback instructions. SQL was not run by this build.
 
 ## Local verification
 
