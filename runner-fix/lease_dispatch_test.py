@@ -328,15 +328,12 @@ class LeaseDispatch(unittest.TestCase):
             self.tick(reconcile=True)
         self.assertEqual(self.store.read()['sessions']['x']['recovery_required'], 'lease_expired')
 
-    def test_disabled_mode_keeps_failure_policy_retry(self):
-        s = self.running(expiry=time.time() - 1)
-        with patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'false'}), patch.object(sessions, 'alive', return_value=False), \
-             patch.object(sessions, 'publish_live', return_value=False), patch.object(sessions, 'admission_state', return_value=dict(cap=0)):
+    def test_disabled_already_loaded_managed_store_freezes_until_restart(self):
+        self.running(expiry=time.time() - 1)
+        before = self.store.read()
+        with patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'false'}), patch.object(sessions, 'alive', return_value=False):
             self.store.tick(reconcile=True)
-        data = self.store.read()
-        self.assertEqual(data['sessions']['x']['status'], 'queued')
-        self.assertEqual(data['sessions']['x']['queue'][0]['recovery_attempt'], 1)
-        self.assertEqual(len(data['outbox']), 1)
+        self.assertEqual(self.store.read(), before)
 
     def test_failed_launch_preserves_the_side_effect_recovery_exclusion(self):
         self.enqueue()
