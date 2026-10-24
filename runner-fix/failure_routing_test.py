@@ -40,13 +40,13 @@ class Routing(unittest.TestCase):
                 self.assertEqual(send.call_args.kwargs.get('section'), 'up_next')
                 self.assertEqual(send.call_args.kwargs['state'], 'blocked')
 
-    def test_generic_approval_and_technical_requests_stay_with_ted(self):
+    def test_unclassified_requests_are_retained_for_review(self):
         for text in ('review the pending approval on this card', 'approve this PR',
                      'fix the unsafe approval artifact', 'please sign in and verify the build'):
             with self.subTest(text=text), patch.object(client, 'cards', return_value=[card(decision_kind='other')]), \
                  patch.object(live, 'call', return_value=dict(ok=True, card=card())) as send:
                 live.update('x', 'waiting_on_you', text, section='needs_you', ask_anyway_reason='Needs review')
-                self.assertEqual(send.call_args.kwargs.get('section'), 'up_next')
+                self.assertEqual(send.call_args.kwargs.get('section'), 'needs_you')
                 self.assertNotIn('ask_anyway_reason', send.call_args.kwargs)
 
     def test_allowed_decisions_reach_rule_resolution(self):
@@ -66,15 +66,15 @@ class Routing(unittest.TestCase):
 
     def test_manual_move_is_not_overwritten(self):
         with patch.object(client, 'cards', return_value=[card(section='done')]), patch.object(live, 'call') as send:
-            with self.assertRaises(RuntimeError):
-                live.update('x', 'waiting_on_you', 'Worker could not start', section='needs_you')
+            result=live.update('x', 'waiting_on_you', 'Worker could not start', section='needs_you')
+            self.assertEqual(result['section'],'done')
             send.assert_not_called()
 
-    def test_waiting_without_a_section_cannot_bypass_gate(self):
+    def test_waiting_without_a_section_still_uses_the_decision_route(self):
         with patch.object(client, 'cards', return_value=[card()]), patch.object(live, 'call', return_value=dict(ok=True, card=card())) as send:
             live.update('x', 'waiting_on_you', 'waiting for CI')
-            self.assertEqual(send.call_args.kwargs.get('section'), 'up_next')
-            self.assertEqual(send.call_args.kwargs.get('state'), 'blocked')
+            self.assertEqual(send.call_args.kwargs.get('section'), 'needs_you')
+            self.assertEqual(send.call_args.kwargs.get('state'), 'waiting_on_you')
 
     def test_failure_without_waiting_state_still_routes_to_ted(self):
         with patch.object(client,'cards',return_value=[card()]),patch.object(live,'call',return_value=dict(ok=True,card=card())) as send:
@@ -333,10 +333,11 @@ class Steward(unittest.TestCase):
         c=card(section='needs_you',decision_kind='other',title='Payment receipt for $25',body='Payment completed. No action required.')
         self.assertEqual(self.action(c)[0]['to'],'done')
 
-    def test_technical_reports_and_active_workers_are_ted_work(self):
-        for line in ('pr 42 awaits ted review and deployment', 'checking the native build'):
-            c=card(section='needs_you',live_state='running' if 'checking' in line else 'blocked',live_status=line)
-            self.assertEqual(self.action(c)[0]['to'],'up_next')
+    def test_only_running_worker_evidence_moves_an_unclassified_report(self):
+        c=card(section='needs_you',live_state='running',live_status='checking the native build')
+        self.assertEqual(self.action(c)[0]['to'],'up_next')
+        c=card(section='needs_you',live_state='blocked',live_status='pr 42 awaits ted review and deployment')
+        self.assertEqual(self.action(c),[])
 
     def test_allowed_decisions_and_fresh_taste_picks_survive(self):
         for body,kind in [('Approve spending $50','spend_money'),('Approve sending the drafted email','send_email'),
@@ -358,12 +359,12 @@ class Steward(unittest.TestCase):
         rows=[dict(id='m',project='Fixture',batch='Launch v2',status='archived',created_at='2026-10-01T00:00:00Z')]
         self.assertEqual(self.action(c,rows)[0]['to'],'done')
 
-    def test_uploaded_price_caption_and_unrelated_question_are_ted_work(self):
+    def test_unclassified_reports_and_unrelated_questions_are_retained(self):
         for text in ('Uploaded the screens. The monthly paywall says $9.99.',
                      'Finished the search screen. Its label is "Is my character here?".',
                      'Uploaded the hero. The reference caption says "please welcome the cast".'):
             c=card(section='needs_you',body=text,decision_kind='other')
-            self.assertEqual(self.action(c)[0]['to'],'up_next')
+            self.assertEqual(self.action(c),[])
 
     def test_dry_run_and_snapshot_race_have_no_mutations(self):
         c=card(section='needs_you',live_status='Worker could not start')

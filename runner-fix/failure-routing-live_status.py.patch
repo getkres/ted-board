@@ -1,7 +1,7 @@
 --- live_status.py
 +++ live_status.py
 @@ -7,0 +8 @@
-+from inbox_policy import decision, failure_kind, FAILURE_LINE, TED_LINE
++from inbox_policy import disposition, failure_kind, FAILURE_LINE, TED_LINE
 @@ -10,2 +11 @@
 -SECTIONS=('done','needs_you','ted_doing')
 -REAPER_APPROVAL_LINE='review the pending approval on this card'
@@ -9,42 +9,43 @@
 @@ -19,0 +20,9 @@
 + if failure_kind(line):
 +  card=next((item for item in board_client.cards() if item.get('id')==card_id),None)
-+  if card and card.get('section')=='up_next' and card.get('live_state')=='blocked' and card.get('live_status')==FAILURE_LINE:return card
-+  if not card or card.get('section') not in ('ted_doing','needs_you'):raise RuntimeError('Failure handoff scope could not be confirmed')
++  if not card:raise RuntimeError('Failure handoff scope could not be confirmed')
++  if card.get('section') not in ('ted_doing','needs_you'):return card
 +  body=dict(card_id=card_id,state='blocked',line=FAILURE_LINE,section='up_next',expected_section=card['section'],expected_updated_at=card.get('updated_at'))
 +  body.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
 +  result=call('live_status',**body)
 +  if not result.get('ok') or not result.get('card'):raise RuntimeError('Failure handoff was not confirmed')
 +  return result['card']
-@@ -23,0 +33,14 @@
+@@ -23,0 +33,15 @@
 +  mockups=[]
 +  if re.search(r'\b(?:mockup|design|batch|pick|choose|copy|headline|write|type)\b',line,re.I):
 +   from mockup_client import call as mockup_call
 +   payload=mockup_call()
-+   if not isinstance(payload,dict) or not isinstance(payload.get('mockups'),list):raise RuntimeError('Mockup scope could not be confirmed')
++   if not isinstance(payload,dict) or not isinstance(payload.get('mockups'),list) or any(not isinstance(m,dict) for m in payload['mockups']):raise RuntimeError('Mockup scope could not be confirmed')
 +   mockups=payload['mockups']
-+  if decision(card,line,mockups) is None:
-+   body=dict(card_id=card_id,state='blocked',line=FAILURE_LINE if failure_kind(line) else TED_LINE,section='up_next',expected_section='ted_doing',expected_updated_at=card.get('updated_at'))
++  target,reason=disposition(card,mockups,line=line)
++  if target:
++   body=dict(card_id=card_id,state='done' if target=='done' else 'blocked',line=reason,section=target,expected_section='ted_doing',expected_updated_at=card.get('updated_at'))
 +   body.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
 +   result=call('live_status',**body)
 +   if not result.get('ok') or not result.get('card'):raise RuntimeError('Ted review handoff was not confirmed')
 +   return result['card']
 +  section='needs_you'
 +  if state!='waiting_on_you':state='waiting_on_you'
-@@ -27,2 +49,0 @@
+@@ -27,2 +50,0 @@
 -  if reaper and line.strip().lower()==REAPER_APPROVAL_LINE and apply_rule_id is None and ask_anyway_reason is None:
 -   ask_anyway_reason='A pending approval artifact needs Sebastian to review its exact contents.'
-@@ -34 +55 @@
+@@ -34 +56 @@
 -   blocked=dict(card_id=card_id,state='blocked',line=REAPER_BLOCKED_LINE,expected_section='ted_doing')
 +   blocked=dict(card_id=card_id,state='blocked',line=REAPER_BLOCKED_LINE,section='up_next',expected_section='ted_doing')
-@@ -54 +75,3 @@
+@@ -54 +76,3 @@
 -         "When you finish: if done, "+command+" done '<one line result>' --section done; "
 +         "When a worker turn finishes successfully, "+command+" blocked 'ted review' --section up_next; "
 +         "Worker failures and operational blockers belong in up_next with state blocked, never needs_you. "
 +         "Needs you is only for spending, email sends, legal or contract decisions, pricing, gated production writes, fresh mockup taste picks, and copy Sebastian writes. "
-@@ -62 +85 @@
+@@ -62 +86 @@
 -def publish_live(card_id,state,line,section=None):
 +def publish_live(card_id,state,line,section=None,**guards):
-@@ -64 +87 @@
+@@ -64 +88 @@
 - try:update(card_id,state,line,section)
 + try:update(card_id,state,line,section,**guards)

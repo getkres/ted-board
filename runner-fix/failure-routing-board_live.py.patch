@@ -1,7 +1,7 @@
 --- board_live.py
 +++ board_live.py
 @@ -13,0 +14 @@
-+from inbox_policy import decision, approval_line, FAILURE_LINE, TED_LINE
++from inbox_policy import disposition, approval_line, FAILURE_LINE, TED_LINE
 @@ -81 +82,3 @@
 - sessions=read_json(root/'sessions.json',{}).get('sessions',{})
 + data=read_json(root/'sessions.json',{});sessions=data.get('sessions',{})
@@ -43,7 +43,7 @@
 -     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'needs_you'}.get(state)
 -     if section=='needs_you':ask_anyway_reason='The worker report has unfinished work that Sebastian must review before this card can continue.'
 +     state,line=classify_report(report.read_text()[:60000]);section={'done':'done','waiting_on_you':'needs_you','blocked':'up_next'}.get(state)
-@@ -164,2 +173,10 @@
+@@ -164,2 +173,13 @@
 -     state,line,section='blocked','worker stopped without a current report, review and restart the card','needs_you'
 -     ask_anyway_reason='The worker stopped without a current report. Sebastian must review the card before work can resume.'
 +     state,line,section='blocked','worker stopped without a current report, ted needs to review recovery','up_next'
@@ -52,7 +52,10 @@
 +   if re.search(r'\b(?:mockup|batch|design|copy|headline|write|type)\b',line or '',re.I):
 +    try:
 +     from mockup_client import call as mockup_call
-+     mockups=mockup_call()['mockups']
-+    except (RuntimeError,KeyError,TypeError):failed+=1;continue
-+   if decision(card,line,mockups) is None:
-+    state,line,section='blocked',TED_LINE,'up_next';ask_anyway_reason=None
++     payload=mockup_call()
++     if not isinstance(payload,dict) or not isinstance(payload.get('mockups'),list) or any(not isinstance(m,dict) for m in payload['mockups']):raise ValueError('Invalid mockup snapshot')
++     mockups=payload['mockups']
++    except (RuntimeError,ValueError,KeyError,TypeError):failed+=1;continue
++   target,reason=disposition(card,mockups,line=line)
++   if target:
++    state,line,section='done' if target=='done' else 'blocked',reason,target;ask_anyway_reason=None

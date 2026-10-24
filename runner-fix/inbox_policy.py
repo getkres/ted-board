@@ -9,6 +9,8 @@ FAILURES = re.compile(r'\bworker (?:exceeded|timed out|timeout|stopped|could not
 ASK = re.compile(r'\?|\b(?:approve|approval|review|sign|choose|pick|decide|write|type|your call|your version|'
                  r'you decide|flat fee|must|please|action required|needed|pending)\b', re.I)
 FYI = re.compile(r'\b(?:fyi|receipts?|confirmations?|payment completed|export completed|welcome|subscription notice)\b', re.I)
+OPERATIONAL = re.compile(r'\b(?:ted review|pr \d+[^.!?\n]*review|pending ted review|worker slot|waiting for CI)\b', re.I)
+RECOVERY = re.compile(r'^\s*(?:reply to (?:retry|continue)|please (?:retry|continue)|review (?:the )?(?:logs|job files|report|artifacts))\b', re.I)
 
 
 def stamp(value):
@@ -32,16 +34,23 @@ def current_text(card):
 
 
 def failure_kind(text):
-    text = str(text or '')
-    if not FAILURES.search(text):
-        return None
-    if re.search(r'exceeded|timed out|timeout', text, re.I):
-        return 'timeout'
-    if re.search(r'without (?:a )?(?:current report|final result)|no final|stopped without', text, re.I):
-        return 'no_result'
-    if re.search(r'could not start', text, re.I):
-        return 'start_failure'
-    return 'crash'
+    """Classify failure sentences only when no independent ask follows or precedes them."""
+    result = None
+    for sentence in re.split(r'(?<=[.!?])\s+|\n+', str(text or '')):
+        if not FAILURES.search(sentence):
+            if ASK.search(sentence) and not OPERATIONAL.search(sentence) and not RECOVERY.search(sentence):
+                return None
+            continue
+        if re.search(r'could not start', sentence, re.I):
+            kind = 'start_failure'
+        elif re.search(r'exceeded|timed out|timeout', sentence, re.I):
+            kind = 'timeout'
+        elif re.search(r'without (?:a )?(?:current report|final result)|no final|stopped without', sentence, re.I):
+            kind = 'no_result'
+        else:
+            kind = 'crash'
+        result = result or kind
+    return result
 
 
 def linked_mockups(card, mockups):
@@ -58,11 +67,6 @@ def linked_mockups(card, mockups):
 def decision(card, line=None, mockups=()):
     """Return the allowed decision family only for a current, concrete ask."""
     line = current_text(card) if line is None else str(line)
-    if failure_kind(line):
-        return None
-    # A worker's operational progress or Ted review is not a fresh human ask.
-    if re.search(r'\b(?:ted review|pr \d+.*review|pending ted review|worker slot|waiting for CI)\b', line, re.I):
-        return None
     text = line
     if line.strip().lower() == 'review the pending approval on this card':
         text += '\n' + str(last_message(card).get('text') or '')
@@ -71,6 +75,8 @@ def decision(card, line=None, mockups=()):
     # Match the action and its object within one sentence. Background prices,
     # historical failures, and quoted UI questions do not create decisions.
     for ask in re.split(r'(?<=[.!?])\s+|\n+', text):
+        if failure_kind(ask) or OPERATIONAL.search(ask):
+            continue
         if not ASK.search(ask):
             continue
         if re.search(r'\b(?:write|type) (?:your|the|each)|\byours to write\b', ask, re.I) and re.search(r'\b(?:copy|headline|line|version|words)\b', ask, re.I):
@@ -103,9 +109,9 @@ def approval_line(kind, card):
     return None
 
 
-def disposition(card, mockups=()):
+def disposition(card, mockups=(), line=None):
     """Mechanical inbox move, or a reason to retain a real or ambiguous ask."""
-    text = current_text(card)
+    text = current_text(card) if line is None else str(line)
     if failure_kind(text):
         return 'up_next', FAILURE_LINE
     family = decision(card, text, mockups)
@@ -120,6 +126,8 @@ def disposition(card, mockups=()):
     without_notice = re.sub(r'\bno action (?:required|needed)\b', '', content, flags=re.I)
     if FYI.search(content) and not ASK.search(without_notice):
         return 'done', 'pure fyi, no action required'
-    if card.get('live_state') == 'running' or re.search(r'\b(?:ted review|pr \d+|draft pr|pending ted review|worker slot|approval needed)\b', text, re.I):
+    asks = [sentence for sentence in re.split(r'(?<=[.!?])\s+|\n+', text)
+            if ASK.search(sentence) and not OPERATIONAL.search(sentence) and not RECOVERY.search(sentence)]
+    if card.get('live_state') == 'running' and not asks:
         return 'up_next', 'ted review, no sebastian decision'
-    return 'up_next', 'ted judgment required, no current sebastian ask'
+    return None, 'ambiguous, retain'
