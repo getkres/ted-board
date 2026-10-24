@@ -1,0 +1,24 @@
+name: Shared admission patches
+on:
+  pull_request:
+    paths:
+      - 'runner-fix/*admission*'
+      - 'runner-fix/fixtures/**'
+      - '.github/workflows/shared-admission.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'runner-fix/*admission*'
+      - 'runner-fix/fixtures/**'
+      - '.github/workflows/shared-admission.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 runner-fix/shared_admission_test.py

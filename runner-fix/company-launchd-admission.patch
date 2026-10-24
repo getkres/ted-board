@@ -1,0 +1,8 @@
+--- a/run-task.sh
++++ b/run-task.sh
+@@ -15 +15 @@
+-  exec python3 "$COORDINATOR" --db "$FICTORA_COMPANY_DB" run-opus "$TASK_ID" --repo "$REPO" --timeout 120
++  exec python3 "$HOME/ted-ops/ted-board/scripts/shared_admission.py" run --lane launchd -- python3 "$COORDINATOR" --db "$FICTORA_COMPANY_DB" run-opus "$TASK_ID" --repo "$REPO" --timeout 120
+@@ -17 +17 @@
+-exec python3 "$COORDINATOR" run-opus "$TASK_ID" --repo "$REPO" --timeout 120
++exec python3 "$HOME/ted-ops/ted-board/scripts/shared_admission.py" run --lane launchd -- python3 "$COORDINATOR" run-opus "$TASK_ID" --repo "$REPO" --timeout 120

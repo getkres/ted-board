@@ -1,0 +1,880 @@
+--- /dev/null
++++ b/scripts/__init__.py
+@@ -0,0 +1 @@
++"""Reviewed local operational tools."""
+--- /dev/null
++++ b/scripts/shared_admission.py
+@@ -0,0 +1,332 @@
++#!/usr/bin/env python3
++"""One host-local resource gate for cooperating model and scheduled commands."""
++import argparse
++import contextlib
++import fcntl
++import json
++import math
++import os
++from pathlib import Path
++import re
++import signal
++import stat
++import subprocess
++import sys
++import time
++import uuid
++
++DEFAULT_ROOT = Path.home() / 'ted-ops/state/shared-admission'
++GIB = 1024 ** 3
++LANES = {'board', 'direct', 'launchd'}
++MEMORY_PER_RUN = 2 * GIB
++CPU_PER_RUN = 1.0
++EVIDENCE_ERRORS = (OSError, ValueError, KeyError, TypeError, RecursionError, subprocess.SubprocessError)
++
++
++class Deferred(Exception):
++    """Admission refused; the caller must preserve its queued work."""
++
++    def __init__(self, reason_code, error_type=None):
++        if reason_code not in ('LoadCapacity', 'MemoryCapacity', 'EvidenceUnavailable'):
++            raise ValueError('unknown deferral code')
++        self.reason_code = reason_code
++        self.capacity = reason_code in ('LoadCapacity', 'MemoryCapacity')
++        self.error_name = error_type.__name__ if isinstance(error_type, type) and issubclass(error_type, Exception) else None
++        self.diagnostic = reason_code + (':' + self.error_name if self.error_name else '')
++        super().__init__(self.diagnostic)
++
++
++def parse_vm_stat(text):
++    page = re.search(r'page size of (\d+) bytes', text)
++    if not page:
++        raise ValueError('unknown page size')
++    counts = []
++    for label in ('free', 'inactive', 'speculative'):
++        row = re.search(r'^Pages ' + label + r':\s+(\d+)\.', text, re.M)
++        if not row:
++            raise ValueError('unknown memory counter')
++        counts.append(int(row[1]))
++    return int(page[1]) * sum(counts)
++
++
++def command_output(command):
++    return subprocess.run(command, capture_output=True, text=True, check=True, timeout=10).stdout
++
++
++def pressure():
++    if sys.platform == 'darwin':
++        total = int(command_output(['/usr/sbin/sysctl', '-n', 'hw.memsize']).strip())
++        available = parse_vm_stat(command_output(['/usr/bin/vm_stat']))
++    elif sys.platform.startswith('linux'):
++        memory = dict(re.findall(r'^(MemTotal|MemAvailable):\s+(\d+) kB$',
++                                 Path('/proc/meminfo').read_text(), re.M))
++        total, available = int(memory['MemTotal']) * 1024, int(memory['MemAvailable']) * 1024
++    else:
++        raise ValueError('unsupported pressure source')
++    return dict(cores=os.cpu_count(), load=os.getloadavg()[0],
++                available_bytes=available, total_bytes=total)
++
++
++def processes():
++    # No command arguments or environment values enter the state or output.
++    output = command_output(['/bin/ps', '-axo', 'pid=,pgid=,stat=,lstart='])
++    table = {}
++    for line in output.splitlines():
++        fields = line.split(None, 3)
++        if len(fields) != 4:
++            raise ValueError('unknown process identity')
++        pid, pgid, status, started = fields
++        if not status.startswith('Z'):
++            table[int(pid)] = dict(pgid=int(pgid), identity=started.strip())
++    if os.getpid() not in table:
++        raise ValueError('incomplete process evidence')
++    return table
++
++
++def validate_pressure(sample):
++    for name in ('cores', 'load', 'available_bytes', 'total_bytes'):
++        value = sample[name]
++        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
++            raise ValueError('unknown pressure')
++    if sample['cores'] < 1 or sample['total_bytes'] < 1 or sample['available_bytes'] > sample['total_bytes']:
++        raise ValueError('invalid pressure')
++
++
++class Gate:
++    def __init__(self, root=DEFAULT_ROOT, *, sample=pressure):
++        self.root = Path(root).absolute()
++        self.sample = sample
++
++    @contextlib.contextmanager
++    def locked(self):
++        # Parent locations are operator-owned. Refuse custom aliases before resolving.
++        for part in [*reversed(self.root.parents), self.root]:
++            alias = part in (Path('/var'), Path('/tmp')) and part.resolve() == Path('/private') / part.name
++            if part.is_symlink() and not alias:
++                raise ValueError('symlink state directory')
++        # Traverse from a held root descriptor, so a concurrent replacement cannot
++        # redirect resolve(), mkdir(), or the state files through a symlink.
++        path = self.root
++        if len(path.parts) > 1 and path.parts[1] in ('var', 'tmp') and Path('/'+path.parts[1]).is_symlink():
++            path = Path('/private').joinpath(*path.parts[1:])
++        directory = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
++        try:
++            for component in path.parts[1:]:
++                try:
++                    next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
++                except FileNotFoundError:
++                    try:
++                        os.mkdir(component, mode=0o700, dir_fd=directory)
++                    except FileExistsError:
++                        pass
++                    next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
++                os.close(directory)
++                directory = next_fd
++        except BaseException:
++            os.close(directory)
++            raise
++        try:
++            info = os.fstat(directory)
++            if info.st_uid != os.getuid() or info.st_mode & 0o077:
++                raise ValueError('private state directory required')
++            lock = os.open('gate.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
++                           0o600, dir_fd=directory)
++            try:
++                self.private_file(lock)
++                os.fchmod(lock, 0o600)
++                fcntl.flock(lock, fcntl.LOCK_EX)
++                yield directory
++            finally:
++                os.close(lock)
++        finally:
++            os.close(directory)
++
++    @staticmethod
++    def private_file(fd):
++        info = os.fstat(fd)
++        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid():
++            raise ValueError('private regular state required')
++
++    def read(self, directory):
++        try:
++            fd = os.open('leases.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
++        except FileNotFoundError:
++            return []
++        with os.fdopen(fd, 'rb') as stream:
++            self.private_file(stream.fileno())
++            raw = stream.read(1_048_577)
++        if len(raw) > 1_048_576:
++            raise ValueError('state too large')
++        data = json.loads(raw)
++        if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('leases'), list):
++            raise ValueError('invalid state')
++        for row in data['leases']:
++            if not isinstance(row, dict) or row.get('lane') not in LANES:
++                raise ValueError('invalid lease')
++            if type(row.get('pgid')) is not int or row['pgid'] <= 1 or not isinstance(row.get('identity'), str):
++                raise ValueError('invalid process identity')
++            if not isinstance(row.get('token'), str) or not re.fullmatch(r'[a-f0-9]{32}', row['token']):
++                raise ValueError('invalid lease token')
++            if row.get('memory_bytes') != MEMORY_PER_RUN or row.get('cpu') != CPU_PER_RUN:
++                raise ValueError('incompatible lease policy')
++        return data['leases']
++
++    @staticmethod
++    def write(directory, leases):
++        name = 'leases.' + uuid.uuid4().hex + '.tmp'
++        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
++        try:
++            with os.fdopen(fd, 'w') as stream:
++                json.dump(dict(version=1, leases=leases), stream, sort_keys=True)
++                stream.flush()
++                os.fsync(stream.fileno())
++            os.replace(name, 'leases.json', src_dir_fd=directory, dst_dir_fd=directory)
++            os.fsync(directory)
++        finally:
++            try:
++                os.unlink(name, dir_fd=directory)
++            except FileNotFoundError:
++                pass
++
++    def spawn(self, command, *, lane, **kwargs):
++        if lane not in LANES or not command:
++            raise ValueError('valid lane and command required')
++        if kwargs.pop('start_new_session', True) is not True:
++            raise ValueError('dedicated process group required')
++        child = None
++        spawn_error = None
++        committed = False
++        try:
++            with self.locked() as directory:
++                leases = self.read(directory)
++                table = processes()
++                groups = {p['pgid'] for p in table.values()}
++                # A live leader with a different identity proves group reuse.
++                # With no leader, surviving group members still reserve capacity.
++                leases = [row for row in leases if row['pgid'] in groups and
++                          (row['pgid'] not in table or table[row['pgid']]['identity'] == row['identity'])]
++                sample = self.sample()
++                validate_pressure(sample)
++                if sample['load'] + sum(row['cpu'] for row in leases) + CPU_PER_RUN > 2 * sample['cores']:
++                    raise Deferred('LoadCapacity')
++                floor = max(4 * GIB, .10 * sample['total_bytes'])
++                if sample['available_bytes'] - sum(row['memory_bytes'] for row in leases) - MEMORY_PER_RUN < floor:
++                    raise Deferred('MemoryCapacity')
++                token = uuid.uuid4().hex
++                guarded = [sys.executable, str(Path(__file__).resolve()), '_child', '--state-dir', str(self.root),
++                           '--token', token, '--', *map(str, command)]
++                try:
++                    child = subprocess.Popen(guarded, start_new_session=True, **kwargs)
++                except Exception as exc:
++                    # Launch errors are not admission evidence or capacity failures.
++                    spawn_error = exc
++                    raise
++                owner = processes().get(child.pid)
++                if not owner or owner['pgid'] != child.pid:
++                    raise ValueError('unverified child')
++                leases.append(dict(token=token, lane=lane, pgid=child.pid, identity=owner['identity'],
++                                   memory_bytes=MEMORY_PER_RUN, cpu=CPU_PER_RUN))
++                self.write(directory, leases)
++                committed = True
++            return child
++        except EVIDENCE_ERRORS as exc:
++            if exc is spawn_error:
++                raise
++            raise Deferred('EvidenceUnavailable', type(exc)) from None
++        finally:
++            if child is not None and not committed:
++                self.stop_uncommitted(child)
++
++    @staticmethod
++    def stop_uncommitted(child):
++        # The helper cannot exec without a matching committed reservation.
++        if child.poll() is None:
++            try:
++                os.killpg(child.pid, signal.SIGTERM)
++            except OSError:
++                # The group may be exiting already. Reap before deciding it failed.
++                pass
++        try:
++            child.wait(timeout=10)
++        except subprocess.TimeoutExpired:
++            kill_error = None
++            try:
++                os.killpg(child.pid, signal.SIGKILL)
++            except OSError as exc:
++                kill_error = exc
++            try:
++                child.wait(timeout=10)
++            except subprocess.TimeoutExpired:
++                raise Deferred('EvidenceUnavailable', type(kill_error) if kill_error else subprocess.TimeoutExpired) from None
++
++    def authorize_child(self, token):
++        with self.locked() as directory:
++            owner = processes().get(os.getpid())
++            return bool(owner and any(row['token'] == token and row['pgid'] == os.getpid()
++                                      and row['identity'] == owner['identity']
++                                      for row in self.read(directory)))
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('action', choices=('run', '_child', 'status'))
++    parser.add_argument('--lane', choices=sorted(LANES), default='direct')
++    parser.add_argument('--state-dir', type=Path, default=DEFAULT_ROOT,
++                        help='use the default on the mini; overrides are for isolated tests')
++    parser.add_argument('--token', default='')
++    # Parse gate options separately from the command, preserving literal arguments.
++    values = list(sys.argv[1:] if argv is None else argv)
++    index = values.index('--') if '--' in values else len(values)
++    args = parser.parse_args(values[:index])
++    command = values[index + 1:]
++    gate = Gate(args.state_dir)
++    child = None
++    handlers = {}
++    def forward(signum, frame):
++        if child is None:
++            return
++        try:
++            os.killpg(child.pid, signum)
++        except ProcessLookupError:
++            pass
++    try:
++        if args.action == 'status':
++            sample = pressure()
++            validate_pressure(sample)
++            print(json.dumps(sample, sort_keys=True))
++            return 0
++        if not command:
++            raise ValueError('command required')
++        if args.action == '_child':
++            if not gate.authorize_child(args.token):
++                raise Deferred('EvidenceUnavailable')
++            try:
++                os.execvpe(command[0], command, dict(os.environ))
++            except FileNotFoundError:
++                print('command execution failed: FileNotFoundError', file=sys.stderr)
++                return 127
++            except OSError as exc:
++                print('command execution failed: ' + type(exc).__name__, file=sys.stderr)
++                return 126
++        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
++            handlers[signum] = signal.getsignal(signum)
++            signal.signal(signum, forward)
++        child = gate.spawn(command, lane=args.lane)
++        result = child.wait()
++        return result if result >= 0 else 128 - result
++    except Deferred as exc:
++        print('admission deferred: ' + exc.diagnostic, file=sys.stderr)
++        return 75
++    except OSError as exc:
++        print('command launch failed: ' + type(exc).__name__, file=sys.stderr)
++        return 127 if isinstance(exc, FileNotFoundError) else 126
++    except (ValueError, KeyError, TypeError, RecursionError, subprocess.SubprocessError) as exc:
++        print('admission deferred: EvidenceUnavailable:' + type(exc).__name__, file=sys.stderr)
++        return 75
++    finally:
++        for signum, handler in handlers.items():
++            signal.signal(signum, handler)
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+--- /dev/null
++++ b/tests/test_shared_admission.py
+@@ -0,0 +1,294 @@
++import json
++import contextlib
++import io
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import time
++import signal
++import unittest
++from unittest import mock
++
++try:
++    from scripts import shared_admission as admission
++except ImportError:
++    admission = None
++
++GIB = 1024 ** 3
++
++
++class SharedAdmissionTests(unittest.TestCase):
++    def setUp(self):
++        self.assertIsNotNone(admission, 'shared admission implementation is missing')
++        self.tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.tmp.cleanup)
++        self.root = Path(self.tmp.name).resolve() / 'budget'
++        self.pressure = dict(cores=18, load=0.0, available_bytes=10 * GIB, total_bytes=64 * GIB)
++        self.gate = admission.Gate(self.root, sample=lambda: self.pressure)
++
++    def spawn(self, code='import time; time.sleep(2)', lane='direct'):
++        child = self.gate.spawn([sys.executable, '-c', code], lane=lane,
++                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++        self.addCleanup(self.stop, child)
++        return child
++
++    @staticmethod
++    def stop(child):
++        if child.poll() is None:
++            os.killpg(child.pid, 15)
++        child.wait(timeout=5)
++
++    def test_rejects_before_command_side_effect_when_memory_is_low(self):
++        marker = self.root.parent / 'ran'
++        self.pressure['available_bytes'] = 3 * GIB
++        with self.assertRaises(admission.Deferred):
++            self.spawn('from pathlib import Path; Path(%r).touch()' % str(marker))
++        self.assertFalse(marker.exists())
++
++    def test_load_ceiling_is_scaled_to_cores(self):
++        self.pressure.update(cores=2, load=4.0)
++        with self.assertRaises(admission.Deferred):
++            self.spawn()
++
++    def test_all_lanes_share_reserved_memory(self):
++        # 10 GiB available, 6.4 GiB floor, and one 2 GiB reservation fits.
++        first = self.spawn(lane='board')
++        with self.assertRaises(admission.Deferred):
++            self.spawn(lane='launchd')
++        first.terminate()
++        first.wait(timeout=5)
++        second = self.spawn(lane='direct')
++        self.assertIsNone(second.poll())
++
++    def test_unknown_pressure_refuses_without_overwriting_state(self):
++        self.spawn()
++        before = (self.root / 'leases.json').read_bytes()
++        self.pressure['available_bytes'] = None
++        with self.assertRaises(admission.Deferred):
++            self.spawn()
++        self.assertEqual((self.root / 'leases.json').read_bytes(), before)
++
++    def test_corrupt_or_linked_state_is_refused(self):
++        self.root.mkdir(mode=0o700)
++        state = self.root / 'leases.json'
++        state.write_text('{')
++        with self.assertRaises(admission.Deferred):
++            self.spawn()
++        self.assertEqual(state.read_text(), '{')
++        state.unlink()
++        target = self.root / 'keep'
++        target.write_text('preserve')
++        state.symlink_to(target)
++        with self.assertRaises(admission.Deferred):
++            self.spawn()
++        self.assertEqual(target.read_text(), 'preserve')
++
++    def test_directory_replacement_cannot_redirect_state(self):
++        self.root.mkdir(mode=0o700)
++        target = self.root.parent / 'other'
++        target.mkdir(mode=0o700)
++        original = Path.is_symlink
++        replaced = False
++        def check(path):
++            nonlocal replaced
++            result = original(path)
++            if path == self.root and not replaced:
++                replaced = True
++                path.rename(path.with_name('original'))
++                path.symlink_to(target, target_is_directory=True)
++            return result
++        with mock.patch.object(Path, 'is_symlink', check):
++            with self.assertRaises(admission.Deferred):
++                self.spawn()
++        self.assertEqual(list(target.iterdir()), [])
++
++    def test_child_executes_only_after_a_committed_matching_lease(self):
++        marker = self.root.parent / 'ran'
++        child = self.spawn('from pathlib import Path; Path(%r).touch()' % str(marker))
++        self.assertEqual(child.wait(timeout=5), 0)
++        self.assertTrue(marker.exists())
++        leases = json.loads((self.root / 'leases.json').read_text())['leases']
++        self.assertEqual(leases[0]['pgid'], child.pid)
++        self.assertEqual((self.root / 'leases.json').stat().st_mode & 0o777, 0o600)
++        self.assertEqual((self.root / 'gate.lock').stat().st_mode & 0o777, 0o600)
++
++    def test_uncommitted_child_does_not_execute(self):
++        marker = self.root.parent / 'ran'
++        script = Path(admission.__file__)
++        result = subprocess.run([sys.executable, str(script), '_child', '--state-dir', str(self.root),
++                                 '--token', 'missing', '--', sys.executable, '-c',
++                                 'from pathlib import Path; Path(%r).touch()' % str(marker)],
++                                capture_output=True, text=True, timeout=10)
++        self.assertEqual(result.returncode, 75)
++        self.assertFalse(marker.exists())
++
++    def test_failed_state_commit_cannot_start_command(self):
++        marker = self.root.parent / 'ran'
++        with mock.patch.object(self.gate, 'write', side_effect=OSError('private-sentinel')):
++            with self.assertRaises(admission.Deferred):
++                self.spawn('from pathlib import Path; Path(%r).touch()' % str(marker))
++        self.assertFalse(marker.exists())
++
++    def test_exited_helper_during_failed_commit_still_defers(self):
++        with mock.patch.object(self.gate, 'write', side_effect=OSError('private-sentinel')), \
++             mock.patch.object(os, 'killpg', side_effect=ProcessLookupError):
++            with self.assertRaises(admission.Deferred):
++                self.spawn()
++
++    def test_cli_preserves_arguments_and_exit_status(self):
++        marker = self.root.parent / 'literal argument'
++        with mock.patch.object(admission, 'Gate', return_value=self.gate):
++            status = admission.main(['run', '--lane', 'direct', '--state-dir', str(self.root), '--',
++                                     sys.executable, '-c',
++                                     'import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2]); sys.exit(17)',
++                                     str(marker), 'literal $(no-substitution)'])
++        self.assertEqual(status, 17)
++        self.assertEqual(marker.read_text(), 'literal $(no-substitution)')
++
++    def test_process_group_keeps_reservation_after_leader_exits(self):
++        child = self.spawn('import subprocess,sys; subprocess.Popen([sys.executable,"-c","import time; time.sleep(2)"])')
++        self.assertEqual(child.wait(timeout=5), 0)
++        with self.assertRaises(admission.Deferred):
++            self.spawn(lane='launchd')
++        time.sleep(2.2)
++        self.spawn()
++
++    def test_concurrent_processes_cannot_over_admit(self):
++        # Hold the sole available reservation until every competing caller exits.
++        start = self.root.parent / 'start'
++        code = '''import pathlib,sys,time
++from scripts.shared_admission import Gate,Deferred
++p=pathlib.Path(sys.argv[1]); marker=pathlib.Path(sys.argv[2])
++while not marker.exists(): time.sleep(.01)
++g=Gate(p,sample=lambda: dict(cores=18,load=0,available_bytes=10*1024**3,total_bytes=64*1024**3))
++try: g.spawn([sys.executable,'-c','import time; time.sleep(3)'],lane=sys.argv[3],stdout=-3,stderr=-3)
++except Deferred: sys.exit(75)
++'''
++        callers = [subprocess.Popen([sys.executable, '-c', code, str(self.root), str(start), lane])
++                   for lane in ['board', 'direct', 'launchd', 'direct']]
++        start.touch()
++        results = [p.wait(timeout=10) for p in callers]
++        self.assertEqual(sorted(results), [0, 75, 75, 75])
++        leases = json.loads((self.root / 'leases.json').read_text())['leases']
++        for lease in leases:
++            try:
++                os.killpg(lease['pgid'], 15)
++            except ProcessLookupError:
++                pass
++
++    def test_darwin_memory_parser_excludes_compressed_and_wired_pages(self):
++        vm = ('Mach Virtual Memory Statistics: (page size of 16384 bytes)\n'
++              'Pages free: 100.\nPages inactive: 200.\nPages speculative: 50.\n'
++              'Pages wired down: 9000.\nPages occupied by compressor: 8000.\n')
++        self.assertEqual(admission.parse_vm_stat(vm), 5_734_400)
++        with self.assertRaises(ValueError):
++            admission.parse_vm_stat('unknown')
++
++    def test_nonexistent_cwd_is_a_launch_error_and_cannot_run_command(self):
++        marker = self.root.parent / 'must-not-run'
++        with self.assertRaises(FileNotFoundError):
++            self.gate.spawn([sys.executable, '-c', 'from pathlib import Path; Path(%r).touch()' % str(marker)],
++                            lane='direct', cwd=self.root.parent/'absent-cwd')
++        self.assertFalse(marker.exists())
++
++    def test_unexpected_assertion_is_not_disguised_as_deferral(self):
++        with mock.patch.object(admission.subprocess, 'Popen', side_effect=AssertionError('sentinel')):
++            with self.assertRaises(AssertionError):
++                self.spawn()
++
++    def test_reused_group_identity_releases_stale_lease(self):
++        self.root.mkdir(mode=0o700)
++        stale = dict(token='a'*32, lane='board', pgid=424242, identity='old boot identity',
++                     memory_bytes=2*GIB, cpu=1.0)
++        with self.gate.locked() as directory:
++            self.gate.write(directory, [stale])
++        real_processes = admission.processes
++        def snapshot():
++            table = real_processes()
++            table[424242] = dict(pgid=424242, identity='different live identity')
++            return table
++        marker = self.root.parent/'reused-group-admitted'
++        with mock.patch.object(admission, 'processes', snapshot):
++            child = self.spawn('from pathlib import Path; Path(%r).touch()' % str(marker))
++        self.assertEqual(child.wait(timeout=5), 0)
++        self.assertTrue(marker.exists())
++        self.assertNotIn('a'*32, [r['token'] for r in json.loads((self.root/'leases.json').read_text())['leases']])
++
++    def test_child_exec_errors_have_distinct_codes_without_values(self):
++        cases = [(self.root.parent/'private-sentinel-missing', 127, 'FileNotFoundError'),
++                 (self.root.parent/'private-sentinel-no-exec', 126, 'PermissionError')]
++        cases[1][0].write_text('not executable')
++        cases[1][0].chmod(0o600)
++        for path, expected, error_type in cases:
++            with self.subTest(status=expected):
++                child = self.gate.spawn([str(path)], lane='direct', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++                out, err = child.communicate(timeout=5)
++                self.assertEqual(child.returncode, expected)
++                self.assertIn(error_type.encode(), err)
++                self.assertNotIn(b'private-sentinel', err)
++                self.assertEqual(out, b'')
++
++    def test_forwarding_is_installed_before_spawn_and_noops_without_child(self):
++        saved = {s:signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
++        self.addCleanup(lambda: [signal.signal(s,h) for s,h in saved.items()])
++        signal.signal(signal.SIGTERM, signal.SIG_IGN)
++        original = self.gate.spawn
++        def start(*args, **kwargs):
++            handler = signal.getsignal(signal.SIGTERM)
++            self.assertTrue(callable(handler), 'signal forwarding was installed after spawn')
++            handler(signal.SIGTERM, None)
++            return original(*args, **kwargs)
++        marker = self.root.parent/'after-noop-signal'
++        with mock.patch.object(admission, 'Gate', return_value=self.gate), \
++             mock.patch.object(self.gate, 'spawn', start):
++            result = admission.main(['run','--','%s'%sys.executable,'-c',
++                                     'from pathlib import Path; Path(%r).touch()'%str(marker)])
++        self.assertEqual(result,0)
++        self.assertTrue(marker.exists())
++
++    def test_cleanup_timeout_kills_and_reaps_before_deferring(self):
++        children = []
++        real_popen = subprocess.Popen
++        sent = []
++        real_killpg = os.killpg
++        def start(*args, **kwargs):
++            child = real_popen(*args, **kwargs)
++            if '_child' not in args[0]:
++                return child
++            children.append(child)
++            wait = child.wait
++            first = True
++            def waiting(timeout=None):
++                nonlocal first
++                if first:
++                    first = False
++                    raise subprocess.TimeoutExpired('private-sentinel', timeout)
++                return wait(timeout=timeout)
++            child.wait = waiting
++            return child
++        def kill(group, number):
++            sent.append(number)
++            return real_killpg(group, number)
++        with mock.patch.object(admission.subprocess, 'Popen', start), \
++             mock.patch.object(os, 'killpg', kill), \
++             mock.patch.object(self.gate, 'write', side_effect=OSError('private-sentinel')):
++            with self.assertRaises(admission.Deferred):
++                self.spawn()
++        self.assertIn(signal.SIGKILL, sent)
++        self.assertTrue(all(child.poll() is not None for child in children))
++
++    def test_cli_deferral_reports_safe_reason_and_exception_class(self):
++        self.pressure['load'] = None
++        error = io.StringIO()
++        with contextlib.redirect_stderr(error), mock.patch.object(admission, 'Gate', return_value=self.gate):
++            status = admission.main(['run','--',sys.executable,'-c','raise AssertionError("private-sentinel")'])
++        self.assertEqual(status,75)
++        self.assertIn('EvidenceUnavailable', error.getvalue())
++        self.assertIn('ValueError', error.getvalue())
++        self.assertNotIn('private-sentinel', error.getvalue())
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- /dev/null
++++ b/tests/test_admission_dispatch.py
+@@ -0,0 +1,241 @@
++"""Import and execute a candidate dispatcher, with provider boundaries isolated."""
++import importlib.util
++import io
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import types
++import unittest
++from unittest import mock
++from scripts import shared_admission
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++class DispatcherTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.tmp.cleanup)
++        self.errors = io.StringIO()
++        stderr = mock.patch('sys.stderr', self.errors)
++        stderr.start()
++        self.addCleanup(stderr.stop)
++        self.root = Path(self.tmp.name).resolve()
++        client = types.ModuleType('board_client')
++        client.BoardConflict = type('BoardConflict', (Exception,), {})
++        client.BoardGone = type('BoardGone', (Exception,), {})
++        client.call = lambda *a, **k: self.fail('provider access is forbidden')
++        live = types.ModuleType('live_status')
++        live.instructions = lambda cid: ''
++        self.publications = []
++        def publish(*args, **kwargs):
++            self.publications.append((args, kwargs))
++            return True
++        live.publish_live = publish
++        with mock.patch.dict(sys.modules, board_client=client, live_status=live):
++            spec = importlib.util.spec_from_file_location('candidate_sessions', ROOT / 'sessions.py')
++            self.module = importlib.util.module_from_spec(spec)
++            spec.loader.exec_module(self.module)
++        self.store = self.module.Store(self.root / 'jobs')
++        self.directory = self.store.root / 'card-sample'
++        self.directory.mkdir()
++        self.turn = dict(id='turn1', message='synthetic', kind='work')
++        session = dict(card_id='sample', engine='codex', cwd=str(self.directory), status='queued',
++                       last_line='queued', queue=[self.turn], title='synthetic', turn='old',
++                       started_at=None, last_activity=0, pid=None, identity='')
++        with self.store.locked() as data:
++            data['sessions']['sample'] = session
++        self.gate = shared_admission.Gate(self.root / 'budget', sample=lambda: dict(
++            cores=18, load=0, available_bytes=1024**3, total_bytes=64*1024**3))
++        self.runtime = self.root/'runtime'
++        self.runtime.mkdir()
++        self.marker = self.root/'worker-ran'
++        (self.runtime/'session_worker.py').write_text('from pathlib import Path\nimport sys\nPath(%r).touch()\nPath(sys.argv[1]+".ran").touch()\n'%str(self.marker))
++        self.module.ROOT = self.runtime
++        self.module.PYTHON = sys.executable
++
++    def test_pressure_deferral_preserves_turn_and_never_launches_model(self):
++        with mock.patch.object(shared_admission, 'Gate', return_value=self.gate), \
++             mock.patch.object(self.module.os, 'getloadavg', return_value=(0, 0, 0)):
++            self.store.tick()
++        session = self.store.read()['sessions']['sample']
++        self.assertEqual(session['admission_deferred']['reason'], 'MemoryCapacity')
++        self.assertEqual(session['queue'], [self.turn])
++        self.assertEqual(session['status'], 'queued')
++        self.assertIsNone(session['pid'])
++        self.assertFalse(self.marker.exists())
++
++    def test_review_and_veto_authority_are_reset_on_deferral(self):
++        with self.store.locked() as data:
++            s = data['sessions']['sample']
++            s['queue'][0].update(kind='review', approval_id='a', veto_proposal_id='v', veto_card_revision=2)
++            data['approvals']['a'] = dict(id='a', status='approved', kind='email', digest='safe', content='synthetic')
++        with mock.patch.object(shared_admission, 'Gate', return_value=self.gate), \
++             mock.patch.object(self.module.os, 'getloadavg', return_value=(0, 0, 0)), \
++             mock.patch.object(self.module, 'artifact', return_value=dict(digest='safe'), create=True):
++            self.store.tick()
++        data = self.store.read()
++        s = data['sessions']['sample']
++        self.assertEqual(s['queue'][0]['id'], 'turn1')
++        self.assertNotIn('reviewing', s)
++        self.assertNotIn('review_context', s)
++        self.assertNotIn('active_veto_revision', s)
++        self.assertEqual(data['approvals']['a']['status'], 'approved')
++        self.assertFalse(self.marker.exists())
++
++    def second_session(self):
++        directory = self.store.root/'card-next'
++        directory.mkdir()
++        with self.store.locked() as data:
++            row = dict(data['sessions']['sample'])
++            row.update(card_id='next',cwd=str(directory),queue=[dict(id='turn2',message='synthetic',kind='work')])
++            data['sessions']['next'] = row
++        return directory
++
++    def tick_and_reap(self, factory, missing_cwd=False):
++        children = []
++        popen = subprocess.Popen
++        def start(*args, **kwargs):
++            if missing_cwd and '_child' in args[0] and kwargs.get('cwd')==str(self.directory):
++                kwargs['cwd'] = str(self.root/'private-sentinel-missing-cwd')
++            child = popen(*args, **kwargs)
++            children.append(child)
++            return child
++        try:
++            with mock.patch.object(shared_admission, 'Gate', side_effect=factory), \
++                 mock.patch.object(self.module.os, 'getloadavg', return_value=(0,0,0)), \
++                 mock.patch.object(self.module.subprocess,'Popen',side_effect=start):
++                self.store.tick()
++        finally:
++            for child in children:
++                child.wait(timeout=10)
++        return self.store.read()
++
++    def test_popen_missing_cwd_fails_only_its_session_and_next_marker_runs(self):
++        next_dir = self.second_session()
++        self.gate.sample = lambda: dict(cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3)
++        data = self.tick_and_reap(lambda:self.gate, missing_cwd=True)
++        bad = data['sessions']['sample']
++        self.assertEqual(bad['status'],'failed')
++        self.assertIn('could not start',bad['last_line'])
++        self.assertNotIn('private-sentinel',bad['last_line'])
++        self.assertFalse((self.directory/'turn1.ran').exists())
++        self.assertTrue((next_dir/'turn2.ran').exists())
++
++    def test_missing_session_cwd_fails_only_its_session(self):
++        next_dir = self.second_session()
++        with self.store.locked() as data:
++            data['sessions']['sample']['cwd'] = str(self.root/'private-sentinel-absent')
++        self.gate.sample = lambda:dict(cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3)
++        data = self.tick_and_reap(lambda:self.gate)
++        self.assertEqual(data['sessions']['sample']['status'],'failed')
++        self.assertIn('could not start',data['sessions']['sample']['last_line'])
++        self.assertFalse((self.directory/'turn1.ran').exists())
++        self.assertTrue((next_dir/'turn2.ran').exists())
++
++    def test_unavailable_evidence_defers_one_session_and_continues(self):
++        next_dir = self.second_session()
++        healthy = shared_admission.Gate(self.root/'budget',sample=lambda:dict(
++            cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3))
++        self.gate.sample = lambda: dict(cores=18,load=None,available_bytes=32*1024**3,total_bytes=64*1024**3)
++        gates = iter([self.gate,healthy])
++        data = self.tick_and_reap(lambda:next(gates))
++        first = data['sessions']['sample']
++        self.assertEqual(first['status'],'queued')
++        self.assertEqual(first['admission_deferred']['reason'],'EvidenceUnavailable')
++        self.assertIn('valueerror',first['last_line'])
++        self.assertFalse((self.directory/'turn1.ran').exists())
++        self.assertTrue((next_dir/'turn2.ran').exists())
++
++    def test_capacity_deferral_stops_later_dispatch(self):
++        next_dir = self.second_session()
++        healthy = shared_admission.Gate(self.root/'budget',sample=lambda:dict(
++            cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3))
++        gates = iter([self.gate,healthy])
++        data = self.tick_and_reap(lambda:next(gates))
++        self.assertEqual(data['sessions']['sample']['admission_deferred']['reason'],'MemoryCapacity')
++        self.assertEqual(data['sessions']['next']['queue'][0]['id'],'turn2')
++        self.assertFalse((next_dir/'turn2.ran').exists())
++
++    def test_old_consecutive_deferrals_publish_card_once_then_clear_on_start(self):
++        now = 10000
++        with mock.patch.object(shared_admission,'Gate',return_value=self.gate), \
++             mock.patch.object(self.module.os,'getloadavg',return_value=(0,0,0)):
++            for offset in (0,899,900,901):
++                with mock.patch.object(self.module.time,'time',return_value=now+offset):
++                    self.store.tick()
++        blocked = [row for row in self.publications if row[0][1]=='blocked']
++        self.assertEqual(len(blocked),1)
++        self.assertEqual(blocked[0][0][0],'sample')
++        self.assertIn('memorycapacity',blocked[0][0][2])
++        self.assertEqual(self.store.read()['sessions']['sample']['admission_deferred']['count'],4)
++        self.assertFalse(self.marker.exists())
++        self.gate.sample = lambda:dict(cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3)
++        data = self.tick_and_reap(lambda:self.gate)
++        self.assertNotIn('admission_deferred',data['sessions']['sample'])
++        self.assertTrue(self.marker.exists())
++
++    def test_failed_deferral_publication_is_retried(self):
++        with self.store.locked() as data:
++            data['sessions']['sample']['admission_deferred'] = dict(turn='turn1',since=1,count=2,alerted=False)
++        with mock.patch.object(shared_admission,'Gate',return_value=self.gate), \
++             mock.patch.object(self.module.os,'getloadavg',return_value=(0,0,0)), \
++             mock.patch.object(self.module,'publish_live',return_value=False), \
++             mock.patch.object(self.module.time,'time',return_value=10000):
++            self.store.tick()
++        self.assertFalse(self.store.read()['sessions']['sample']['admission_deferred']['alerted'])
++        with mock.patch.object(shared_admission,'Gate',return_value=self.gate), \
++             mock.patch.object(self.module.os,'getloadavg',return_value=(0,0,0)), \
++             mock.patch.object(self.module.time,'time',return_value=10001):
++            self.store.tick()
++        self.assertTrue(self.store.read()['sessions']['sample']['admission_deferred']['alerted'])
++        self.assertEqual(len(self.publications),1)
++
++    def test_high_measured_load_is_recorded_instead_of_silently_skipped(self):
++        self.gate.sample = lambda:dict(cores=18,load=100,available_bytes=32*1024**3,total_bytes=64*1024**3)
++        with mock.patch.object(shared_admission,'Gate',return_value=self.gate), \
++             mock.patch.object(self.module.os,'getloadavg',return_value=(100,100,100)):
++            self.store.tick()
++        row = self.store.read()['sessions']['sample']
++        self.assertEqual(row['admission_deferred']['reason'],'LoadCapacity')
++        self.assertFalse(self.marker.exists())
++
++    def test_admitted_dispatch_runs_candidate_worker_and_tracks_same_pid(self):
++        self.gate.sample = lambda: dict(cores=18, load=0, available_bytes=32*1024**3, total_bytes=64*1024**3)
++        runtime = self.runtime
++        marker = self.marker
++        self.module.ROOT = runtime
++        self.module.PYTHON = sys.executable
++        children = []
++        popen = subprocess.Popen
++        def start(*args, **kwargs):
++            child = popen(*args, **kwargs)
++            children.append(child)
++            return child
++        with mock.patch.object(shared_admission, 'Gate', return_value=self.gate), \
++             mock.patch.object(self.module.os, 'getloadavg', return_value=(0, 0, 0)), \
++             mock.patch.object(self.module.subprocess, 'Popen', side_effect=start):
++            self.store.tick()
++        session = self.store.read()['sessions']['sample']
++        self.assertEqual(session['status'], 'running')
++        self.assertEqual(session['queue'], [])
++        pid = session['pid']
++        try:
++            for child in children:
++                child.wait(timeout=10)
++        finally:
++            if not marker.exists():
++                try:
++                    os.killpg(pid, 15)
++                except ProcessLookupError:
++                    pass
++        self.assertTrue(marker.exists())
++        leases = json.loads((self.root / 'budget/leases.json').read_text())['leases']
++        self.assertEqual(leases[0]['pgid'], pid)
++
++
++if __name__ == '__main__':
++    unittest.main()
