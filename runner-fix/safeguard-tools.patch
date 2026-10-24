@@ -269,7 +269,7 @@
 +            handler.close()
 --- /dev/null
 +++ b/tests/test_ops_preflight.py
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,162 @@
 +import datetime as dt
 +import json
 +from pathlib import Path
@@ -395,6 +395,12 @@
 +            self.assertFalse(hung, 'nonregular inventories must fail without blocking')
 +            self.assertEqual(child.returncode, 2)
 +            self.assertNotIn(str(fifo).encode(), output + errors)
++
++    def test_actual_inventory_read_has_a_size_budget(self):
++        result = self.run_check({'expiries': [dict(name='cert', expires_at='2027-10-17T00:00:00Z',
++                                                  note='x' * (1024 * 1024))]})
++        self.assertEqual(result.returncode, 2)
++        self.assertNotIn('2027-10-17', result.stdout + result.stderr)
 +
 +    def test_cleanup_does_not_follow_directory_replaced_by_symlink(self):
 +        import importlib.util

@@ -53,4 +53,4 @@ python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 python3 scripts/check_data_api_grants.py
 ```
 
-The harness applies the bundled patch in a disposable directory and runs its 14 tests. Existing grant checks stay separate. The tests use synthetic files, clocks, expiry metadata, and concurrent subprocesses. They cover concurrent directory replacement, FIFO inventory refusal, and retention reductions. They do not contact providers or operate production routines. CI runs this same offline harness.
+The harness applies the bundled patch in a disposable directory and runs its 15 tests. Existing grant checks stay separate. The tests use synthetic files, clocks, expiry metadata, and concurrent subprocesses. They cover concurrent directory replacement, FIFO inventory refusal, and retention reductions. They do not contact providers or operate production routines. CI runs this same offline harness.
