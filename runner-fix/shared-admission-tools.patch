@@ -4,7 +4,7 @@
 +"""Reviewed local operational tools."""
 --- /dev/null
 +++ b/scripts/shared_admission.py
-@@ -0,0 +1,270 @@
+@@ -0,0 +1,273 @@
 +#!/usr/bin/env python3
 +"""One host-local resource gate for cooperating model and scheduled commands."""
 +import argparse
@@ -219,7 +219,10 @@
 +        except Exception as exc:
 +            # The child waits on this same lock and cannot exec an uncommitted lease.
 +            if child is not None and child.poll() is None:
-+                os.killpg(child.pid, signal.SIGTERM)
++                try:
++                    os.killpg(child.pid, signal.SIGTERM)
++                except ProcessLookupError:
++                    pass
 +                child.wait(timeout=10)
 +            if isinstance(exc, Deferred):
 +                raise
@@ -277,7 +280,7 @@
 +    sys.exit(main())
 --- /dev/null
 +++ b/tests/test_shared_admission.py
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,188 @@
 +import json
 +import os
 +from pathlib import Path
@@ -407,6 +410,12 @@
 +            with self.assertRaises(admission.Deferred):
 +                self.spawn('from pathlib import Path; Path(%r).touch()' % str(marker))
 +        self.assertFalse(marker.exists())
++
++    def test_exited_helper_during_failed_commit_still_defers(self):
++        with mock.patch.object(self.gate, 'write', side_effect=OSError('private-sentinel')), \
++             mock.patch.object(os, 'killpg', side_effect=ProcessLookupError):
++            with self.assertRaises(admission.Deferred):
++                self.spawn()
 +
 +    def test_cli_preserves_arguments_and_exit_status(self):
 +        marker = self.root.parent / 'literal argument'
