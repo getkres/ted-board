@@ -1,11 +1,18 @@
 --- a/inbox_steward.py
 +++ b/inbox_steward.py
-@@ -22 +22,3 @@
+@@ -2 +2 @@
+-"""Mechanical inbox maintenance. Uses only existing board move and archive APIs."""
++"""Mechanical card inbox maintenance. Uses the existing board move API."""
+@@ -4 +3,0 @@
+-from collections import defaultdict
+@@ -20,3 +19,3 @@
+-TERMINAL = {'done', 'killed'}
+-VERDICTS = {'approved', 'needs_work', 'scrapped'}
 -REPORT = re.compile(r'\b(finished|opened\s+(?:a\s+)?pr\b|uploaded|applied|merged|(?:is|now|went)\s+live)\b', re.I)
 +REPORT = re.compile(r'\b(finished|opened\s+(?:a\s+)?pr\b|uploaded|applied|merged|deployed|'
 +                    r'(?:is|now|went)\s+live|pr\s*#\d+\s+(?:is\s+)?open|'
 +                    r'(?:is|are)\s+up\s+(?:on|in)|(?:implementation|work|build|patch)\s+(?:is\s+)?completed)\b', re.I)
-@@ -24,4 +26,7 @@
+@@ -24,4 +23,7 @@
 -REQUEST = re.compile(r'\?|\b(approval (?:needed|required|pending)|awaiting (?:your|a decision)|waiting (?:on|for) you|'
 -                     r'please\b|must\b|verify\b|(?:payment|charge) failed|outstanding balance|cancellation required|renewal required|choose\b|pick (?:one|a|the|your)|your (?:pick|decision|approval|call)|'
 -                     r'approve (?:each|the|this)|tap yes|tell me|update your|action required|'
@@ -17,18 +24,39 @@
 +                     r'cancellation required|renewal required|choose\b|pick (?:one|a|the|your)|'
 +                     r'should (?:i|we)|which (?:one|option|route|design)|your (?:pick|choice|decision|approval|call)|approve (?:each|the|this)|tap yes|tell me|'
 +                     r'type your (?:version|copy|answer)|say a letter|update your|action required|needs? (?:your |an? )?(?:approval|decision|signature)|pending approval)\b', re.I)
-@@ -30,4 +35,6 @@
+@@ -30,5 +32,59 @@
 -                       r'approve (?:the )?(?:charge|payment)|flat fee|\$\s*\d)\b|\$\s*\d', re.I)
 -NEGATED_REPORT = re.compile(r'\b(?:not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
 -                            r'(?:finished|opened|uploaded|applied|merged|live)\b|'
 -                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}(?:upload|finish|apply|merge|open)\b', re.I)
+-STUDY = re.compile(r'\b(reference locks?|inventor(?:y|ies)|side[ -]by[ -]sides?|just to look|just[ -]looking)\b', re.I)
 +                       r'approve (?:the )?(?:charge|payment)|flat fee)\b|\$\s*\d', re.I)
 +MONEY_REQUEST = re.compile(r'\b(?:approve|authorize|pay|spend|charge|purchase)\b[^.\n]{0,80}\$\s*\d', re.I)
 +NEGATED_REPORT = re.compile(r'\b(?:if|unless|no|not|never|isn.t|hasn.t|wasn.t|haven.t)\s+(?:\w+\s+){0,3}'
 +                            r'(?:finished|completed|opened|uploaded|applied|merged|deployed|live)\b|'
 +                            r'\b(?:will|plan to|going to)\s+(?:\w+\s+){0,2}'
 +                            r'(?:upload(?:ed)?|finish(?:ed)?|complete(?:d)?|appl(?:y|ied)|merge(?:d)?|open(?:ed)?)\b', re.I)
-@@ -34,0 +42,32 @@
++
++
++# Case-insensitive project/section selectors. A wildcard matches every value.
++PROTECTED_SCOPES = (
++    ('personal', '*'),
++    ('money', '*'),
++    ('*', 'ted_doing'),
++    ('*', 'up_next'),
++    ('*', 'done'),
++    ('*', 'killed'),
++)
++
++
++def protected_scope(card):
++    project = str(card.get('project') or '').strip().casefold()
++    section = str(card.get('section') or '').strip().casefold()
++    return any(p in ('*', project) and s in ('*', section) for p, s in PROTECTED_SCOPES)
++
++
++def disabled(root):
++    return (ROOT / 'steward.disabled').exists() or (Path(root) / 'steward.disabled').exists()
 +
 +
 +# Auto-routing is an allow decision. Every ambiguity check must pass first.
@@ -61,22 +89,24 @@
 +    if not positive_completion(text):
 +        return 'no unambiguous completion evidence, ted judgment required'
 +    return None
-@@ -72,0 +112,2 @@
+@@ -72,0 +129,4 @@
++    if protected_scope(card):
++        return 'protected project or section, manual review only'
 +    if card.get('live_state') == 'running':
 +        return 'worker is still running'
-@@ -97 +138 @@
+@@ -97 +157 @@
 -    if SENSITIVE.search(content):
 +    if SENSITIVE.search(content) or MONEY_REQUEST.search(content):
-@@ -104 +145,4 @@
+@@ -104 +164,4 @@
 -    if REQUEST.search(content):
 +    current_text = str((last or {}).get('text') or '')
 +    current_text = re.sub(r'https?://\S+', '', current_text)
 +    current_text = re.sub(r'"[^"]*"|[\u201c][^\u201d]*[\u201d]|`[^`]*`', '', current_text)
 +    if '?' in current_text or REQUEST.search(content):
-@@ -114,2 +157,0 @@
+@@ -114,2 +176,0 @@
 -    if last == {} and FYI.search(str(card.get('title', ''))+' '+str(card.get('body', ''))):
 -        return 'done', 'pure fyi, no action required'
-@@ -119,5 +161,4 @@
+@@ -119,5 +180,4 @@
 -    if NEGATED_REPORT.search(text):
 -        return None, 'unfinished or future work, ted judgment required'
 -    if REPORT.search(text):
@@ -86,16 +116,224 @@
 +    if reason:
 +        return None, reason
 +    if FYI.search(text) and not positive_completion(text, REPORT):
-@@ -125 +166 @@
+@@ -125,6 +185 @@
 -    return None, 'ambiguous, ted judgment required'
+-
+-
+-def base_title(value):
+-    value = re.sub(r'\b(?:v\d+(?:\.\d+)*|final|restart)\b', ' ', value, flags=re.I)
+-    return re.sub(r'[^\w]+', ' ', value.lower()).strip()
 +    return 'up_next', 'Ted review'
-@@ -270,2 +311,3 @@
+@@ -144,33 +199 @@
+-def linked_cards(rows, cards):
+-    project, batch = rows[0]['project'], rows[0]['batch']
+-    ids = {r['id'] for r in rows}
+-    return [c for c in cards if c.get('project') == project and c.get('section') not in TERMINAL and
+-            (c.get('batch') == batch or batch.lower() in (str(c.get('title', ''))+'\n'+str(c.get('body', ''))).lower()
+-             or any(mid in str(c.get('body', '')) for mid in ids))]
+-
+-
+-def batch_reason(rows, pins, cards, now):
+-    attached = [p for p in pins if p.get('mockup_id') in {r['id'] for r in rows}]
+-    if any(not stamp(p.get('created_at')) or any(not stamp(m.get('at')) for m in p.get('thread', [])) for p in attached):
+-        return 'undated mockup activity', attached
+-    if any(not p.get('resolved') for p in attached):
+-        return 'unresolved mockup feedback', attached
+-    if any(recent_human(p.get('thread') or [], now) for p in attached):
+-        return 'sebastian replied within 48 hours', attached
+-    if any(r.get('verdict_change') and (not stamp(r['verdict_change'].get('at')) or
+-            now-stamp(r['verdict_change']['at']) < 2*DAY) for r in rows):
+-        return 'recent or undated sebastian verdict', attached
+-    for c in linked_cards(rows, cards):
+-        if 'build approved:' in c.get('title', '').lower() or c.get('build_pending'):
+-            return 'build is pending', attached
+-        reason = protection(c, now)
+-        if reason:
+-            return reason, attached
+-    if any(r.get('build_pending') or r.get('detail_error') for r in rows):
+-        return 'build or image detail pending', attached
+-    if any(not stamp(r.get('created_at')) for r in rows):
+-        return 'unknown batch creation time', attached
+-    return None, attached
+-
+-
+-def plan(cards, mockups, pins, now):
++def plan(cards, now):
+@@ -187,35 +209,0 @@
+-    groups = defaultdict(list)
+-    for row in mockups:
+-        if row.get('status') != 'archived' and row.get('project') and row.get('batch'):
+-            groups[(row['project'], row['batch'])].append(row)
+-    for (project, batch), rows in sorted(groups.items()):
+-        blocked, attached = batch_reason(rows, pins, cards, now)
+-        reason = None
+-        if not blocked:
+-            newest = max(stamp(r['created_at']) for r in rows)
+-            newer = [name for (proj, name), other in groups.items() if proj == project and name != batch
+-                     and base_title(name) and base_title(name) == base_title(batch)
+-                     and all(stamp(r.get('created_at')) for r in other)
+-                     and min(stamp(r['created_at']) for r in other) > newest
+-                     and not any(r.get('detail_error') for r in other)]
+-            if newer:
+-                reason = 'superseded by '+sorted(newer)[0]
+-            elif all(r.get('verdict') in VERDICTS or (not r.get('verdict') and r.get('status') == 'picked') for r in rows):
+-                reason = 'every image has a verdict, and no build is pending'
+-            elif STUDY.search(batch):
+-                touched = [stamp(r.get('created_at')) for r in rows]
+-                touched.extend(stamp((r.get('verdict_change') or {}).get('at')) for r in rows)
+-                touched.extend(stamp(p.get('created_at')) for p in attached)
+-                touched.extend(stamp(m.get('at')) for p in attached for m in p.get('thread', []))
+-                if now-max(touched) >= 7*DAY:
+-                    reason = 'just-looking study untouched for seven days'
+-        if reason:
+-            actions.append(dict(kind='archive', card_id='batch:'+project+':'+batch,
+-                                project=project, batch=batch, **{'from': 'mockups'}, to='archived',
+-                                reason=reason, basis=digest([rows, attached])))
+-        else:
+-            times = [stamp(r.get('created_at')) for r in rows]
+-            review.append(dict(id=clean('batch:'+batch), project=clean(project), title=clean(batch),
+-                               age_hours=round(max(0, now-max(times))/3600, 1),
+-                               last_message=clean(blocked or 'no mechanical archive rule applies'),
+-                               suggested_move='keep', reason=blocked or 'ted judgment required'))
+@@ -233,8 +220,0 @@
+-def fetch_mockups():
+-    from mockup_client import call
+-    result = call()
+-    if not isinstance(result, dict) or not isinstance(result.get('mockups'), list) or not isinstance(result.get('pins'), list):
+-        raise RuntimeError('Mockup snapshot incomplete')
+-    return result
+-
+-
+@@ -246,10 +225,0 @@
+-def archive_batch(project, batch):
+-    from mockup_client import call
+-    return call('archive', project=project, batch=batch)
+-
+-
+-def snapshot():
+-    cards, payload = fetch_cards(), fetch_mockups()
+-    return cards, payload['mockups'], payload['pins']
+-
+-
+@@ -258,2 +227,0 @@
+-    if action.get('batch'):
+-        row['batch'] = clean(action['batch'], 300)
+@@ -270,2 +238,3 @@
 -    ranked = sorted((review_row(c, now, 'keep', classify_card(c, now)[1]) for c in cards
 -                     if c.get('section') == 'needs_you'), key=lambda r: (-r['age_hours'], r['id']))
 +    remaining = sorted((c for c in cards if c.get('section') == 'needs_you'),
 +                       key=lambda c: (activity(c), c.get('id', '')))
 +    ranked = [review_row(c, now, 'keep', classify_card(c, now)[1]) for c in remaining]
-@@ -274 +316,2 @@
+@@ -274 +243,10 @@
 -                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked if excess else [])
 +                   cap=12, excess_count=excess, extras=ranked[:excess], ranked=ranked,
 +                   ambiguous=[row for c, row in zip(remaining, ranked) if classify_card(c, now)[0] is None])
++    payload.update(stale=False, stale_since=None)
++    write_overflow_json(root, payload)
++    return len(ranked), excess
++
++
++def write_overflow_json(root, payload):
++    root = Path(root)
++    root.mkdir(parents=True, exist_ok=True)
+@@ -277,0 +256 @@
++    os.fchmod(fd, 0o600)
+@@ -284 +263,25 @@
+-    return len(ranked), excess
++
++
++def mark_stale(root, now):
++    path = Path(root) / 'steward-overflow.json'
++    try:
++        payload = json.loads(path.read_text())
++        if not isinstance(payload, dict):
++            raise ValueError('Invalid cached overflow')
++    except (OSError, ValueError):
++        payload = dict(at=None, needs_you=None, cap=12, excess_count=None,
++                       extras=[], ranked=[], ambiguous=[])
++    first = stamp(payload.get('stale_since')) or now
++    payload.update(stale=True, stale_since=datetime.fromtimestamp(first, timezone.utc).isoformat(),
++                   last_attempt_at=datetime.fromtimestamp(now, timezone.utc).isoformat())
++    write_overflow_json(root, payload)
++
++
++def fetch_or_stale(root, counts, now):
++    try:
++        return fetch_cards()
++    except Exception:
++        mark_stale(root, now)
++        counts['stale'] = True
++        counts['failed'] += 1
++        return None
+@@ -288,0 +292,6 @@
++    counts = dict(dry_run=dry_run, disabled=False, stale=False, planned_moves=0,
++                  moved=0, deferred=0, failed=0, needs_you_before=None,
++                  needs_you_after=None, overflow=None, actions=[])
++    if disabled(root):
++        counts['disabled'] = True
++        return counts
+@@ -291,5 +300,8 @@
+-    cards, mockups, pins = snapshot()
+-    proposed = plan(cards, mockups, pins, now)
+-    counts = dict(dry_run=dry_run, planned_moves=sum(a['kind'] == 'move' for a in proposed['actions']),
+-                  planned_archives=sum(a['kind'] == 'archive' for a in proposed['actions']),
+-                  moved=0, archived_batches=0, archived_images=0, deferred=0, failed=0,
++    cards = fetch_or_stale(root, counts, now)
++    if cards is None:
++        return counts
++    if disabled(root):
++        counts['disabled'] = True
++        return counts
++    proposed = plan(cards, now)
++    counts.update(planned_moves=len(proposed['actions']),
+@@ -299 +311 @@
+-        remaining = counts['needs_you_before']-counts['planned_moves']
++        remaining = counts['needs_you_before'] - counts['planned_moves']
+@@ -304,3 +316,11 @@
+-        current_cards, current_mockups, current_pins = snapshot()
+-        current = plan(current_cards, current_mockups, current_pins, time.time() if fixed_now is None else fixed_now)
+-        if action not in current['actions']:
++        if disabled(root):
++            counts['disabled'] = True
++            return counts
++        current_now = time.time() if fixed_now is None else fixed_now
++        current_cards = fetch_or_stale(root, counts, current_now)
++        if current_cards is None:
++            return counts
++        if disabled(root):
++            counts['disabled'] = True
++            return counts
++        if action not in plan(current_cards, current_now)['actions']:
+@@ -312,4 +332 @@
+-            if action['kind'] == 'move':
+-                result = move_card(action['card_id'], action['to'], action['reason'])
+-            else:
+-                result = archive_batch(action['project'], action['batch'])
++            result = move_card(action['card_id'], action['to'], action['reason'])
+@@ -323,6 +340,7 @@
+-        if action['kind'] == 'move':
+-            counts['moved'] += 1
+-        else:
+-            counts['archived_batches'] += 1
+-            counts['archived_images'] += int(result.get('archived', 0))
+-    cards = fetch_cards()
++        counts['moved'] += 1
++    cards = fetch_or_stale(root, counts, time.time() if fixed_now is None else fixed_now)
++    if cards is None:
++        return counts
++    if disabled(root):
++        counts['disabled'] = True
++        return counts
+@@ -343,0 +362,3 @@
++    if disabled(args.root):
++        print(json.dumps(dict(disabled=True, moved=0, failed=0)))
++        return 0
+--- a/steward_review.py
++++ b/steward_review.py
+@@ -2 +2 @@
+-"""Print ambiguous inbox cards and mockup batches for Ted's judgment pass."""
++"""Print ambiguous inbox cards for Ted's judgment pass."""
+@@ -11,2 +11 @@
+-    cards, mockups, pins = steward.snapshot()
+-    rows = steward.plan(cards, mockups, pins, time.time() if now is None else now)['review']
++    rows = steward.plan(steward.fetch_cards(), time.time() if now is None else now)['review']

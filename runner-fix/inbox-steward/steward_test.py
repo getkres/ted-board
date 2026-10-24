@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-SOURCE = Path(os.environ.get('TED_STEWARD_RUNTIME', Path.home() / 'ted-ops/ted-board/steward-runtime/current'))
+if not os.environ.get('TED_STEWARD_RUNTIME'):
+    raise SystemExit('Set TED_STEWARD_RUNTIME to a prepared private candidate. This suite does not run in CI.')
+SOURCE = Path(os.environ['TED_STEWARD_RUNTIME'])
 sys.path.insert(0, str(SOURCE))
 import inbox_steward as steward
 import steward_review
@@ -25,14 +27,9 @@ def card(cid='worker', text='Finished the work and opened PR #12.', **kw):
                 messages=[dict(who='ted', at=OLD, text=text)], **kw)
 
 
-def image(batch='Study v1', mid='m1', **kw):
-    return dict(dict(id=mid, project='Test', batch=batch, title='Screen',
-                     status='open', created_at=OLD, verdict=None), **kw)
-
-
 class CardRules(unittest.TestCase):
     def target(self, c):
-        return steward.plan([c], [], [], NOW)['actions']
+        return steward.plan([c], NOW)['actions']
 
     def test_worker_reports_go_to_ted_review(self):
         for text in ['Finished.', 'Opened PR #3.', 'Uploaded the screens.',
@@ -210,98 +207,24 @@ class CardRules(unittest.TestCase):
         self.assertEqual(self.target(c), [])
 
 
-class MockupRules(unittest.TestCase):
-    def actions(self, rows, cards=None, pins=None):
-        return steward.plan(cards or [], rows, pins or [], NOW)['actions']
-
-    def test_newer_same_base_batch_archives_older_in_same_project(self):
-        rows = [image('Study v2'), image('Study FINAL restart', 'm2')]
-        rows[1]['created_at'] = '2026-10-10T00:00:00Z'
-        a = self.actions(rows)
-        self.assertEqual([(x['project'], x['batch']) for x in a], [('Test', 'Study v2')])
-        rows[1]['project'] = 'Other'
-        self.assertEqual(self.actions(rows), [])
-
-    def test_version_only_normalization_does_not_merge_different_studies(self):
-        rows = [image('Study v2: hair'), image('Study v3: brows', 'm2')]
-        rows[1]['created_at'] = RECENT
-        self.assertEqual(self.actions(rows), [])
-        rows = [image(), image('Study v2', 'm2')]
-        self.assertEqual(self.actions(rows), [])
-        rows[1]['created_at'] = 'bad'
-        self.assertEqual(self.actions(rows), [])
-
-    def test_all_verdicts_archive_but_partial_verdicts_do_not(self):
-        rows = [image(verdict='approved'), image(mid='m2', verdict='scrapped')]
-        self.assertEqual(len(self.actions(rows)), 1)
-        rows[1]['verdict'] = None
-        self.assertEqual(self.actions(rows), [])
-        rows[1]['status'] = 'picked'
-        self.assertEqual(len(self.actions(rows)), 1)
-
-    def test_pending_build_approvals_and_recent_feedback_block_archives(self):
-        rows = [image(verdict='approved')]
-        build = card('build'); build.update(title='build approved: Study v1', section='ted_doing')
-        self.assertEqual(self.actions(rows, [build]), [])
-        build['section'] = 'done'
-        self.assertEqual(len(self.actions(rows, [build])), 1)
-        decision = card('decision', decision_kind='approve_design'); decision['body'] = 'Review Study v1'
-        self.assertEqual(self.actions(rows, [decision]), [])
-        pin = dict(mockup_id='m1', resolved=True, created_at=OLD,
-                   thread=[dict(who='seb', at=RECENT, text='Keep it.')])
-        self.assertEqual(self.actions(rows, pins=[pin]), [])
-        pin.update(resolved=False, thread=[])
-        self.assertEqual(self.actions(rows, pins=[pin]), [])
-
-    def test_old_just_looking_studies_archive_after_last_activity(self):
-        for name in ['Reference lock', 'Inventory', 'Side-by-side']:
-            rows = [image(name)]
-            self.assertEqual(len(self.actions(rows)), 1)
-            pin = dict(mockup_id='m1', resolved=True, created_at=OLD,
-                       thread=[dict(who='ted', at=RECENT, text='Updated.')])
-            self.assertEqual(self.actions(rows, pins=[pin]), [])
-        self.assertEqual(self.actions([image('App screens')]), [])
-
-    def test_archived_rows_never_generate_actions(self):
-        row = image(verdict='approved'); row['status'] = 'archived'
-        self.assertEqual(self.actions([row]), [])
-
-    def test_inventory_screen_in_real_app_batch_is_not_a_study(self):
-        row = image('New app'); row['title'] = 'Inventory screen'
-        self.assertEqual(self.actions([row]), [])
-
-    def test_undated_activity_cannot_make_a_study_look_stale(self):
-        row = image('Inventory')
-        pin = dict(mockup_id='m1', resolved=True, created_at=OLD,
-                   thread=[dict(who='ted', text='Recently reviewed.')])
-        self.assertEqual(self.actions([row], pins=[pin]), [])
-
-    def test_recent_verdict_is_recent_sebastian_activity(self):
-        row = image(verdict='approved', verdict_change={'at': RECENT})
-        self.assertEqual(self.actions([row]), [])
-
-
 class Runner(unittest.TestCase):
-    def run_steward(self, root, cards, mockups=None, pins=None, dry=False, move_result=None):
-        payload = dict(mockups=mockups or [], pins=pins or [])
+    def run_steward(self, root, cards, dry=False, move_result=None):
         def apply_move(cid, value, note):
             for row in cards:
                 if row['id'] == cid:
                     row['section'] = value
             return move_result or {'ok': True}
         with patch.object(steward, 'fetch_cards', return_value=cards), \
-             patch.object(steward, 'fetch_mockups', return_value=payload), \
-             patch.object(steward, 'move_card', side_effect=apply_move) as move, \
-             patch.object(steward, 'archive_batch', return_value={'ok': True, 'archived': 1}) as archive:
+             patch.object(steward, 'move_card', side_effect=apply_move) as move:
             result = steward.run_once(Path(root), dry_run=dry, now=NOW)
-        return result, move, archive
+        return result, move
 
     def test_dry_run_has_no_mutations_or_journal_writes(self):
         with tempfile.TemporaryDirectory() as root:
-            r, move, archive = self.run_steward(root, [card()], dry=True)
+            r, move = self.run_steward(root, [card()], dry=True)
             self.assertEqual(r['planned_moves'], 1)
             self.assertEqual(r['moved'], 0)
-            self.assertFalse(move.called or archive.called)
+            self.assertFalse(move.called)
             self.assertFalse((Path(root)/'steward-log.jsonl').exists())
             self.assertFalse((Path(root)/'steward-overflow.json').exists())
 
@@ -309,7 +232,7 @@ class Runner(unittest.TestCase):
         cards = [card()]+[card(str(i), text='A judgment call remains.') for i in range(14)]
         cards[1]['updated_at'] = '2026-10-21T00:00:00Z'
         with tempfile.TemporaryDirectory() as root:
-            r, move, archive = self.run_steward(root, cards)
+            r, move = self.run_steward(root, cards)
             self.assertEqual(r['moved'], 1)
             self.assertEqual(move.call_args.args, ('worker', 'up_next', 'Ted review'))
             log = [json.loads(x) for x in (Path(root)/'steward-log.jsonl').read_text().splitlines()]
@@ -325,7 +248,6 @@ class Runner(unittest.TestCase):
         c = card(); changed = card(); changed['messages'].append(dict(who='seb', at=RECENT, text='Keep.'))
         with tempfile.TemporaryDirectory() as root, \
              patch.object(steward, 'fetch_cards', side_effect=[[c], [changed], [changed]]), \
-             patch.object(steward, 'fetch_mockups', return_value=dict(mockups=[], pins=[])), \
              patch.object(steward, 'move_card') as move:
             r = steward.run_once(Path(root), now=NOW)
             self.assertFalse(move.called)
@@ -334,7 +256,6 @@ class Runner(unittest.TestCase):
     def test_failure_is_recorded_without_printing_raw_error(self):
         with tempfile.TemporaryDirectory() as root, \
              patch.object(steward, 'fetch_cards', return_value=[card()]), \
-             patch.object(steward, 'fetch_mockups', return_value=dict(mockups=[], pins=[])), \
              patch.object(steward, 'move_card', side_effect=RuntimeError('secret-token=do-not-print')):
             r = steward.run_once(Path(root), now=NOW)
             self.assertEqual(r['failed'], 1)
@@ -342,34 +263,14 @@ class Runner(unittest.TestCase):
             self.assertNotIn('do-not-print', text)
             self.assertIn('uncertain', text)
 
-    def test_archive_uses_exact_project_and_batch_and_journals_it(self):
-        with tempfile.TemporaryDirectory() as root:
-            r, move, archive = self.run_steward(root, [], [image(verdict='scrapped')])
-            self.assertEqual(r['archived_batches'], 1)
-            self.assertEqual(archive.call_args.args, ('Test', 'Study v1'))
-            self.assertIn('archived', (Path(root)/'steward-log.jsonl').read_text())
 
     def test_adapters_use_existing_transports_and_page_key_only_for_moves(self):
         import types
         board = types.SimpleNamespace(cards=lambda: [], call=lambda *a, **kw: (a, kw))
-        mockups = types.SimpleNamespace(call=lambda *a, **kw: (a, kw))
-        with patch.dict(sys.modules, board_client=board, mockup_client=mockups):
+        with patch.dict(sys.modules, board_client=board):
             self.assertEqual(steward.move_card('c1', 'up_next', 'Ted review'),
                              (('move',), dict(page=True, card_id='c1', value='up_next', note='Ted review')))
-            self.assertEqual(steward.archive_batch('Test', 'Study'),
-                             (('archive',), dict(project='Test', batch='Study')))
 
-    def test_batch_changed_before_archive_is_deferred(self):
-        row = image(verdict='approved')
-        pin = dict(mockup_id='m1', resolved=True, created_at=OLD,
-                   thread=[dict(who='seb', at=RECENT, text='Keep this.')])
-        with tempfile.TemporaryDirectory() as root, \
-             patch.object(steward, 'fetch_cards', return_value=[]), \
-             patch.object(steward, 'fetch_mockups', side_effect=[dict(mockups=[row], pins=[]), dict(mockups=[row], pins=[pin])]), \
-             patch.object(steward, 'archive_batch') as archive:
-            result = steward.run_once(Path(root), now=NOW)
-            self.assertEqual(result['deferred'], 1)
-            self.assertFalse(archive.called)
 
     def test_empty_overflow_replaces_a_previous_overflow(self):
         with tempfile.TemporaryDirectory() as root:
@@ -382,16 +283,13 @@ class Runner(unittest.TestCase):
     def test_incomplete_snapshots_are_refused(self):
         import types
         board = types.SimpleNamespace(cards=lambda: [card()]*500)
-        mockups = types.SimpleNamespace(call=lambda: dict(mockups=[]))
-        with patch.dict(sys.modules, board_client=board, mockup_client=mockups):
+        with patch.dict(sys.modules, board_client=board):
             with self.assertRaises(RuntimeError):
                 steward.fetch_cards()
-            with self.assertRaises(RuntimeError):
-                steward.fetch_mockups()
 
     def test_unconfirmed_api_response_is_not_counted_as_applied(self):
         with tempfile.TemporaryDirectory() as root:
-            result, move, archive = self.run_steward(root, [card()], move_result={'ok': False})
+            result, move = self.run_steward(root, [card()], move_result={'ok': False})
             self.assertEqual(result['failed'], 1)
             self.assertEqual(result['moved'], 0)
 
@@ -427,12 +325,138 @@ class Runner(unittest.TestCase):
         c = card(text='See https://example.test/#k=private and token=hidden.')
         out = io.StringIO()
         with patch.object(steward, 'fetch_cards', return_value=[c]), \
-             patch.object(steward, 'fetch_mockups', return_value=dict(mockups=[], pins=[])), \
              contextlib.redirect_stdout(out):
             steward_review.main([], now=NOW)
         text = out.getvalue()
         self.assertIn('worker', text); self.assertIn('Test', text); self.assertIn('Build screens', text)
         self.assertIn('keep', text); self.assertNotIn('private', text); self.assertNotIn('hidden', text)
+
+
+class ScopeAndAvailability(unittest.TestCase):
+    def test_disabled_run_does_not_read_or_mutate_anything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); (root/'steward.disabled').touch()
+            cached = root/'steward-overflow.json'; cached.write_text('{"ranked": ["keep"]}')
+            with patch.object(steward, 'fetch_cards', side_effect=AssertionError('network forbidden')):
+                result = steward.run_once(root, now=NOW)
+            self.assertTrue(result['disabled'])
+            self.assertEqual(result['failed'], 0)
+            self.assertEqual(cached.read_text(), '{"ranked": ["keep"]}')
+            self.assertFalse((root/'steward-log.jsonl').exists())
+
+    def test_global_kill_switch_cannot_be_bypassed_with_another_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); (root/'steward.disabled').touch(); alternate = root/'alternate'
+            with patch.object(steward, 'ROOT', root), \
+                 patch.object(steward, 'fetch_cards', side_effect=AssertionError('network forbidden')):
+                result = steward.run_once(alternate, now=NOW)
+            self.assertTrue(result['disabled'])
+            self.assertFalse(alternate.exists())
+
+    def test_disabled_cli_exits_zero_without_creating_a_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); (root/'steward.disabled').touch(); alternate = root/'alternate'
+            with patch.object(steward, 'ROOT', root), \
+                 patch.object(steward, 'require_mini', side_effect=AssertionError('disabled means no work')), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(steward.main(['--root', str(alternate)]), 0)
+            self.assertFalse(alternate.exists())
+
+    def test_api_down_marks_cached_data_stale_and_preserves_first_failure_time(self):
+        for dry in [False, True]:
+            with self.subTest(dry=dry), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); path = root/'steward-overflow.json'
+                path.write_text(json.dumps({'at': OLD, 'ranked': [{'id': 'retained'}], 'needs_you': 1}))
+                with patch.object(steward, 'fetch_cards', side_effect=RuntimeError('token=private')):
+                    result = steward.run_once(root, dry_run=dry, now=NOW)
+                    first = json.loads(path.read_text())
+                    steward.run_once(root, dry_run=dry, now=NOW+3600)
+                last = json.loads(path.read_text())
+                self.assertTrue(result['stale'])
+                self.assertEqual(first['stale_since'], '2026-10-23T02:00:00+00:00')
+                self.assertEqual(last['stale_since'], first['stale_since'])
+                self.assertEqual(last['at'], OLD)
+                self.assertEqual(last['ranked'], [{'id': 'retained'}])
+                self.assertNotIn('private', path.read_text())
+
+    def test_api_down_without_cache_writes_a_stale_marker(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(steward, 'fetch_cards', side_effect=RuntimeError('offline')):
+            root = Path(tmp); steward.run_once(root, now=NOW)
+            result = json.loads((root/'steward-overflow.json').read_text())
+            self.assertEqual(result['stale_since'], '2026-10-23T02:00:00+00:00')
+            self.assertIsNone(result['needs_you'])
+
+    def test_successful_refresh_clears_staleness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); path = root/'steward-overflow.json'
+            path.write_text(json.dumps({'stale_since': OLD, 'ranked': [{'id': 'old'}]}))
+            with patch.object(steward, 'fetch_cards', return_value=[]):
+                result = steward.run_once(root, now=NOW)
+            refreshed = json.loads(path.read_text())
+            self.assertFalse(result['stale'])
+            self.assertIsNone(refreshed['stale_since'])
+            self.assertEqual(refreshed['ranked'], [])
+
+    def test_run_has_no_mockup_transport_dependency(self):
+        import types
+        forbidden = types.SimpleNamespace(call=lambda *a, **kw: self.fail('mockup transport forbidden'))
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(sys.modules, mockup_client=forbidden), \
+             patch.object(steward, 'fetch_cards', return_value=[]):
+            result = steward.run_once(Path(tmp), now=NOW)
+            self.assertEqual(result['failed'], 0)
+
+    def test_protected_projects_never_move_even_with_clear_reports(self):
+        for project in ['personal', 'PERSONAL', ' money ']:
+            with self.subTest(project=project):
+                row = card(); row['project'] = project
+                self.assertIsNone(steward.classify_card(row, NOW)[0])
+
+    def test_protected_sections_never_move_even_with_clear_reports(self):
+        for section in ['ted_doing', 'up_next', 'done', 'killed']:
+            row = card(); row['section'] = section
+            self.assertIsNone(steward.classify_card(row, NOW)[0])
+
+    def test_api_down_before_recheck_prevents_the_move_and_marks_stale(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(steward, 'fetch_cards', side_effect=[[card()], RuntimeError('offline')]), \
+             patch.object(steward, 'move_card') as move:
+            root = Path(tmp); result = steward.run_once(root, now=NOW)
+            self.assertFalse(move.called)
+            self.assertTrue(result['stale'])
+            self.assertEqual(json.loads((root/'steward-overflow.json').read_text())['stale_since'], '2026-10-23T02:00:00+00:00')
+
+    def test_api_down_after_a_confirmed_move_preserves_the_move_count(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(steward, 'fetch_cards', side_effect=[[card()], [card()], RuntimeError('offline')]), \
+             patch.object(steward, 'move_card', return_value={'ok': True}):
+            result = steward.run_once(Path(tmp), now=NOW)
+            self.assertEqual(result['moved'], 1)
+            self.assertTrue(result['stale'])
+            self.assertIsNone(result['needs_you_after'])
+
+    def test_kill_switch_appearing_during_fetch_prevents_every_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def fetch():
+                (root/'steward.disabled').touch()
+                return [card()]
+            with patch.object(steward, 'fetch_cards', side_effect=fetch), \
+                 patch.object(steward, 'move_card') as move:
+                result = steward.run_once(root, now=NOW)
+            self.assertTrue(result['disabled']); self.assertFalse(move.called)
+            self.assertFalse((root/'steward-overflow.json').exists())
+            self.assertFalse((root/'steward-log.jsonl').exists())
+
+    def test_project_becoming_protected_before_move_is_deferred(self):
+        changed = card(); changed['project'] = 'personal'
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(steward, 'fetch_cards', side_effect=[[card()], [changed], [changed]]), \
+             patch.object(steward, 'move_card') as move:
+            result = steward.run_once(Path(tmp), now=NOW)
+            self.assertFalse(move.called)
+            self.assertEqual(result['deferred'], 1)
 
 
 if __name__ == '__main__':

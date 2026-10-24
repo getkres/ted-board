@@ -1,34 +1,28 @@
-# Inbox steward: report-only routing
+# Card-only inbox steward
 
-The live classifier was unsafe: a completion word could route a message to Ted review even when the same message asked Sebastian to choose, approve, or agree to a price. This review fix replaces that positive-word shortcut with a fail-closed admission gate.
+The latest Ted review narrows the steward to card moves and overflow review. [Merged PR #41](https://github.com/getkres/ted-board/pull/41) is the sole mockup archive owner, with its enable flag still off. This steward patch removes every mockup planner, verdict rule, study-age rule, supersession rule, mockup read, and archive call. The private read-only judgment hook also lists cards only.
 
-A card can leave needs_you only when its latest dated worker message has positive completion evidence and the entire raw message passes every report-only check:
+The fail-closed report-only gate is unchanged. All seven earlier decision-protection reproductions remain covered. Only a dated worker report with positive completion evidence and no addressed decision, question, choice, or money signal can move. Approval metadata, recent Sebastian replies, active workers, guided steps, contracts, SQL requests, and send drafts retain their protection.
 
-- No second-person address, including you, your, or Sebastian.
-- No question mark, including inside quoted UI copy or URLs.
-- No choice or approval language, including pick, favorite, prefer, like, option, sign-off, approve, agree, or thoughts. Word families and plural forms are treated conservatively.
-- No money or pricing signal, including price, pricing, budget, spend, per day, or monthly. These signals block routing with or without a numeric amount. A bare dollar sign followed by digits also blocks routing, and that protection is restored in the wider card context.
+Additional controls:
 
-The gate is evaluated before either a Ted-review move or a Done move. Clear completed FYIs, such as "Export completed. No action required.", can still go to Done. A receipt or welcome message without completion evidence, a thank-you message addressing the reader, and missing or undated worker messages remain for Ted. Ambiguity is an intentional hold, with no quoted-text, price-description, or FYI bypass.
+- The global `steward.disabled` marker makes run_once a zero-work no-op, with zero CLI exit status. It cannot be bypassed with another root. The steward never clears a marker.
+- Board snapshot failures persist the first UTC ISO `stale_since`, retain cached review rows, and update `last_attempt_at`. A healthy live refresh clears staleness. Unknown counts are not replaced with zero. Failed dry reads also mark staleness.
+- The explicit protected project/section list never moves personal or money project cards in any section, or any project's ted_doing, up_next, done, or killed cards. Matching ignores case and surrounding whitespace. The move recheck honors newly protected scopes.
+- Overflow always lists held cards for Ted, including below the cap of 12. It never causes extra moves.
 
-Approval metadata, decision kinds, recent Sebastian replies, active workers, pending choices and guided steps, contracts, SQL requests, and send drafts retain their existing protection. Conditional or negated completion language is not completion evidence. Ordinary report numbers, such as a PR number or a count of uploaded screens, are allowed when no money or choice signal is present. Mockup archival and the 900-second schedule are unchanged.
-
-The private overflow file always includes the full stale-first ranked inbox and an ambiguous list, even below 12 cards. Its excess_count and extras retain the cap-of-12 semantics. The read-only judgment hook also lists held messages and their reason. Ambiguous cards are never moved merely to meet the cap.
-
-The operational scripts and launch agent remain local. This public bundle follows the existing runner-fix pattern: a focused runtime patch, synthetic regression tests, baseline hashes, and offline preparation. It contains no credentials or private board snapshots.
+The public bundle contains a focused patch, synthetic tests, baseline hashes, and candidate preparation. Operational runtime files stay private. **The steward tests require `TED_STEWARD_RUNTIME` pointing at a prepared private candidate and do not run in CI.** Existing grants checks remain separate CI checks. No synthetic production transport or private credentials are committed.
 
 ```sh
 python3 runner-fix/inbox-steward/prepare_candidate.py \
   --source "$HOME/ted-ops/ted-board/steward-runtime/b7a4092689d42418b9fd43a2838a5159bcf8aad0" \
-  --dest /tmp/ted-steward-candidate
-TED_STEWARD_RUNTIME=/tmp/ted-steward-candidate \
+  --dest /tmp/ted-steward-card-candidate
+TED_STEWARD_RUNTIME=/tmp/ted-steward-card-candidate \
   python3 runner-fix/inbox-steward/steward_test.py
 python3 scripts/check_data_api_grants.py
 python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 ```
 
-Preparation refuses baseline drift and existing destinations. It copies only the two private steward scripts and checks and applies the patch in the candidate directory. Tests mock every network boundary. All seven reported false-positive strings have individual protected-case tests, with broader admission-gate, FYI-bypass, completion-evidence, quoted-question, dollar-amount, and below-cap review coverage.
+Preparation refuses baseline drift and existing destinations. It copies the two private steward scripts, then checks and applies the patch in the candidate directory. All network boundaries are mocked in tests. Coverage includes the unchanged report-only gate, forbidden mockup access, global and local kill switches, kill activation during a fetch, outage handling at every read stage, recovery, protected scopes, and scope changes before a move.
 
-After tests pass on the mini, preserve the installed release and copy the verified scripts into a new private release directory. Inspect its dry run, then switch the current symlink atomically and restore the existing launch agent. Preserve the 900-second interval, private umask, logs, journal, and previous releases. No new scheduled agent or database change is required.
-
-The existing move and archive APIs lack atomic revision preconditions. The steward refreshes state immediately before an action, and this narrow race remains. The judgment hook is the private `steward-runtime/current/steward_review.py`.
+After tests pass, install only the verified private scripts on the mini, retain the previous release, inspect a dry run, and restore the existing 900-second launch agent. Do not clear a disabled marker or enable the separate archive owner. The only mutation API is the board move action. Logs and overflow stay in the private operational checkout. The existing move API's narrow final read/write race remains documented in [STEWARD.md](../../STEWARD.md).

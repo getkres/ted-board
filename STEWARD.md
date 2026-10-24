@@ -1,43 +1,45 @@
-# Inbox steward
+# Card inbox steward
 
-The Mac mini runs `co.ted.inbox-steward` every 15 minutes. The standard-library Python runner uses existing private `board_client` and `mockup_client` modules from the operational checkout. The operational scripts, launch agent, transports, and credentials remain local. The public [review bundle](runner-fix/inbox-steward/README.md) contains a focused patch and synthetic regression tests. The runner only calls the existing move and archive actions. It has no SQL, send, spending, or deletion path.
+The Mac mini runs `co.ted.inbox-steward` every 15 minutes. The steward only moves cards through the existing board move API, appends action receipts to its private journal, and maintains overflow review data. Its read-only judgment hook prints ambiguous cards.
 
-Only report-only messages can move cards out of needs_you. The latest dated worker message must have positive completion evidence and contain no second-person address, question mark, choice or approval words, money or pricing words, daily or monthly rate signal, or dollar amount. Quoted UI copy and URLs receive the same checks. The explicit gate runs before every routing branch, including FYIs. Ambiguity stays in needs_you for Ted.
+**PR #41 is the sole owner of mockup archiving.** That merged helper remains behind its own disabled flag. The steward does not read mockups, import the mockup transport, evaluate verdicts or study age, detect superseded batches, or issue archive requests. This change does not install or enable PR #41. [Archive owner](https://github.com/getkres/ted-board/pull/41).
 
-Eligible worker reports go to up_next with the exact note `Ted review`. Clear completed FYIs go to done. A receipt or welcome message without completion evidence remains for review. Existing approval metadata, decision kinds, recent Sebastian replies and answers, active workers, unanswered choices, and guided steps retain their protection. Existing `card.py new --needs-you` sets decision_kind, which is protected regardless of age. Explicit creation metadata also receives the seven-day protection.
+The operational scripts and launch agent remain local. The [public review bundle](runner-fix/inbox-steward/README.md) contains a focused patch, baseline hashes, offline candidate preparation, and synthetic tests. The steward suite requires `TED_STEWARD_RUNTIME` to point at a prepared private runtime and does not run in CI.
 
-Mockup archival is scoped to the exact project and batch. Version normalization only removes standalone `v2`, `v3`, `final`, and `restart` tags. A replacement must have strictly newer creation times. Complete verdicts include approved, needs_work, scrapped, and legacy picked states. Pending builds, related decision cards, unresolved feedback, and Sebastian feedback or verdicts in the last 48 hours block archival. Only study batch names containing reference lock, inventory, side-by-side, or just-looking evidence qualify for seven-day inactivity archival. A product screen named Inventory does not qualify. The last pin, reply, verdict, and upload count as activity. Archived data is retained by the existing API.
+## Card routing and protected workspace
 
-The planner uses a fresh snapshot before each action. Changed actions are deferred. Move and archive APIs do not provide atomic revision preconditions, so a narrow race between the final read and write remains. The steward does not claim a server-side lock. The local lock prevents overlapping steward processes.
+The existing fail-closed gate is unchanged. The latest dated worker message must have positive completion evidence and no second-person address, question mark, choice or approval language, money or pricing signal, daily or monthly rate signal, or dollar-digit amount. Quoted copy and URLs receive the same checks. Eligible reports move to up_next with `Ted review`; eligible completed FYIs move to done. Every ambiguous message remains for Ted. Existing approval, recency, active-worker, guided-step, contract, SQL, and send protections remain.
 
-Every attempted and confirmed action appends to the private `~/ted-ops/ted-board/steward-log.jsonl`, with card or batch ID, from, to, reason, timestamp, and outcome. An uncertain network outcome is recorded without error bodies. The next pass reads current state before considering a retry. A dry run writes neither the action journal nor overflow.
+The explicit `PROTECTED_SCOPES` list is checked before classification and again during the move recheck. Project and section names are case-insensitive, with surrounding whitespace ignored. A wildcard matches every value:
 
-After a live pass, `steward-overflow.json` contains the actual remaining needs_you count, the excess above 12, the oldest excess candidates, and the full remaining list in stale-first order. The full ranked list and an ambiguous list remain present even below the cap, so Ted can review held cards without an overflow event. Entries include compact, sanitized review context. Overflow never authorizes a move. An empty result clears an earlier overflow file.
+| Project | Section |
+| --- | --- |
+| personal | * |
+| money | * |
+| * | ted_doing |
+| * | up_next |
+| * | done |
+| * | killed |
 
-## Run and review
+These conservative project defaults use the existing personal and money board projects. Protected cards remain visible in review data, but the steward never moves them, even when their message is a clear completion report. Other projects are eligible only in needs_you and only after every existing gate passes.
 
-Run from an installed release on the mini, with the private transports on PYTHONPATH:
+## Disable and freshness
+
+If `~/ted-ops/ted-board/steward.disabled` exists, `run_once` performs no network calls or writes. The CLI exits zero without creating a lock. An alternate `--root` cannot bypass the global switch, and a disabled marker in that alternate root is honored too. The steward never clears either marker. It rechecks the switch after reads and before further actions.
+
+A board snapshot failure at the initial read, action recheck, or final refresh writes `stale_since` as a UTC ISO timestamp into `steward-overflow.json`. Existing cached cards and their last successful `at` timestamp are preserved. Repeated failures preserve the first stale time and update `last_attempt_at`. Without an earlier cache, counts stay unknown rather than claiming an empty inbox. A successful live refresh clears `stale_since` to null. Raw transport errors are never copied into review data.
+
+Healthy dry runs do not write the journal or overflow. A failed dry-run read still writes the stale marker so an outage cannot leave old review data silently looking current. The kill switch takes precedence over that write. A snapshot failure returns a nonzero CLI status, and the normal schedule can retry later.
+
+Overflow includes the exact remaining count, excess above 12, oldest excess candidates, the full stale-first list, and an ambiguous list even below the cap. Overflow never authorizes additional moves. Every attempted and confirmed move records card id, from, to, reason, timestamp, and outcome in the private append-only `steward-log.jsonl`.
+
+## Run, verify, and deploy
 
 ```sh
-PYTHONPATH="$HOME/ted-ops/ted-board" python3 inbox_steward.py --dry-run
-PYTHONPATH="$HOME/ted-ops/ted-board" python3 inbox_steward.py
-PYTHONPATH="$HOME/ted-ops/ted-board" python3 steward_review.py
+PYTHONPATH="$HOME/ted-ops/ted-board" python3 "$HOME/ted-ops/ted-board/steward-runtime/current/inbox_steward.py" --dry-run
+PYTHONPATH="$HOME/ted-ops/ted-board" python3 "$HOME/ted-ops/ted-board/steward-runtime/current/steward_review.py"
 ```
 
-`steward_review.py` is read-only. It prints id, project, title, age, last message, and suggested move for cards and batches needing judgment. It includes protected items with their protection reason. URLs, labeled credentials, and line breaks are removed from printed context. It starts no other workers and sends no notifications.
+Prepare and test a candidate with the review bundle before installation. Keep the previous private release, run the new release dry first, and point `steward-runtime/current` at the verified release atomically. Preserve the existing launch agent, 900-second interval, private umask, logs, and journal. Verify a fresh scheduled pass after restoring the agent. The routine belongs only on the mini.
 
-## Verify and install
-
-```sh
-TED_STEWARD_RUNTIME=/absolute/path/to/private/candidate python3 runner-fix/inbox-steward/steward_test.py
-python3 scripts/check_data_api_grants.py
-python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
-```
-
-The tests mock all network boundaries and use synthetic data. Run `node qa/run.cjs` with the static fixture server and Playwright as described in README.md for the existing UI regression suite.
-
-On the mini, prepare and test a candidate with the review bundle, then copy its two Python scripts into a release directory at `~/ted-ops/ted-board/steward-runtime/<commit>/`, then atomically point `steward-runtime/current` to that directory. Keep previous releases for rollback. Preserve the installed `~/Library/LaunchAgents/co.ted.inbox-steward.plist`, ensure `~/ted-ops/logs/` exists, and reload it in the user's GUI domain. The existing agent follows the co.ted Python interpreter, logging, background process, and private umask patterns. The runtime checks ComputerName for mini before executing. Never load it on the MacBook.
-
-Inspect `launchctl print gui/$(id -u)/co.ted.inbox-steward` for the 900-second interval and a zero exit status. Logs are in `~/ted-ops/logs/inbox-steward-launchd.log`.
-
-To stop, boot out the launch agent. To roll back, stop the agent, repoint `current` at a previously verified release, and bootstrap it again. Stopping a routine does not undo board moves or archives. Preserve the action journal for Ted's review. Archive has no unarchive API, so inspect the dry run before the first live pass.
+The existing move API has no atomic revision precondition. The steward refreshes current card state immediately before each move and refuses changed or newly protected work. The narrow final read/write race remains. No database change, new routine, or archive-owner flag change is needed.
