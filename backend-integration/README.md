@@ -70,3 +70,46 @@ The current board feed can return only `{cards, pod_pulse}`, with projects ident
 ## Manual mockup archive
 
 The scoped page archive integration is documented in [MOCKUP-ARCHIVE-QA.md](../docs/MOCKUP-ARCHIVE-QA.md). Its private handler patch is a separate review artifact. The frontend remains disabled until the existing authenticated handler advertises `archive_enabled: true`. No database migration or grant change is required.
+
+## Whole-batch comments, held for Ted review
+
+The existing page pin route accepts `{mockup_id,batch_note:true,text}`.
+`handleMockupBatchNote` intercepts it before ordinary `actionArgs` pin validation.
+The isolated private handler candidate already has this wiring; its exact patch
+is `mockup-batch-handler.patch`. Copy the canonical
+`mockup-batch-comments.ts` beside the private handler before deployment. Full
+private source remains local, and no candidate is deployed by this PR.
+
+`createMockupBatchNoteStore` calls the proposed `ted_mockup_batch_note` RPC.
+That SQL wrapper calls the unchanged `ted_mockup_act` pin transaction, sets the
+batch marker, and labels its existing receipt whole-batch before commit. The
+worker receives the ordinary mockups/pin receipt and replies to the same pin ID.
+The wrapper retains the underlying lock, archive check, and rate limit. Missing
+SQL fails closed; it never silently saves an image pin. The seam confirms the
+marked pin, saved text, and positive receipt ID before acknowledging delivery.
+
+Authenticated GET probes this wrapper and returns
+`capabilities:{batch_comments:true}` only when it is available. Missing or
+unreachable SQL returns false. The frontend ignores the old flat flag and hides
+the entire composer until the nested capability is true. Existing session drafts
+are kept across capability changes. The marker alone never enables the UI.
+
+`mockup-batch-worker.patch` is applied from the private `ted-ops` root. It keeps a
+batch-level comment from becoming an image-only request when its anchor is final
+art. It preserves final, scrapped, and archived review states and grants no build
+approval. No new watcher or routine is introduced.
+
+The proposed SQL adds the marker, a 1200-character check for Sebastian's batch
+messages, an immutable validation helper, and the transactional wrapper. Both new
+functions allow service-role execution only. Ted replies retain the existing
+2000-character limit. `migrations/` is never auto-applied to Supabase; Ted owns review,
+backup, application, and deployment. See `docs/mockups-batch-review-gate.md`.
+
+Offline checks: `mockup-batch-comments.test.ts` covers seam validation.
+`mockup-batch-handler.test.ts` uses PGlite, the actual private handler, and a
+network-isolated watcher test with a temporary design queue. Set `PGLITE_MODULE`
+to an installed PGlite module, prepare the private candidate and legacy RPC
+fixture and the matching job `apply.sql`, and set `MOCKUP_WORKER_PATH` to the reviewed watcher candidate. The suite
+skips explicitly when the private sources are omitted from a public clone; it
+never substitutes a fake passing private handler. Local tests execute SQL only
+in isolated memory, not on Supabase.

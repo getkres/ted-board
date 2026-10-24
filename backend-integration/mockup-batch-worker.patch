@@ -1,0 +1,20 @@
+--- a/ted-decisions/mockup_route.py
++++ b/ted-decisions/mockup_route.py
+@@ -169,13 +169,16 @@
+             refresh_existing_card(m,data)
+             return 'build card updated'
+     if choice in ('pin','reply','needs_work'):
+-        if verdict in ('approved','scrapped') or m.get('status')=='archived':
++        batch_note=any(p.get('id')==pin_id and p.get('batch_note') is True for p in data['pins'])
++        if not batch_note and (verdict in ('approved','scrapped') or m.get('status')=='archived'):
+             state='Good to go' if verdict=='approved' else 'scrapped' if verdict=='scrapped' else 'archived'
+             instruction='Ask Ted to restore it before requesting changes.' if state=='archived' else 'Choose Needs work to request changes, and I will use these pins as feedback.'
+             call('ted_reply',pin_id=pin_id,text=f'This art is marked {state}, so iteration is paused. {instruction}',decision_id=int(row['id']))
+             return 'explained final or scrapped art in its feedback thread'
+         call('ted_reply',pin_id=pin_id,text="Got it. I'm adding this to the design queue and will reply here with the outcome or blocker.",decision_id=int(row['id']))
+         instruction=f'Before editing, reload mockup {m["id"]} and check its verdict. Approved art is final to build from, and scrapped art must not be iterated. Finish by calling {PYTHON} {REPLY} {pin_id} "<outcome or blocker>". Reply in this pin thread with the result, use at most 2000 characters, and do not use U+2014. Pass this exact reply requirement to every delegated worker.'
++        if batch_note:
++            instruction='Whole-batch feedback. The pin is an anchor, not an instruction to change that frame. Respect approved, scrapped, and archived art; ask before changing its review state. This comment approves no build. '+instruction
+         label='Mockup feedback'
+     elif choice in ('pick','approved','scrapped'):
+         label='Mockup selection' if choice!='scrapped' else 'Mockup scrapped'
