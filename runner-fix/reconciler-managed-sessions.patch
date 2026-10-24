@@ -85,7 +85,7 @@
    if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude','sonnet'):raise ValueError('Invalid card or engine')
    veto_id=str(receipt_id)[5:] if str(receipt_id).startswith('veto-') else None
    if veto_id and (isinstance(card.get('revision'),bool) or not isinstance(card.get('revision'),int) or card['revision']<1):
-@@ -131,39 +170,127 @@
+@@ -131,39 +170,128 @@
    with self.locked() as data:
     if str(receipt_id) in data['receipts']:return False
     cid=card['id'];s=data['sessions'].get(cid)
@@ -121,7 +121,7 @@
   def _out(self,data,s,text,token):
 -  data['outbox'].append(dict(card_id=s['card_id'],text=text.replace(chr(8212),'-')[:2000] or 'Worker returned no answer.',token=token))
 +  item=dict(card_id=s['card_id'],text=text.replace(chr(8212),'-')[:2000] or 'Worker returned no answer.',token=token)
-+  if reconciler_enabled() and operational_note(item):retain_ted_note(data,item)
++  if operational_note(item):retain_ted_note(data,item)
 +  else:data['outbox'].append(item)
   def _fail_artifact(self,data,s):
 -  line='approval artifact is unsafe or over 60 kb; fix it, then reply to retry'
@@ -185,8 +185,9 @@
 +   if publish_live(s['card_id'],'blocked',FAILURE_LINE,section='up_next'):
 +    s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
 + def tick(self,reconcile=False):
-+  managed=reconciler_enabled()
-+  if managed and not reconcile:return
++  if not reconciler_enabled():return
++  managed=True
++  if not reconcile:return
    with self.locked() as data:
     for s in data['sessions'].values():
 +    if managed and s.get('stop_requested'):continue
@@ -220,7 +221,7 @@
       activity_path=Path(str(prefix)+'.events')
       if activity_path.exists():
        s['last_activity']=max(s['last_activity'],activity_path.stat().st_mtime)
-@@ -179,75 +306,154 @@
+@@ -179,75 +307,146 @@
         if event.get('type') in ('item.started','item.completed'):
          s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
       s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);continue
@@ -363,32 +364,29 @@
 +     if turn['kind']=='review':a.update(status='failed',reason='reviewer could not start',sync_status=True);lanes.clear_review(s)
 +  if managed:self._flush_publications()
   def flush(self):
-+  if reconciler_enabled():
-+   # Board note tokens make replay safe after a crash between delivery and ack.
-+   with (self.root/'.outbox.lock').open('a') as lock:
-+    os.chmod(lock.name,0o600)
-+    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-+    except BlockingIOError:return
-+    with self.locked() as data:
-+     for item in list(data['outbox']):
-+      if operational_note(item):retain_ted_note(data,item);data['outbox'].remove(item)
-+     pending=json.loads(json.dumps(data['outbox']))
-+    for item in pending:
-+     try:confirmed=deliver(item)
-+     except (OSError,RuntimeError):confirmed=False
-+     if not confirmed:continue
-+     with self.locked() as data:
-+      # Preserve concurrently added or modified entries, even with the same token.
-+      if item in data['outbox']:data['outbox'].remove(item)
-+   return
-   with self.locked() as data:
-    remaining=[]
-    for item in data['outbox']:
-     if not deliver(item):remaining.append(item)
-    data['outbox']=remaining
+-  with self.locked() as data:
+-   remaining=[]
+-   for item in data['outbox']:
+-    if not deliver(item):remaining.append(item)
+-   data['outbox']=remaining
 - def collect_approvals(self):
++  # Network delivery never holds the lease lock.
++  with (self.root/'.outbox.lock').open('a') as lock:
++   os.chmod(lock.name,0o600)
++   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++   except BlockingIOError:return
++   with self.locked() as data:
++    for item in list(data['outbox']):
++     if operational_note(item):retain_ted_note(data,item);data['outbox'].remove(item)
++    pending=json.loads(json.dumps(data['outbox']))
++   for item in pending:
++    try:confirmed=deliver(item)
++    except (OSError,RuntimeError):confirmed=False
++    if not confirmed:continue
++    with self.locked() as data:
++     if item in data['outbox']:data['outbox'].remove(item)
 + def collect_approvals(self,reconcile=False):
-+  if reconciler_enabled() and not reconcile:return
++  if not reconciler_enabled() or not reconcile:return
    with self.locked() as data:
     db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
     for s in data['sessions'].values():
@@ -397,7 +395,7 @@
      for kind in ('db','email','spend'):
       try:a=artifact(s['cwd'],kind)
       except (ValueError,OSError):
-@@ -255,6 +461,10 @@
+@@ -255,6 +454,10 @@
        db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
        break
       if not a or a['digest'] in s['seen_artifacts']:continue
@@ -408,29 +406,26 @@
       if kind=='db' and db_busy:s['status']='waiting_approval';s['last_line']='Waiting for the current DB approval to finish';continue
       aid='approval-'+uuid.uuid4().hex
       a.update(id=aid,card_id=s['card_id'],summary={'db':'Apply database SQL after a fresh safety review','email':'Send the exact drafted email','spend':'Execute the exact proposed spend'}[kind],status='pending')
-@@ -271,14 +481,17 @@
+@@ -271,15 +474,12 @@
        pid=payload.get('pid');expected=payload.get('identity','')
        if s and (s.get('pid')!=pid or s.get('identity')!=expected):result='Stale kill refused'
        else:
 -       killed=safe_kill(pid,expected)
-+       killed=False if reconciler_enabled() else safe_kill(pid,expected)
         if s:
-         # Do not free a slot while a refusing process is still alive.
+-        # Do not free a slot while a refusing process is still alive.
 -        if killed:s.update(kill_requested_at=time.time(),last_line='Stopping on request',queue=[])
 -        elif not alive(pid,expected):s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
-+        if reconciler_enabled():s.update(stop_requested=True,kill_requested_at=time.time(),last_line='Stopping on request')
-+        elif killed:s.update(kill_requested_at=time.time(),last_line='Stopping on request',queue=[])
-+        elif not alive(pid,expected):
-+         s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
-+         lanes.clear_review(s);s.pop('active_turn',None)
++        s.update(stop_requested=True,kill_requested_at=time.time(),last_line='Stopping on request')
          for a in data['approvals'].values():
           if a['card_id']==s['card_id'] and a['status'] in ('pending','approved','reviewing'):a.update(status='failed',reason='job stopped on request',sync_status=True)
 -        self._out(data,s,'Job stop requested.' if killed else 'Job is already stopped, or process identity changed.',cmd['id'])
-+        self._out(data,s,'Job stop queued for the reconciler.' if reconciler_enabled() else 'Job stop requested.' if killed else 'Job is already stopped, or process identity changed.',cmd['id'])
-        result='Stop requested' if killed else 'Process identity changed or already stopped'
+-       result='Stop requested' if killed else 'Process identity changed or already stopped'
++        self._out(data,s,'Job stop queued for the reconciler.',cmd['id'])
++       result='Stop queued for reconciler' if s else 'No managed session; Ted must review the untracked process'
       elif s and cmd['target'] in data['approvals']:
        a=data['approvals'][cmd['target']]
-@@ -312,4 +525,8 @@
+       if a['status']!='pending' or payload.get('digest')!=a['digest'] or payload.get('card_id')!=s['card_id']:
+@@ -312,4 +512,8 @@
    data=self.read();jobs=[]
    for s in data['sessions'].values():
     jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})

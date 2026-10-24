@@ -1,6 +1,6 @@
 --- a/session_worker.py
 +++ b/reconciler_worker.py
-@@ -5,8 +5,12 @@
+@@ -5,11 +5,16 @@
  from pathlib import Path
  import subprocess
  import sys
@@ -14,11 +14,15 @@
  
  
  def run(prefix):
-@@ -17,10 +21,37 @@
++ if not reconciler_enabled():return
+  prefix=Path(prefix);inp=json.loads(Path(str(prefix)+'.input.json').read_text());s=inp['session']
+  # Parent spawns under the store lock. This handshake permits model execution
+  # only after the parent has durably committed this exact PID and turn.
+@@ -17,10 +22,37 @@
   try:fcntl.flock(claim,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError:claim.close();return
   store=Store(Path(s['cwd']).parent)
-+ managed=reconciler_enabled();pid=os.getpid();expected=identity(pid);token=s.get('lease_token')
++ managed=True;pid=os.getpid();expected=identity(pid);token=s.get('lease_token')
   with store.locked() as data:
    owner=data['sessions'].get(s['card_id'],{})
 -  if owner.get('status')!='running' or owner.get('pid')!=os.getpid() or owner.get('turn')!=prefix.name or owner.get('identity')!=identity(os.getpid()):
@@ -53,7 +57,7 @@
   if inp.get('veto_proposal_id'):
    try:
     from veto_worker import send
-@@ -30,19 +61,21 @@
+@@ -30,19 +62,21 @@
     result=dict(ok=False,veto_outcome='failed',text='Timed send was refused before Gmail send. Review the proposal before retrying.')
    except Exception:
     result=dict(ok=False,veto_outcome='uncertain',text='Timed send result is uncertain. Check the proposal and Gmail Sent before retrying.')
@@ -78,7 +82,7 @@
      if event.get('session_id'):sid=event['session_id']
      if event.get('type')=='result':payload=event
     text=payload.get('result','');ok=p.returncode==0 and bool(payload) and not payload.get('is_error',False)
-@@ -52,10 +85,13 @@
+@@ -52,10 +86,13 @@
      except ValueError:continue
      if event.get('type')=='thread.started':sid=event.get('thread_id')
     last=Path(str(prefix)+'.last.txt');text=last.read_text() if last.exists() else '';ok=p.returncode==0

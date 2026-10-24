@@ -55,13 +55,13 @@
   },
   "reconciler_sessions.py": {
     "patch": "reconciler-managed-sessions.patch",
-    "candidate_sha256": "6860c8678f78192ede0b03106d484ee7f0c320d071b888b5e0575276e35adc18",
+    "candidate_sha256": "c5d1b8c4a8aecada9638db9c994494f7f652ea1970f06bd914b7b026e547e166",
     "source": "sessions.py",
     "baseline_sha256": "8f6cbb513e136838d167d081e9fbace56a62e8e41af5a4b2b25c4d45482b1527"
   },
   "reconciler_worker.py": {
     "patch": "reconciler-managed-worker.patch",
-    "candidate_sha256": "eb4cba4c3c0a9998da264f12a664cef2b577934973a7fbf27c07fb958fb9ed67",
+    "candidate_sha256": "cda6b28a9e160276c72c3ba798c52161b2626c737af48a6c2de0b005453c010e",
     "source": "session_worker.py",
     "baseline_sha256": "ce122789da3344c6ca6ed4f41cc4393c51270a150cfb0c10d73efac286fd6a31"
   },
