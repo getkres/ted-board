@@ -1,58 +1,74 @@
-# Mockup batch feedback: NEEDS TED REVIEW
+# Batch comments: NEEDS TED REVIEW
 
-The card worker stopped at Sebastian's database gate. This PR proposes only the
-storage prerequisite. It does not implement or enable the UI, change the private
-backend, deploy a function, or apply SQL.
+PR #35 now contains the batch conversation UI and its reduced storage proposal.
+Merged PR #42 supplies Archive, five-second Undo, and Restore at batch and image
+level. This PR adds no dismissal verdict, archive action, or build approval.
+It builds on `origin/main` at `6eed5cd`, including PR #42 and the compact header
+from PR #32.
 
-Read-only catalog checks against the target project confirmed that the live
-`ted_mockups.verdict` is text, its check accepts only `approved`, `needs_work`,
-and `scrapped`, and `ted_mockup_pins` has no batch-scope marker. The local private
-handler also permits only those three verdicts. Its existing `archive` action is
-worker-only, changes status only, and has no five-second undo.
+## UI and request path
 
-The proposal extends that check with `not_relevant` and adds one boolean,
-`ted_mockup_pins.batch_note`, defaulting to false. It leaves existing pins and
-threads intact. The pin's existing mockup identifies its project and batch, so
-batch notes can reuse pin IDs, thread entries, receipts, and `mockup_reply.py`.
-Multiple note threads can be displayed together for the same exact batch.
+Batch, round, and version-compare pages show the conversation and composer below
+their batch controls. The existing type, colors, and flat fills remain. Archived
+batches show their history and require Restore before posting. Notes are filtered
+by the anchor mockup's exact project and batch, including archived anchors in a
+partially active batch. Image pins stay separate from batch history.
 
-The migration refuses a changed verdict constraint or a pre-existing marker.
-Reconcile newer schema work rather than widening or dropping constraints blindly.
-The private job's `apply.sql` contains separate backup, apply, and rollback phases.
-Only Ted may run them after review. Preserve the private backup outside Git.
+Send uses the existing feedback endpoint and pin action:
+`{action:'pin',mockup_id,batch_note:true,text}`. The selected anchor belongs to
+the displayed batch. A confirmed response must include the same mockup ID, a
+marked pin with the saved text in its thread, and a positive feedback receipt ID.
+Only then does the UI clear the draft and say Sent to Ted. A failed or malformed
+response keeps the draft and asks for refresh before resending. There is no
+automatic retry. Drafts survive ordinary polling and batch navigation within the
+current access-key session, and polling preserves the textarea focus and caret.
+Access-key reset clears drafts and rejects late responses.
 
-## Work remaining after the gate
+`batch_comments_enabled:true` is required to send. Missing support keeps the
+composer available for a local draft and leaves Send disabled. Column existence
+alone must never advertise support. `backend-integration/mockup-batch-comments.ts`
+is an authenticated server seam with an explicit durable store hook, not a
+replacement or deployment of the private backend. See the private integration
+requirements in `backend-integration/README.md`.
 
-1. Implement a transaction for batch and individual dismissal. Resolve exact
-   project and batch or mockup ID server-side, lock rows in stable ID order,
-   store `not_relevant` and `archived`, and retain previous values and a shared
-   five-second undo token. Undo must reject expired or superseded changes and
-   restore previous status and verdict atomically. Retries must be idempotent.
-   Dismissal must create zero `ted_decisions` rows and zero build cards. Do not
-   route it through approval, scrap, or the legacy worker-only archive action.
-2. Implement batch-note posting through the authenticated existing pin and reply
-   path. Select a valid anchor inside the exact project and batch, store
-   `batch_note=true`, preserve rate limits, deduplicate retries, and issue the
-   existing ordinary feedback receipt with explicit whole-batch context. Confirm
-   that the private worker delivers it to Ted or the originating card and that
-   `mockup_reply.py` replies to the same pin thread. Suppress these pins from
-   image overlays and include their history in the batch thread.
-3. Advertise separate capabilities only after both server transactions and
-   routing are tested. The column alone must never advertise feature support.
-4. Add batch dismissal next to whole-batch Good to go, immediate optimistic
-   removal, a five-second undo, and failure restoration. Add the viewer verdict
-   without increasing the compact header merged in PR #32. Put the batch
-   textarea, Send button, and short conversation under its verdict buttons.
-   Preserve drafts, focus, and identity isolation across polling and key changes.
-5. Run QA for dismissal, undo, undo expiry and conflicts, per-image dismissal,
-   batch-note posting and retries, thread display with Ted replies, and zero
-   build-card creation. Capture before and after screenshots at 390x844 and
-   1440x900. Keep existing type and colors, use flat fills, and use no gradients.
+## Reduced SQL and manual gate
 
-PR #32 is already merged. This branch starts from `origin/main` at `d2970d0`,
-which includes that compact header. PR #34 owns the nearby mobile Decide work;
-this proposal changes no frontend files and has no overlapping implementation.
+The only schema change is `ted_mockup_pins.batch_note boolean not null default
+false`. Existing pins, threads, reply IDs, RLS, and service-role grants remain.
+The migration refuses a pre-existing marker. Read-only checks on October 24 found
+that the marker is absent and version `20261023020000` is absent from
+`supabase_migrations.schema_migrations`, so this is an unapplied proposal.
 
-The feature remains blocked until Ted reviews the SQL and the remaining
-implementation and verification are completed. This PR is not ready to merge
-as the completed card.
+The private card job contains `apply.sql` with opt-in backup, apply, and rollback
+phases. It exits by default. The backup snapshots pins in a private schema.
+Rollback refuses to discard any batch notes and preserves its backup. Ted must
+hold application until the UI, private receipt transaction, and routing are
+reviewed together. This worker applies no SQL.
+
+**`migrations/` is never auto-applied by this repository.** At this revision the
+only workflows run offline Python checks. The grant checker reads SQL as text;
+it has no database connection or execution path. GitHub Pages is configured as a
+legacy static deployment from `main`, path `/`. Neither the frontend nor a
+workflow invokes a migration runner, Supabase db push, or psql. SQL files here
+are inert proposals; Ted applies reviewed SQL separately. This is a statement
+about the checked repository and Pages configuration, not unknown external jobs.
+
+## Review artifacts and remaining rollout
+
+The [offline review board](mockup-batch-comments-review/index.html) places the
+master copies, eight thumbnails, notan, construction, color studies, and clean
+drawing next to the synthetic final screenshots. Its Notes card records the
+value-grouping technique and critique. Nothing was uploaded to live Mockups.
+
+Offline Chrome QA covers sending, history with Ted replies, exact scope, HTML-like
+text, failed and malformed acknowledgements, capability gating, polling, drafts,
+identity reset, archived history, every batch layout, and 375- and 1440-pixel
+screens. Existing Archive and Restore tests remain in the full suite. Fixture
+requests confirm that posting comments does not invoke approval or build actions.
+That is not a substitute for private worker and receipt verification.
+
+Before live delivery, Ted must review this draft, integrate the marker into the
+existing atomic pin and feedback receipt transaction, verify the ordinary pin
+routing and `mockup_reply.py` reply path, apply the reduced SQL with backup, and
+deploy the private handler. Enable the capability only after those checks pass.
+Do not treat merging static UI or applying the column alone as feature delivery.

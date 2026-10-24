@@ -70,3 +70,38 @@ The current board feed can return only `{cards, pod_pulse}`, with projects ident
 ## Manual mockup archive
 
 The scoped page archive integration is documented in [MOCKUP-ARCHIVE-QA.md](../docs/MOCKUP-ARCHIVE-QA.md). Its private handler patch is a separate review artifact. The frontend remains disabled until the existing authenticated handler advertises `archive_enabled: true`. No database migration or grant change is required.
+
+## Whole-batch comments, held for Ted review
+
+The batch conversation UI sends the existing page pin action with
+`{mockup_id,batch_note:true,text}`. Invoke `handleMockupBatchNote` before legacy
+pin validation or fallback, after the existing credential and size checks. A pin
+request containing `batch_note` must be intercepted even when the marker is
+invalid. Never let a missing integration silently save it as an image pin.
+The returned safe error or body uses the handler's existing CORS and no-store
+headers. Ordinary pin and reply payloads keep their existing routes.
+
+Supply a server-only `BatchNoteStore.post({mockup_id,text})` backed by the existing
+private pin and feedback receipt transaction. Inside that transaction, lock and
+validate the active anchor mockup, derive its project and batch from the row,
+create a pin with `batch_note=true`, append the Sebastian message, and commit the
+ordinary pin feedback receipt with explicit whole-batch context. Retain the
+existing rate limit and text bounds. Return its positive decision ID and the
+saved marked pin only after commit. Reuse the same pin ID for Ted's existing
+reply command and ordinary reply handling. The worker must deliver a batch
+comment as feedback to Ted or the originating card, never as an approval or build
+request. Do not bolt a second marker update onto an already committed ordinary
+pin, because a worker could see the wrong scope between those writes.
+
+This repo deliberately provides no speculative database adapter for that private
+transaction. The reduced migration adds only the marker column; Ted still owns
+transaction integration and private routing verification. GET must preserve the
+marker and thread fields on authenticated pins and return
+`batch_comments_enabled:true` only after that durable hook and worker path pass
+staging checks. Keep it false on missing storage, missing integration, or an
+unreachable capability probe. The UI never infers support from a column.
+
+Run `node --test backend-integration/mockup-batch-comments.test.ts` for offline
+seam authorization, validation, and acknowledgement tests. These do not execute
+SQL or prove delivery by the private worker. The proposed marker migration and
+manual-only rollout are documented in `docs/mockups-batch-review-gate.md`.
