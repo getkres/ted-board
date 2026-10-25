@@ -1,6 +1,6 @@
 # Claude Max account setup, account 2 first
 
-Run on the Mac mini after Ted reviews and installs the current runner bundle. Account 2 is sufficient for activation. Account 3 can be added later. The installer does not change the flag.
+Run on the Mac mini with the reviewed runner bundle installed. The account-2 rollout is authorized; account 3 is optional. Account 2 is sufficient for activation. Account 3 can be added later. The installer does not change the flag.
 
 1. **Create a separate directory, and log in normally.** For the account Sebastian just bought, use `lane_account=2`. If Ted already completed that login, proceed to verification. Confirm macOS uses Google Chrome as its default browser before starting the login, and select the intended Max account in Chrome.
 
@@ -18,7 +18,7 @@ Run on the Mac mini after Ted reviews and installs the current runner bundle. Ac
    CLAUDE_CONFIG_DIR="$lane_dir" claude auth status --json
    ```
 
-3. **Ted enables account 2 only after installation and verification.** This is an operator action, separate from applying the bundle. The existing dispatcher rereads the flag at job boundaries. The command below is for Ted to run when ready; the preparation job must not run it.
+3. **Enable account 2 only after installation and verification.** This is an operator action, separate from applying the bundle. The existing dispatcher rereads the flag at job boundaries. The command below is for Ted to run when ready; the preparation job must not run it.
 
    ```sh
    python3 - <<'PY_ENABLE'
