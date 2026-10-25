@@ -1,6 +1,6 @@
 # Deck source notes, October 24, 2026
 
-The team deck has exactly ten slides. This note accompanies the PDF decks. Slides are authored as PDF with editable JSON content and a ReportLab layout source, because the presentation artifact runtime is unavailable in this Mac session. No PowerPoint-native deliverable or PowerPoint QA is claimed.
+The team deck has exactly ten slides. This note accompanies the PDF decks. 
 
 ## Team deck
 
@@ -10,4 +10,4 @@ The team deck has exactly ten slides. This note accompanies the PDF decks. Slide
 
 7: https://www.pff.com/terms, introduction, supplemental terms, and sections 14.2-14.4; https://auth.sportsinfosolutions.com/Account/Register, terms 1-5; https://www.sportsinfosolutions.com/terms-of-service/; https://operations.nfl.com/game-operations-logistics/technology/performance-tracking-data-next-gen-stats; https://www.nfl.com/legal/terms/; and https://www.nfl.com/legal/subscriptions_terms. See DATA-RIGHTS.md for what is verified and what remains contract-specific.
 
-8: BDB accepted access is the confirmed project access state, corroborated by nine local CSV files. https://www.kaggle.com/competitions/nfl-big-data-bowl-2027/data. Competition data is not distributed in this package. 9-10: proposed pilot and product walkthrough, not measured time savings or a customer commitment.
+8: BDB accepted access is confirmed project access. https://www.kaggle.com/competitions/nfl-big-data-bowl-2027/data. Competition data is not distributed in this package. 9-10: proposed pilot and product walkthrough, not measured time savings or a customer commitment.
