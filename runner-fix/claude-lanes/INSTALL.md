@@ -1,118 +1,19 @@
-# Ted's operator install steps
+# Account-2 rollout
 
-Run these only after reviewing the PR, on the Mac mini, from the same shell. The preparation job does not execute them. Keep the lane flag false throughout this procedure. The revised disabled runner returns through the pre-PR paths and preserves the existing login environment, default engine, review-cap exemptions, and model arguments. Do not use the older cap-3 or cap-16 backups as the rollback source; take a fresh backup of tonight's runner.
+This is the authorized live rollout, following a fresh Opus review and green CI. Account 2 must report `loggedIn: true`, `authMethod: claude.ai`, `subscriptionType: max`, and its separate config directory. Poll at two-minute intervals while waiting. Do not wait for account 3, copy credentials, use a proxy, enable paid extra usage, or add a routine.
 
-1. **Pin the reviewed bundle, and pause the existing routines.** Confirm the commit shown is the one reviewed. Avoid manual `card.py` creation or other dispatcher invocations during the install window. These four labels were read from the installed mini LaunchAgents. No new routine is created.
+1. Capture the current source and file hashes, prepare a candidate with `prepare_candidate.py`, and run the mocked runtime and board checks. Preserve the currently installed failure, recovery, completion, approval, Chrome, and art rules. Review the PR and this rollout plan with a fresh `claude -p --model opus` context. Fix findings and repeat until the verdict is MERGE, then merge with green CI.
+2. Take fresh private backups of `sessions.py`, `session_worker.py`, any existing `claude_lanes.py` and `capacity.json`, the flag, and the ledger. Record which of the four existing dispatcher agents are loaded, then pause those agents during file replacement. Existing worker processes retain their already imported source and finish normally. Do not stop them or copy their resume IDs to another account. Compare the live source hashes again before replacing anything.
+3. Install the tested helper, capacity file, sessions module, and worker module together while dispatch is paused. Keep `inbox_policy.py` and `runner_failure_templates.json` unchanged. Capacity is 64 total, load at three times CPU count, Claude 4, and Sonnet 16. All worker environments remove every `ANTHROPIC_*` key. Atomically enable the separate lane flag, run a real Sonnet canary through the installed dispatcher and worker in an isolated diagnostic store, and check its successful result, actual config directory, Sonnet model, and normal Max auth status. Then run the production tick and resume only the recorded agents. Verify the board heartbeat and live files. Done requires a real successful account-2 worker turn.
 
-   ```sh
-   umask 077
-   lane_bundle="$HOME/ted-ops/ted-board/jobs/card-c-claude-lanes-1022/worktree"
-   lane_runtime="$HOME/ted-ops/ted-board"
-   lane_install_root="$HOME/ted-ops/claude-lanes/install-$(date -u +%Y%m%dT%H%M%SZ)"
-   lane_uid="$(id -u)"
-   mkdir -p "$lane_install_root"
-   touch "$lane_install_root/paused-labels.txt"
-   (
-   set -eu
-   git -C "$lane_bundle" diff --exit-code
-   git -C "$lane_bundle" diff --cached --exit-code
-   git -C "$lane_bundle" rev-parse HEAD
-   for lane_label in co.ted.decisions co.ted.board-jobs co.ted.board-live co.ted.job-watchdog; do
-     if launchctl print "gui/$lane_uid/$lane_label" >/dev/null 2>&1; then
-       launchctl bootout "gui/$lane_uid/$lane_label"
-       printf '%s\n' "$lane_label" >> "$lane_install_root/paused-labels.txt"
-     fi
-   done
-   )
-   ```
+The diagnostic store prevents canary output from being posted to an unrelated card. Its model call is real. Capture only safe auth fields, paths, booleans, counters, and model names. Never print credentials, identity fields, or raw logs.
 
-2. **Let existing workers drain, without stopping them.** Run this read-only check until it succeeds. It reports only a count. It checks process identity rather than trusting a stale running status in the ledger. Do not call `Store.tick()` to drain, because it can launch queued work.
+## Rollback on any error
 
-   ```sh
-   python3 - <<'PY_DRAIN'
-   import json
-   import sys
-   from pathlib import Path
-   root = Path.home() / 'ted-ops/ted-board'
-   sys.path.insert(0, str(root))
-   from sessions import alive
-   path = root / 'jobs/sessions.json'
-   data = json.loads(path.read_text()) if path.exists() else {'sessions': {}}
-   active = sum(s.get('status') == 'running' and alive(s.get('pid'), s.get('identity'))
-                for s in data['sessions'].values())
-   if active:
-       raise SystemExit(str(active) + ' active workers remain; wait before installing')
-   print('No active card workers remain.')
-   PY_DRAIN
-   ```
+Pause the recorded agents, and disable the lane flag atomically. Stop only a still-running diagnostic worker, using its exact recorded process identity. Preserve other workers and the current ledger; never replace newer ledger entries with a stale snapshot.
 
-3. **Back up current files and build from copies.** This backs up the live flag without changing it. Keep the ledger backup private. The two source copies must be tonight's files, including the 64-worker cap, load guard, Sonnet engine, Chrome rules, and twelve-hour timeout. If the patch refuses drift, stop and rebase it against the changed files; never force it.
+If the production ledger contains any dedicated lane session, keep the new lane-aware runtime and capacity files installed. Its disabled path safely settles running dedicated workers and holds their queued continuations. Resume the recorded agents with the flag disabled, then repair and re-review the rollout. A lane-unaware old runner must never see an account-2 resume ID.
 
-   ```sh
-   (
-   set -eu
-   mkdir -p "$lane_install_root/source" "$lane_install_root/backup"
-   for lane_file in sessions.py session_worker.py; do
-     cp -p "$lane_runtime/$lane_file" "$lane_install_root/source/$lane_file"
-     cp -p "$lane_runtime/$lane_file" "$lane_install_root/backup/$lane_file"
-   done
-   cp -p "$lane_runtime/jobs/sessions.json" "$lane_install_root/backup/sessions.json"
-   cp -p "$HOME/ted-ops/claude-lanes/config.json" "$lane_install_root/backup/config.json"
-   if [ -f "$lane_runtime/claude_lanes.py" ]; then
-     cp -p "$lane_runtime/claude_lanes.py" "$lane_install_root/backup/claude_lanes.py"
-   else
-     touch "$lane_install_root/backup/helper-was-absent"
-   fi
-   python3 "$lane_bundle/runner-fix/claude-lanes/prepare_candidate.py" \
-     --source "$lane_install_root/source" --dest "$lane_install_root/candidate"
-   TED_LANES_RUNTIME="$lane_install_root/candidate" \
-     python3 "$lane_bundle/runner-fix/claude-lanes/test_lanes.py"
-   python3 -m py_compile "$lane_install_root/candidate/claude_lanes.py" \
-     "$lane_install_root/candidate/sessions.py" "$lane_install_root/candidate/session_worker.py"
-   python3 "$lane_bundle/scripts/check_data_api_grants.py" --root "$lane_runtime"
-   )
-   ```
+Restore old runtime and capacity files only if no dedicated session exists in the production ledger. Verify restored hashes, and resume only the recorded agents. Leave the card blocked in Up next with the actual reason while repairing the error.
 
-4. **Install the three reviewed candidate files together while the routines are paused.** Verify the flag is false and the source files have not changed since capture. If either comparison fails, stop and rebuild the candidate. Do not replace an active process's imported code.
-
-   ```sh
-   (
-   set -eu
-   python3 - <<'PY_FLAG'
-   import json
-   from pathlib import Path
-   assert json.loads((Path.home() / 'ted-ops/claude-lanes/config.json').read_text()).get('enabled') is False
-   PY_FLAG
-   cmp "$lane_install_root/source/sessions.py" "$lane_runtime/sessions.py"
-   cmp "$lane_install_root/source/session_worker.py" "$lane_runtime/session_worker.py"
-   for lane_file in claude_lanes.py sessions.py session_worker.py; do
-     install -m 600 "$lane_install_root/candidate/$lane_file" "$lane_runtime/.$lane_file.next"
-   done
-   for lane_file in claude_lanes.py sessions.py session_worker.py; do
-     mv "$lane_runtime/.$lane_file.next" "$lane_runtime/$lane_file"
-   done
-   cp -p "$lane_bundle/runner-fix/claude-lanes/SETUP.md" "$HOME/ted-ops/claude-lanes/SETUP.md"
-   TED_LANES_RUNTIME="$lane_runtime" \
-     python3 "$lane_bundle/runner-fix/claude-lanes/test_lanes.py"
-   cmp "$lane_install_root/backup/config.json" "$HOME/ted-ops/claude-lanes/config.json"
-   )
-   ```
-
-5. **Resume only the routines recorded as paused, with the flag still false.** Do this after successful checks, or after restoring the backup if installation failed. The agents' existing RunAtLoad settings start them after bootstrap. Inspect the next heartbeat through the board, rather than printing raw logs.
-
-   ```sh
-   (
-   set -eu
-   while IFS= read -r lane_label; do
-     launchctl bootstrap "gui/$lane_uid" "$HOME/Library/LaunchAgents/$lane_label.plist"
-   done < "$lane_install_root/paused-labels.txt"
-   )
-   ```
-
-6. **Activate separately.** Release the PR's static Jobs UI through the normal board deployment process. Complete [SETUP.md](SETUP.md) for account 2, then let Ted explicitly enable the flag. Account 3 is optional, and its later successful login automatically changes routing only for new research and review conversations. No SQL, schema change, or Edge Function deployment is required by this bundle.
-
-## Rollback
-
-Keep the flag false, pause the same four routines, and repeat the drain check. Before reverting to a runner without lane awareness, inspect the ledger privately for `claude_lane`, `review_claude_lane`, and `active_claude_lane` values of `design` or `research`. If any exist, keep the lane-aware runner disabled until Ted retires or reconciles those conversations. Do not resume their IDs on the main account.
-
-If there are no dedicated conversations, restore `sessions.py` and `session_worker.py` from `$lane_install_root/backup` with `cp -p`. Restore the backed-up helper if present; if `helper-was-absent` exists, remove only the newly installed `claude_lanes.py`. Preserve account directories and tonight's current ledger. Never overwrite the ledger with its stale backup after it has processed newer turns. Keep the flag false, revert the static UI through the normal release process if needed, and resume the same four routines.
+Account setup remains three steps in [SETUP.md](SETUP.md). No database change or application is part of this rollout.

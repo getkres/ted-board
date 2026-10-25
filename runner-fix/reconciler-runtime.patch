@@ -1,0 +1,517 @@
+--- /dev/null
++++ reconciler_runtime.py
+@@ -0,0 +1,514 @@
++#!/usr/bin/env python3
++"""Private mini adapter. Default dry-run performs GETs and local reads only."""
++import argparse
++from concurrent.futures import ThreadPoolExecutor
++import contextlib
++import fcntl
++import importlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import re
++import socket
++import sqlite3
++import subprocess
++import sys
++import time
++import uuid
++
++from reconciler import classify_priorities, digest, iso, plan, stamp, unsafe_session, initial_dispatch_allowed, MISSED_RENEWALS
++
++PR=re.compile(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)\b')
++
++
++INITIAL_DIGEST_ID = digest('initial_escalation_digest', 'v1')
++DIGEST_CARD_ID = 'reconciler-initial-ted-digest'
++ESCALATIONS = {'escalate_2h', 'escalate_12h', 'review_sla', 'sebastian_escalation', 'verification_review'}
++PASS_LIMITS = {'retry': 3, 'route': 5, 'create': 5, 'deploy': 5, 'dispatch': 10, 'escalation': 10}
++
++
++def action_group(action):
++ kind=action['kind']
++ if kind in ('route_ted','dead_letter','detached_worker'):return 'route'
++ if kind in ('create_build','escalation_digest'):return 'create'
++ if kind in ('advance_deploy','advance_verify','close_verified'):return 'deploy'
++ if kind in ESCALATIONS:return 'escalation'
++ return kind
++
++
++def select_pass(result, completed):
++ """Bound effects, while the complete ledger and unreceipted proposals survive."""
++ def rows(action):
++  cid=action['payload'].get('card_id');entity=action['entity']
++  return [x for x in result['items'] if (cid and x.get('card_id')==cid) or x['id']==entity or x['id'].split(':',1)[-1]==entity]
++ def age(action):
++  return min((stamp(x.get('action_started_at')) for x in rows(action)),default=stamp(result['generated_at'])),action['id']
++ actions=sorted((a for a in result['actions'] if a['id'] not in completed),key=age)
++ if INITIAL_DIGEST_ID not in completed:
++  covered=[a for a in actions if a['kind'] in ESCALATIONS]
++  if covered:
++   ranked={x['id']:x for a in covered for x in rows(a)}
++   ranked=sorted(ranked.values(),key=lambda x:(stamp(x.get('action_started_at')),x.get('priority',2),x['id']))
++   actions=[a for a in actions if a['kind'] not in ESCALATIONS]
++   actions.insert(0,dict(id=INITIAL_DIGEST_ID,kind='escalation_digest',entity=DIGEST_CARD_ID,payload=dict(card_id=DIGEST_CARD_ID,covered_ids=[a['id'] for a in covered],items=ranked)))
++ selected=[];deferred=[];counts={}
++ for action in actions:
++  group=action_group(action)
++  if group in PASS_LIMITS and counts.get(group,0)>=PASS_LIMITS[group]:deferred.append(action);continue
++  selected.append(action);counts[group]=counts.get(group,0)+1
++ return selected,deferred
++
++
++def read_json(path,default):
++ try:
++  path=Path(path)
++  if path.is_symlink() or path.stat().st_size>16*1024*1024:return default
++  return json.loads(path.read_text())
++ except (OSError,ValueError):return default
++
++
++class Journal:
++ def __init__(self,path):self.path=Path(path)
++ def __enter__(self):
++  self.path.parent.mkdir(parents=True,exist_ok=True)
++  self.db=sqlite3.connect(self.path);os.chmod(self.path,0o600)
++  self.db.execute('pragma synchronous=FULL')
++  self.db.execute('create table if not exists receipts (id text primary key, kind text not null, completed_at real not null)');self.db.commit();return self
++ def __exit__(self,*args):self.db.close()
++ def complete_group(self,entries):
++  with self.db:
++   self.db.executemany('insert or ignore into receipts values (?,?,?)',[(aid,kind,time.time()) for aid,kind in entries])
++ def completed(self):return {row[0] for row in self.db.execute('select id from receipts')}
++ def complete(self,aid,action):
++  self.db.execute('insert or ignore into receipts values (?,?,?)',(aid,action['kind'],time.time()));self.db.commit()
++
++
++def completed_readonly(path):
++ if not Path(path).exists():return set()
++ db=sqlite3.connect(Path(path).resolve().as_uri()+'?mode=ro',uri=True)
++ try:return {row[0] for row in db.execute('select id from receipts')}
++ finally:db.close()
++
++
++def execute_recorded(action,journal,effect):
++ if action['id'] in journal.completed():return True
++ if effect(action) is not True:return False
++ journal.complete(action['id'],action);return True
++
++
++def recover_session(session,action,stop):
++ p=action['payload']
++ if session.get('turn')!=p.get('expected_turn') or session.get('lease_token')!=p.get('expected_lease_token'):return False
++ if session.get('recovery_action')==action['id']:return False
++ if action['kind']=='retry' and (unsafe_session(session) or session.get('stop_requested') or session.get('status')=='stopped'):return False
++ if action['kind']=='stop_worker' and not session.get('stop_requested'):return False
++ if action['kind']!='stop_worker' and session.get('status')=='running' and stamp(session.get('lease_expires_at'))>time.time():return False
++ if not stop(session):return False
++ old=dict(session.get('active_turn') or {})
++ session.update(pid=None,identity='',recovery_action=action['id'],recovery_required=None)
++ remaining=list(session.get('queue') or [])
++ session['queue']=remaining
++ if action['kind']=='stop_worker':
++  from claude_lanes import clear_review
++  clear_review(session)
++  session.pop('active_turn',None);session.pop('active_veto_revision',None)
++  remaining=[turn for turn in remaining if turn.get('automatic') is not True and not str(turn.get('id','')).startswith('reconciler-retry-')]
++  session['queue']=remaining
++  session.pop('stop_requested',None);session.pop('kill_requested_at',None)
++  session.update(status='queued' if remaining else 'stopped',last_line='user stop settled, no retry of cancelled attempt')
++  return True
++ if action['kind']=='dead_letter':
++  session.update(status='dead_letter',last_line='retry exhausted or unsafe to repeat, ted review required',dead_letter_at=time.time())
++  return True
++ session['retry_count']=p['attempt'];session['retry_at']=stamp(p['retry_at'])
++ session['queue']=[dict(id='reconciler-retry-'+action['id'],kind='work',automatic=True,message='Resume from REPORT.md and your files. Verify prior effects before continuing. '+old.get('message','')[:12000])]+remaining
++ session.update(status='queued',last_line='safe retry queued with backoff')
++ return True
++
++
++def settle_review(data,card_id,approval_id,outcome,reason):
++ if outcome not in ('done','failed') or not isinstance(reason,str) or not reason.strip() or len(reason)>240 or re.search(r'[\x00-\x1f\x7f]',reason):raise ValueError('explicit review outcome and short operator reason required')
++ session=data.get('sessions',{}).get(card_id,{})
++ approval=data.get('approvals',{}).get(approval_id,{})
++ if session.get('status')!='dead_letter' or session.get('pid') or session.get('reviewing')!=approval_id or approval.get('status')!='reviewing' or approval.get('card_id')!=card_id:raise ValueError('current dead-lettered review identity required')
++ from claude_lanes import clear_review
++ approval.update(status=outcome,reason=reason,settled_by='ted',settled_at=time.time(),sync_status=True)
++ clear_review(session);session.pop('active_turn',None);session.pop('active_veto_revision',None)
++ session.update(status='done' if outcome=='done' else 'dead_letter',last_line='operator settled review outcome',review_settlement=dict(approval_id=approval_id,outcome=outcome,reason=reason,at=time.time()))
++
++
++def redrive(session,reason):
++ if not isinstance(reason,str) or not reason.strip() or len(reason)>240:raise ValueError('Ted redrive requires a short repair reason')
++ if session.get('status')!='dead_letter':raise ValueError('Only dead-lettered work can be redriven')
++ if unsafe_session(session):raise ValueError('Side effects require their original approval flow')
++ session.setdefault('redrive_history',[]).append(dict(at=time.time(),reason=reason,retry_count=session.get('retry_count',0)))
++ session.update(status='queued',retry_count=0,retry_at=0,recovery_action=None)
++ session['queue']=[dict(id='redrive-'+uuid.uuid4().hex,kind='work',message='Ted redrive after repair: '+reason+'. Resume from REPORT.md and files, and verify existing effects first.')]+list(session.get('queue') or [])
++
++
++def local_snapshot(root,cards):
++ root=Path(root);path=root/'jobs/sessions.json'
++ # Atomic replacement gives a complete old or new document. No Store.read(),
++ # which writes on lock exit, is permitted in dry-run.
++ data=read_json(path,None)
++ if not isinstance(data,dict) or not isinstance(data.get('sessions'),dict):raise RuntimeError('Session store unavailable')
++ workflows={};sessions=data['sessions']
++ for c in cards:
++  cid=c['id'];s=sessions.get(cid,{})
++  directory=Path(s.get('cwd') or root/'jobs'/('card-'+cid))
++  if s.get('turn'):
++   result=read_json(directory/(str(s['turn'])+'.result.json'),None)
++   if isinstance(result,dict) and isinstance(result.get('ok'),bool):
++    if s.get('lease_token'):
++     s['result_ready']=all(result.get(k)==v for k,v in dict(lease_token=s['lease_token'],turn=s['turn'],pid=s.get('pid'),identity=s.get('identity')).items())
++    else:s['result_ready']=True
++  w=read_json(directory/'workflow.json',{})
++  if not isinstance(w,dict):w={}
++  w={k:w[k] for k in ('pr_url','deployment','verification','created_at','review_required') if k in w}
++  report=directory/'REPORT.md';text=''
++  if report.is_file() and not report.is_symlink() and report.stat().st_size<=100000:text=report.read_text()
++  matches=list(PR.finditer(text))
++  if 'pr_url' not in w and matches:w['pr_url']=matches[-1].group(0)
++  if (directory/'apply.sql').is_file() and not (directory/'applied-receipt.json').is_file():w['sql_pending']=True
++  if re.search(r'needs ted review|pending review|pr pending|not (?:merged|deployed|live)|ted review',text,re.I):w['review_required']=True
++  if w:workflows[cid]=w
++ approvals=data.get('approvals',{})
++ return dict(cards=cards,sessions=sessions,approvals=list(approvals.values()) if isinstance(approvals,dict) else approvals,workflows=workflows,prs={},mockups=[],coverage={'cards':'ok','sessions':'ok','approvals':'ok'})
++
++
++def pr_observation(url):
++ m=PR.fullmatch(url or '')
++ if not m:return url,None
++ try:
++  result=subprocess.run(['gh','pr','view',m[3],'--repo',m[1]+'/'+m[2],'--json','state,mergedAt,createdAt,headRefOid,mergeCommit,url'],capture_output=True,text=True,timeout=20)
++  if result.returncode:return url,None
++  data=json.loads(result.stdout)
++  return url,dict(state=data['state'],merged_at=data.get('mergedAt'),created_at=data.get('createdAt'),revision=data.get('headRefOid'),merge_revision=(data.get('mergeCommit') or {}).get('oid'))
++ except (OSError,ValueError,KeyError,subprocess.TimeoutExpired):return url,None
++
++
++def observe(root,board=None,mockups=None,policy_source=None):
++ sys.path.insert(0,str(root))
++ board=board or importlib.import_module('board_client')
++ feed=board.call()
++ cards=feed.get('cards') if isinstance(feed,dict) else None
++ if not isinstance(cards,list):cards=[];card_coverage='unavailable'
++ else:card_coverage='truncated' if len(cards)>=500 else 'ok'
++ valid=[c for c in cards if isinstance(c,dict) and isinstance(c.get('id'),str) and re.fullmatch(r'[A-Za-z0-9._-]{1,64}',c['id'])]
++ if len(valid)!=len(cards):card_coverage='invalid_rows'
++ cards=valid
++ s=local_snapshot(root,cards);s['coverage']['cards']=card_coverage
++ from reconciler_gate import read_dispatch_policy
++ s['dispatch_policy']=read_dispatch_policy(Path(root)/'jobs/reconciler-config.json')
++ if s['dispatch_policy'] is None:s['coverage']['dispatch_policy']='invalid'
++ try:
++  feed=(mockups or importlib.import_module('mockup_client')).call()
++  rows=feed.get('mockups')
++  if not isinstance(rows,list):raise ValueError()
++  s['mockups']=rows;s['coverage']['mockups']='ok'
++ except Exception:s['coverage']['mockups']='unavailable'
++ try:
++  if policy_source:
++   spec=importlib.util.spec_from_file_location('reconciler_inbox_policy',policy_source);policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
++  else:policy=importlib.import_module('inbox_policy')
++  for c in s['cards']:
++   if s['coverage'].get('mockups')!='ok' and re.search(r'\b(?:mockup|design|batch|pick|choose|copy)\b',policy.current_text(c),re.I) and not policy.failure_kind(policy.current_text(c)):
++    c['classification_uncertain']=True
++   else:c['inbox_decision']=policy.decision(c,mockups=s['mockups'])
++   if policy.routing_hold(c):c['classification_uncertain']=True
++  s['coverage']['inbox_policy']='ok'
++ except Exception:s['coverage']['inbox_policy']='not_installed'
++ try:
++  remote=board.call(resource='jobs')
++  if not isinstance(remote.get('jobs'),list):raise ValueError()
++  s['coverage']['remote_jobs']='ok'
++  jobs=[j for j in remote['jobs'] if isinstance(j,dict)]
++  if len(jobs)!=len(remote['jobs']):s['coverage']['remote_job_rows']='invalid_rows'
++  s['external_jobs']=[j for j in jobs if j.get('id')!='fresh-ted-health' and j.get('status') in ('running','queued','untracked','waiting_approval') and (not j.get('card_id') or j.get('card_id') not in s['sessions'])]
++  known={j.get('card_id') for j in jobs if isinstance(j.get('card_id'),str)}
++  for cid in known-set(s['sessions']):s['coverage']['untracked_job:'+digest(cid)]='unavailable'
++  remote_ledger=remote.get('reconciliation')
++  if not isinstance(remote_ledger,dict):s['coverage']['backend_ledger']='ok' if remote.get('reconciliation_error')=='not_published' else 'not_installed'
++  else:
++   s['previous_items']=remote_ledger.get('items',[])
++   s['coverage']['backend_ledger']='ok'
++   if s['coverage'].get('mockups')!='ok':s['retained_items']=[x for x in s['previous_items'] if x.get('kind')=='mockup']
++ except Exception:
++  s['coverage']['remote_jobs']='unavailable';s['coverage']['backend_ledger']='unavailable'
++ urls=sorted({w['pr_url'] for w in s['workflows'].values() if w.get('pr_url')})
++ with ThreadPoolExecutor(max_workers=4) as pool:
++  for url,pr in pool.map(pr_observation,urls):
++   if pr:s['prs'][url]=pr
++   else:s['coverage']['pr:'+digest(url)]='unavailable'
++ # Existing deterministic mockup IDs are shared with mockup_route.py, including archived lineage.
++ for c in cards:
++  if c.get('id','').startswith('mockup-build-'):s['workflows'].setdefault(c['id'],{})
++ classify_priorities(s,read_json(root/'jobs/priority-overrides.json',{}))
++ return s
++
++
++def group_members(pgid):
++ try:
++  result=subprocess.run(['/bin/ps','-axo','pid=,pgid=,uid=,stat='],capture_output=True,text=True,timeout=5)
++  if result.returncode:return None
++  members=[]
++  for row in result.stdout.splitlines():
++   fields=row.split()
++   if len(fields)!=4:return None
++   pid,group,uid,state=fields
++   if int(group)==int(pgid) and not state.startswith('Z'):
++    if int(uid)!=os.getuid():return None
++    members.append(int(pid))
++  return members
++ except (OSError,ValueError,subprocess.TimeoutExpired):return None
++
++
++def activity_stamp(session):
++ latest=0
++ prefix=Path(session.get('cwd',''))/str(session.get('turn',''))
++ for suffix in ('.events','.log'):
++  try:latest=max(latest,Path(str(prefix)+suffix).stat().st_mtime)
++  except OSError:pass
++ return latest
++
++
++def sample_health(store,now):
++ """Probe processes and file activity outside the renewal lock, then CAS observations."""
++ from sessions import alive
++ with store.locked() as data:sessions=json.loads(json.dumps(data['sessions']))
++ updates={}
++ for cid,session in sessions.items():
++  if session.get('status')!='running' or not session.get('lease_token'):continue
++  pid_dead=not alive(session.get('pid'),session.get('identity'))
++  activity=activity_stamp(session)
++  quiet=activity==session.get('health_activity_mtime',0) and now-activity>=150
++  expired=stamp(session.get('lease_expires_at'))<=now
++  signature=[session.get('lease_token'),session.get('lease_expires_at'),session.get('lease',{}).get('renewed_at')]
++  same=signature==session.get('health_lease')
++  misses=int(session.get('missed_renewals') or 0) if same else 0
++  if expired and pid_dead and quiet:
++   if now-stamp(session.get('health_observed_at'))>=30:misses+=1
++  else:misses=0
++  update=dict(pid_dead=pid_dead,activity_quiet=quiet,missed_renewals=misses,health_activity_mtime=activity,health_lease=signature,health_observed_at=now)
++  with store.locked() as data:
++   current=data['sessions'].get(cid,{})
++   if all(current.get(k)==session.get(k) for k in ('turn','lease_token','lease_expires_at','status')):
++    current.update(update);updates[cid]=dict(current)
++ return updates
++
++
++def confirmed_stop(session,allow_kill=False):
++ from sessions import alive,safe_kill
++ lease=session.get('lease') or {}
++ pid=session.get('pid') or lease.get('pid');ident=session.get('identity') or lease.get('identity')
++ if not pid:return True
++ members=group_members(pid)
++ if members is None:return False
++ if not alive(pid,ident):return not members
++ # Expiry alone never grants permission to signal a live process.
++ if not allow_kill:return False
++ if not safe_kill(pid,ident):return False
++ for _ in range(10):
++  members=group_members(pid)
++  if members is None:return False
++  if not members and not alive(pid,ident):return True
++  time.sleep(.1)
++ return False
++
++
++def require_leased_cutover(snapshot):
++ if any(s.get('status')=='running' and not s.get('lease_token') for s in snapshot.get('sessions',{}).values()):
++  raise RuntimeError('lease-less running workers prevent apply; drain the legacy runner first')
++
++
++def execute(action,store,snapshot,board):
++ kind=action['kind'];p=action['payload'];cid=p.get('card_id')
++ if kind in ('retry','dead_letter','stop_worker'):
++  from sessions import matching_result
++  def result_ready(session):
++   result=read_json(Path(session.get('cwd',''))/(str(session.get('turn'))+'.result.json'),None)
++   return matching_result(session,result)
++  with store.locked() as data:
++   current=data['sessions'].get(cid)
++   if not current:return False
++   if current.get('recovery_action')==action['id']:return True
++   if current.get('status')=='running' and not current.get('lease_token'):return False
++   if kind!='stop_worker' and current.get('status')=='running' and result_ready(current):return False
++   observed=json.loads(json.dumps(current));observed_activity=activity_stamp(current)
++  # All probes, signals, and waits occur outside the session lock.
++  stopped=confirmed_stop(observed,allow_kill=kind=='stop_worker')
++  if not stopped:return False
++  with store.locked() as data:
++   current=data['sessions'].get(cid)
++   if not current:return False
++   if current.get('recovery_action')==action['id']:return True
++   if any(current.get(k)!=observed.get(k) for k in ('turn','lease_token','lease_expires_at','status','stop_requested')):return False
++   if kind!='stop_worker':
++    if (current.get('status')=='running' and result_ready(current)) or activity_stamp(current)!=observed_activity:return False
++    if current.get('status')=='running' and (current.get('pid_dead') is not True or current.get('activity_quiet') is not True or int(current.get('missed_renewals') or 0)<MISSED_RENEWALS):return False
++   ok=recover_session(current,action,lambda _:True)
++   if ok and kind=='dead_letter':store._out(data,current,'retries exhausted or unsafe to repeat, ted owns this recovery','reconciler-dlq-'+action['id'])
++   return ok
++ if kind=='dispatch':
++  from board_card_snapshot import fetch_cards
++  try:cards=fetch_cards(call=board.call)
++  except (OSError,RuntimeError,ValueError):return False
++  c=next((c for c in cards if c['id']==cid),None)
++  from reconciler_gate import read_dispatch_policy
++  if not hasattr(store,'root'):return False
++  fresh=dict(snapshot,dispatch_policy=read_dispatch_policy(store.root/'reconciler-config.json'))
++  try:
++   remote=board.call(page=True,resource='jobs')
++   if not isinstance(remote,dict) or not isinstance(remote.get('jobs'),list):return False
++  except (OSError,RuntimeError,ValueError):return False
++  fresh['external_jobs']=[j for j in remote['jobs'] if isinstance(j,dict) and j.get('card_id')==cid and j.get('status') in ('running','queued','untracked','waiting_approval')]
++  if not c or c.get('section') not in ('up_next','ted_doing') or not initial_dispatch_allowed(fresh,c):return False
++  return store.enqueue(c,'Resume the card from REPORT.md and its files. Deliver and verify the requested outcome, and retain an accurate blocked state until it is live.','reconciler-dispatch-'+action['id'],engine='codex') is True
++ if kind=='escalation_digest':
++  if any(c['id']==cid for c in snapshot['cards']):return True
++  import card
++  rows=p['items'];lines=['Ted owns this first-run overdue review digest. Full oldest-first queue: Jobs and jobs/ted-review-queue.json. Full initial snapshot: jobs/ted-initial-escalation-digest.json. Review the queue before starting new work.']
++  for n,row in enumerate(rows,1):
++   line=str(n)+'. '+str(row.get('card_id') or row['id'])+' | '+row.get('action_started_at','')+' | '+row.get('stage','')
++   if len('\n'.join(lines+[line]))>1850:break
++   lines.append(line)
++  lines.append(str(len(rows))+' overdue obligations in the full ranked digest.')
++  card.create('Ted ops','ted review: first-run overdue digest','\n'.join(lines),card_id=cid)
++  return True
++ if kind=='create_build':
++  # card.create defaults to queued board work and no immediate model launch.
++  import card
++  card.create(p['project'],('build approved: '+p['batch'])[:200],('Build approved mockups. Preserve the approved, build, PR, merged, deployed, and verified chain. Batch: '+p['batch']+'\nMockup IDs: '+', '.join(p['mockup_ids']))[:2000],card_id=cid)
++  return True
++ if kind=='route_ted':
++  result=board.call('reconcile_route_ted',card_id=cid,expected_updated_at=p.get('expected_updated_at'),expected_revision=p.get('expected_revision'),expected_messages=p.get('expected_messages'),expected_section='needs_you',line='operational work belongs to ted, review queued')
++  return result.get('ok') is True
++ if kind in ('escalate_2h','escalate_12h','review_sla'):return True  # one ranked queue and banner avoid a note flood
++ if kind=='repair_metadata':return True  # atomic reconcile_publish already persisted this metadata
++ if kind=='close_verified':
++  return board.call('reconcile_close_verified',card_id=cid,expected_updated_at=p.get('expected_updated_at'),expected_revision=p.get('expected_revision')).get('ok') is True
++ if kind in ('advance_deploy','advance_verify'):
++  # Ranked Ted queue is the safe stage executor for repo-specific merge, deploy,
++  # and verify policy. The next obligation is opened even while a card is done.
++  line={'advance_deploy':'merged pr needs deployment and a deployment receipt','advance_verify':'deployed change needs independent verification and a matching revision receipt','close_verified':'delivery verified, ted can close the chain'}[kind]
++ elif kind=='sebastian_escalation':line='your reserved decision has been waiting over 24 hours, ted has kept it in the decision queue'
++ elif kind=='ambiguous_link':return True  # visible coverage issue, no guessed build association
++ elif kind=='coverage_defect':return True  # published banner and local review queue carry this symptom
++ else:line='ted review required: '+kind.replace('_',' ')+', next action is overdue'
++ if not cid:return True
++ result=board.call('ted_reply',card_id=cid,text=line,token='reconciler-'+action['id'])
++ return result.get('ok') is True
++
++
++def run(snapshot,journal_path,now,dry_run=True,store=None,board=None):
++ completed=completed_readonly(journal_path)
++ result=plan(snapshot,completed=completed,now=now);result['applied']=False
++ if dry_run:return result
++ if store is None or board is None:raise ValueError('apply requires explicit effect adapters')
++ require_leased_cutover(snapshot)
++ partial_cards=snapshot.get('coverage',{}).get('cards','ok')!='ok'
++ if not partial_cards:
++  if any(snapshot.get('coverage',{}).get(source)!='ok' for source in ('backend_ledger','inbox_policy','remote_jobs')):raise RuntimeError('Complete authoritative backend and inbox observations required before apply')
++  publish={k:result[k] for k in ('generated_at','items','ted_queue','banner','coverage_defects')}
++  response=board.call('reconcile_publish',**publish)
++  if response.get('ok') is not True:raise RuntimeError('Reconciliation publication unconfirmed')
++ selected,limited=select_pass(result,completed)
++ if partial_cards:
++  limited += [a for a in selected if a['kind'] not in ('retry','dead_letter','stop_worker')]
++  selected=[a for a in selected if a['kind'] in ('retry','dead_letter','stop_worker')]
++ result['publication_skipped']=partial_cards
++ failures=[]
++ with Journal(journal_path) as journal:
++  for action in selected:
++   try:
++    if action['kind']=='escalation_digest':
++     write_private(Path(journal_path).parent/'ted-initial-escalation-digest.json',action['payload'])
++     if execute(action,store,snapshot,board) is not True:
++      failures.append(action['id']);continue
++     journal.complete_group([(action['id'],action['kind'])]+[(aid,'initial_digest_member') for aid in action['payload']['covered_ids']])
++    elif not execute_recorded(action,journal,lambda a:execute(a,store,snapshot,board)):failures.append(action['id'])
++   except Exception:failures.append(action['id'])
++  if not partial_cards and INITIAL_DIGEST_ID not in completed and not any(a['kind'] in ESCALATIONS for a in result['actions']):
++   journal.complete(INITIAL_DIGEST_ID,dict(kind='initial_scan'))
++ result.update(applied=True,selected_actions=selected,limited=[a['id'] for a in limited],failed=failures,deferred=failures+[a['id'] for a in limited])
++ return result
++
++
++def sync_scheduling(store,snapshot):
++ with store.locked() as data:
++  for card in snapshot['cards']:
++   session=data['sessions'].get(card['id'])
++   if session is None:continue
++   for key in ('priority_class','explicit_ask','created_at','action_started_at','metadata','reconciler_hold'):
++    if key in card:session[key]=card[key]
++
++
++def write_private(path,data):
++ path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
++ temp=path.with_name(path.name+'.tmp');temp.write_text(json.dumps(data,indent=2)+'\n');temp.chmod(0o600);os.replace(temp,path)
++
++
++def main(argv=None):
++ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,default=Path.home()/'ted-ops/ted-board');p.add_argument('--snapshot',type=Path);p.add_argument('--output',type=Path);p.add_argument('--dry-run',action='store_true');p.add_argument('--apply',action='store_true');p.add_argument('--policy-source',type=Path);p.add_argument('--redrive');p.add_argument('--reason');p.add_argument('--settle-review');p.add_argument('--approval-id');p.add_argument('--review-outcome',choices=('done','failed'));a=p.parse_args(argv)
++ apply=a.apply and not a.dry_run
++ if a.apply and a.dry_run:p.error('choose dry-run or apply')
++ from reconciler_gate import reconciler_enabled
++ if apply and (not reconciler_enabled(a.root/'jobs/reconciler-config.json',strict=True) or 'mini' not in socket.gethostname().lower()):p.error('apply requires mini and explicit reviewed enablement')
++ if apply and (a.snapshot or a.policy_source):p.error('apply must observe fresh installed sources')
++ root=a.root.resolve();sys.path.insert(0,str(root))
++ lock=None
++ if apply:
++  lock=(root/'jobs/.reconciler.lock').open('a');os.chmod(lock.name,0o600)
++  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++  except BlockingIOError:
++   lock.close()
++   if a.settle_review or a.redrive:
++    print('Reconciler pass is busy; operator command was not performed.',file=sys.stderr);return 1
++   return 0
++ try:
++  store=importlib.import_module('reconciler_sessions').Store(root/'jobs') if apply else None
++  if a.settle_review:
++   if not apply:p.error('review settlement requires apply and explicit operator outcome')
++   with store.locked() as data:
++    observed=json.loads(json.dumps(data['sessions'].get(a.settle_review,{})))
++    trial=json.loads(json.dumps(data));settle_review(trial,a.settle_review,a.approval_id,a.review_outcome,a.reason)
++   lease=observed.get('lease') if isinstance(observed.get('lease'),dict) else {}
++   if not lease.get('pid') or not lease.get('identity') or not confirmed_stop(dict(observed,pid=lease['pid'],identity=lease['identity']),allow_kill=False):raise RuntimeError('review settlement requires confirmed process absence')
++   with store.locked() as data:
++    current=data['sessions'].get(a.settle_review,{})
++    if any(current.get(key)!=observed.get(key) for key in ('turn','lease_token','status','reviewing')):raise RuntimeError('review identity changed')
++    settle_review(data,a.settle_review,a.approval_id,a.review_outcome,a.reason)
++   return 0
++  board=importlib.import_module('board_client') if apply else None
++  snapshot=read_json(a.snapshot,None) if a.snapshot else observe(root,policy_source=a.policy_source)
++  if snapshot is None:raise RuntimeError('Snapshot unavailable')
++  if apply:
++   require_leased_cutover(snapshot)
++   if snapshot['coverage'].get('cards')=='ok':store.controls(board.call('control').get('commands',[]))
++   for cid,health in sample_health(store,time.time()).items():
++    if cid in snapshot['sessions']:
++     snapshot['sessions'][cid].update({key:health[key] for key in ('pid_dead','activity_quiet','missed_renewals','health_activity_mtime','health_lease','health_observed_at') if key in health})
++  if a.redrive:
++   if not apply:p.error('redrive requires apply and Ted repair reason')
++   with store.locked() as data:redrive(data['sessions'][a.redrive],a.reason)
++   return 0
++  result=run(snapshot,root/'jobs/reconciler.sqlite',time.time(),not apply,store,board)
++  if apply and not result.get('publication_skipped'):
++   # All lifecycle mutations are owned here, not by the heartbeat or reaper.
++   sync_scheduling(store,snapshot);store.tick(reconcile=True);store.collect_approvals(reconcile=True);store.sync_approval_status();store.flush()
++   if os.environ.get('TED_MOCKUP_AUTOARCHIVE_ENABLED')=='true':
++    from mockup_autoarchive import heartbeat_pass
++    heartbeat_pass()
++   write_private(root/'jobs/ted-review-queue.json',dict(generated_at=result['generated_at'],items=[x for x in result['items'] if x['id'] in result['ted_queue']],coverage_defects=result['coverage_defects'],notes=store.read().get('ted_outbox',[])))
++  if a.output:write_private(a.output,dict(snapshot=snapshot,result=result))
++  counts={}
++  for action in result['actions']:counts[action['kind']]=counts.get(action['kind'],0)+1
++  print(json.dumps(dict(mode='apply' if apply else 'dry_run',items=len(result['items']),actions=counts,coverage_defects=result['coverage_defects']),sort_keys=True))
++  return 0 if not result.get('failed') else 1
++ finally:
++  if lock:lock.close()
++
++if __name__=='__main__':
++ try:sys.exit(main())
++ except Exception as exc:print('Reconciler failed: '+type(exc).__name__,file=sys.stderr);sys.exit(1)

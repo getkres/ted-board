@@ -1,0 +1,154 @@
+--- /dev/null
++++ inbox_policy.py
+@@ -0,0 +1,151 @@
++"""Shared, conservative routing policy for Sebastian's decision inbox."""
++from datetime import datetime
++import json
++from pathlib import Path
++import re
++
++TED_LINE = 'ted review needed, this is not a sebastian decision'
++TEMPLATES = json.loads(Path(__file__).with_name('runner_failure_templates.json').read_text())
++FAILURE_MESSAGES = {base+suffix: kind for kind,base in TEMPLATES['failures'].items()
++                    for suffix in TEMPLATES['recovery'].values()}
++# Used only to label approval categories, never to authorize an inbox departure.
++DECISION_ACTION = re.compile(r'\?|\b(?:approve|approval|review|sign|choose|pick|decide|write|type|your call|your version|'
++                 r'you decide|flat fee|must|please|action required|needed|pending)\b', re.I)
++OPERATIONAL = re.compile(r'\b(?:ted review|pr \d+[^.!?\n]*review|pending ted review|worker slot|waiting for CI)\b', re.I)
++
++
++def failure_message(kind, recovery='held'):
++    kind = 'startup_failure' if kind == 'start_failure' else kind
++    return TEMPLATES['failures'].get(kind,TEMPLATES['failures']['crash'])+TEMPLATES['recovery'][recovery]
++
++
++FAILURE_LINE = failure_message('crash')
++
++
++def stamp(value):
++    try:
++        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
++    except (ValueError, TypeError, OverflowError):
++        return 0
++
++
++def last_message(card):
++    rows = [m for m in card.get('messages') or [] if isinstance(m, dict) and stamp(m.get('at'))]
++    return max(rows, key=lambda m: stamp(m['at']), default={})
++
++
++def current_text(card):
++    last = last_message(card)
++    live = str(card.get('live_status') or '')
++    if live and (not last or not card.get('live_status_at') or stamp(card.get('live_status_at')) >= stamp(last.get('at'))):
++        return live
++    return str(last.get('text') or card.get('body') or card.get('title') or '')
++
++
++def failure_kind(text):
++    """Only the runner's complete versioned templates are failure evidence."""
++    return FAILURE_MESSAGES.get(text) if isinstance(text,str) else None
++
++
++def pending_approval(card):
++    if card.get('live_state') == 'waiting_on_you':
++        return True
++    if any(card.get(k) for k in ('pending_approval','approval_pending','pending_decision','veto_pending','pending_approval_kinds')):
++        return True
++    for key in ('approval','veto'):
++        value=card.get(key)
++        if isinstance(value,dict) and value.get('status') not in ('sent','cancelled','failed','done','superseded'):
++            return True
++    return False
++
++
++def runner_failure(card):
++    """Exact runner provenance is necessary before a card can leave Needs you."""
++    if 'decision_kind' not in card or card['decision_kind'] is not None or pending_approval(card):
++        return None
++    rows=card.get('messages')
++    if not isinstance(rows,list) or not rows or any(not isinstance(m,dict) or not stamp(m.get('at')) for m in rows):
++        return None
++    newest=max(stamp(m['at']) for m in rows)
++    latest=[m for m in rows if stamp(m['at'])==newest]
++    if len(latest)!=1 or latest[0].get('who')!=TEMPLATES['author'] or latest[0].get('runner_failure') is not True:
++        return None
++    status_at=card.get('live_status_at')
++    if status_at is not None and (not stamp(status_at) or stamp(status_at)>newest):
++        return None
++    text=latest[0].get('text')
++    return text if failure_kind(text) else None
++
++
++def linked_mockups(card, mockups):
++    text = '\n'.join(str(card.get(k) or '') for k in ('title', 'body', 'live_status'))
++    text += '\n' + str(last_message(card).get('text') or '')
++    rows = [m for m in mockups if m.get('project') == card.get('project') and m.get('batch')]
++    if card.get('batch'):
++        return [m for m in rows if m['batch'].casefold() == str(card['batch']).casefold()]
++    matches = [m for m in rows if re.search(r'(?<!\w)'+re.escape(str(m['batch']))+r'(?!\w)', text, re.I)
++               or (m.get('id') and str(m['id']) in text)]
++    return matches
++
++
++def decision(card, line=None, mockups=()):
++    """Return the allowed decision family only for a current, concrete ask."""
++    line = current_text(card) if line is None else str(line)
++    text = line
++    if line.strip().lower() == 'review the pending approval on this card':
++        text += '\n' + str(last_message(card).get('text') or '')
++    text = re.sub(r'\bno action (?:required|needed)\b', '', text, flags=re.I)
++    rows = linked_mockups(card, mockups)
++    # Match the action and its object within one sentence. Background prices,
++    # historical failures, and quoted UI questions do not create decisions.
++    for ask in re.split(r'(?<=[.!?])\s+|\n+', text):
++        if failure_kind(ask) or OPERATIONAL.search(ask):
++            continue
++        if not DECISION_ACTION.search(ask):
++            continue
++        if re.search(r'\b(?:write|type) (?:your|the|each)|\byours to write\b', ask, re.I) and re.search(r'\b(?:copy|headline|line|version|words)\b', ask, re.I):
++            if not rows or not all(m.get('status') == 'archived' for m in rows):
++                return 'copy'
++            continue
++        if re.search(r'\b(?:send(?:ing)? (?:the |this |an? |exact |drafted )*(?:email|draft)|send_email)\b', ask, re.I):
++            return 'send_email'
++        if re.search(r'\b(?:spend(?:ing)?|pay(?:ment)?|charge|flat fee|budget|billing)\b|\$\s*\d', ask, re.I):
++            return 'spend_money'
++        if re.search(r'\b(?:contract|legal|signature|docusign)\b', ask, re.I):
++            return 'legal'
++        if re.search(r'\b(?:pricing|price|prices)\b', ask, re.I):
++            return 'pricing'
++        if re.search(r'\b(?:gated (?:prod|production)|production (?:database|db) write|prod write)\b', ask, re.I):
++            return 'prod_write'
++        if re.search(r'\b(?:pick|choose|taste|mockup|design|batch)\b', ask, re.I):
++            if any(m.get('status') == 'open' and not m.get('verdict') for m in rows):
++                return 'approve_design'
++    return None
++
++
++def approval_line(kind, card):
++    if kind == 'email':
++        return 'approve sending the drafted email'
++    if kind == 'spend':
++        return 'approve the proposed spend'
++    if kind == 'db' and decision(card) == 'prod_write':
++        return 'approve the gated production database write'
++    return None
++
++
++def disposition(card, mockups=(), line=None):
++    """Retain everything except a complete, latest runner failure template."""
++    text=runner_failure(card)
++    if text and (line is None or line==text):
++        return 'up_next',text
++    return None, 'ambiguous, retain'
++
++
++def routing_hold(card):
++    """An operational update cannot erase sensitive original scope or human auth."""
++    if card.get('section') != 'needs_you':
++        return False
++    scope = '\n'.join(str(card.get(k) or '') for k in ('title', 'body', 'live_status'))
++    return bool(re.search(r'\b(?:you decide|your call|yours to write|type your|write your|flat fee|'
++                          r'one.time (?:sign.in|authentication)|apple verification|'
++                          r'enter (?:the )?(?:code|key))\b', scope, re.I))

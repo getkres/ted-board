@@ -1,0 +1,18 @@
+--- /dev/null
++++ reconciler-capacity.json
+@@ -0,0 +1,15 @@
++{
++  "total_workers": 64,
++  "load_per_cpu": 2,
++  "minimum_available_gib": 8,
++  "urgent_reserved": 2,
++  "engines": {
++    "claude": 2,
++    "sonnet": 8
++  },
++  "account2_engines": {
++    "claude": 4,
++    "sonnet": 16
++  },
++  "review_exempt": true
++}

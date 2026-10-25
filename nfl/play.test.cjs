@@ -1,0 +1,6 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+let P;try{P=require('./play.js')}catch{P={}}
+const valid={team:'LA',down:3,distance:8,zone:'open',personnel:'11',formation:'shotgun',motion:'yes',concept:'dagger'};
+test('structured play imports every supported field',()=>{assert.equal(typeof P.parsePlay,'function');assert.deepEqual(P.parsePlay(JSON.stringify(valid),['LA','BUF']),valid)});
+test('malformed play cannot silently default or partially replace a play',()=>{assert.equal(typeof P.parsePlay,'function');for(const data of [{...valid,team:'XX'},{...valid,motion:'jet'},{...valid,down:0},{...valid,distance:''},{...valid,formation:'unknown'},{...valid,concept:'<script>'},[],{...valid,personnel:undefined}])assert.throws(()=>P.parsePlay(JSON.stringify(data),['LA','BUF']));assert.throws(()=>P.parsePlay('{', ['LA']))});
+test('only finite strictly lower Brier can activate a forecast',()=>{assert.equal(typeof P.hasEdge,'function');for(const m of [undefined,{}, {n:0,brier:.2,baseline_brier:.3},{n:30,brier:null,baseline_brier:.3},{n:30,brier:.3,baseline_brier:.3},{n:30,brier:.31,baseline_brier:.3}])assert.equal(P.hasEdge(m),false);assert.equal(P.hasEdge({n:30,brier:.2,baseline_brier:.3}),true)});

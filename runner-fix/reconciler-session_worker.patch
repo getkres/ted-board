@@ -1,0 +1,12 @@
+--- a/session_worker.py
++++ b/session_worker.py
+@@ -123,4 +123,9 @@
+  if inp['session'].get('active_claude_managed') is not True:return _legacy_run(prefix)
+  return _managed_run(prefix)
+ 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_worker import run
++# END RECONCILER ROUTE
+ if __name__=='__main__':run(sys.argv[1])
