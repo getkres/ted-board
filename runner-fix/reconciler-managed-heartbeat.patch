@@ -1,15 +1,18 @@
 --- a/jobs_heartbeat.py
 +++ b/reconciler_heartbeat.py
-@@ -8,7 +8,7 @@
+@@ -8,7 +8,10 @@
  import sys
  import time
  from board_client import call
 -from sessions import Store, identity
++from heartbeat_wire import heartbeat_transport
++
++call=heartbeat_transport(call)
 +from reconciler_sessions import Store, identity
  
  
  def untracked(jobs):
-@@ -40,7 +40,7 @@
+@@ -40,7 +43,7 @@
    from fresh_ted import dispatch
    dispatch()
   except Exception as exc:print('Fresh Ted dispatch failed: '+type(exc).__name__,file=sys.stderr)

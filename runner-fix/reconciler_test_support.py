@@ -8,7 +8,7 @@ import tempfile
 HERE=Path(__file__).resolve().parent
 TEMP=tempfile.TemporaryDirectory(prefix='ted-reconciler-offline-')
 SOURCE=Path(TEMP.name)
-for name in ('reconciler-gate.patch','reconciler-core.patch','reconciler-runtime.patch','reconciler-admission.patch','reconciler-inbox-policy.patch','reconciler-claude-lanes.patch','reconciler-failure-templates.patch','reconciler-board-card-snapshot.patch'):
+for name in ('reconciler-heartbeat-wire.patch','reconciler-gate.patch','reconciler-core.patch','reconciler-runtime.patch','reconciler-admission.patch','reconciler-inbox-policy.patch','reconciler-claude-lanes.patch','reconciler-failure-templates.patch','reconciler-board-card-snapshot.patch'):
  subprocess.run(['patch','--batch','--fuzz=0','-s','-p0','-i',str(HERE/name)],cwd=SOURCE,check=True,capture_output=True)
 sys.path.insert(0,str(SOURCE))
 

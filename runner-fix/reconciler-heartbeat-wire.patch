@@ -1,0 +1,24 @@
+--- /dev/null
++++ heartbeat_wire.py
+@@ -0,0 +1,21 @@
++"""Project newer local terminal states onto the older heartbeat wire contract."""
++from functools import wraps
++
++
++def heartbeat_transport(transport):
++    @wraps(transport)
++    def send(*args, **body):
++        action = args[0] if args else body.get('action')
++        jobs = body.get('jobs')
++        if action == 'heartbeat' and isinstance(jobs, list) and any(
++            isinstance(job, dict) and job.get('status') in ('dead_letter', 'stopped')
++            for job in jobs
++        ):
++            body['jobs'] = [
++                dict(job, status='failed')
++                if isinstance(job, dict) and job.get('status') in ('dead_letter', 'stopped')
++                else job
++                for job in jobs
++            ]
++        return transport(*args, **body)
++    return send
