@@ -49,7 +49,7 @@
   },
   "handler.ts": {
     "patch": "reconciliation-handler.patch",
-    "candidate_sha256": "27d04fb1eeea2bd2b3efa0296c5d9d7d5d0e84a12617e9244401899e01eed1af",
+    "candidate_sha256": "0a71d7f86e52607428cf54a83b0012336c0fc64ea15096969553d9f4b585fa08",
     "source": "handler.ts",
     "baseline_sha256": "85eff3b0d09c7fc41af22bf5de1210662035931b7bb01f61a26c02de551da867"
   },

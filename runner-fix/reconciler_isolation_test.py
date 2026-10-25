@@ -37,7 +37,9 @@ class LegacyIsolation(unittest.TestCase):
                 target = ROOT / 'backend/handler.ts' if name == 'handler.ts' else ROOT / name
                 raw = target.read_bytes()
                 self.assertEqual(len(BLOCK.findall(raw)), 1)
-                stripped=BLOCK.sub(b'',raw)
+                type_only=b'/* BEGIN RECONCILER TYPE */ as PropertyKey/* END RECONCILER TYPE */'
+                self.assertEqual(raw.count(type_only),2 if name=='handler.ts' else 0)
+                stripped=BLOCK.sub(b'',raw).replace(type_only,b'')
                 stripped=re.sub(rb'^// BEGIN RECONCILER SUPPORT\n.*?^// END RECONCILER SUPPORT\n',b'',stripped,flags=re.M|re.S)
                 self.assertEqual(stripped, (BASE / name).read_bytes())
 

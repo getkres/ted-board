@@ -17,3 +17,12 @@
   return async(req: Request): Promise<Response> => {
    if (req.method === 'OPTIONS') return new Response(null,{status:204,headers:cors});
    try {
+@@ -202,7 +208,7 @@
+       const kind=b.failure_kind,recovery=b.recovery;
+       if(typeof b.card_id!=='string'||!/^[A-Za-z0-9._-]{1,64}$/.test(b.card_id)
+           ||typeof b.token!=='string'||!/^[A-Za-z0-9._-]{1,150}$/.test(b.token)
+-          ||!Object.hasOwn(failureTemplates.failures,kind)||!Object.hasOwn(failureTemplates.recovery,recovery)
++          ||!Object.hasOwn(failureTemplates.failures,kind/* BEGIN RECONCILER TYPE */ as PropertyKey/* END RECONCILER TYPE */)||!Object.hasOwn(failureTemplates.recovery,recovery/* BEGIN RECONCILER TYPE */ as PropertyKey/* END RECONCILER TYPE */)
+           ||b.text!==undefined||b.runner_failure!==undefined)return json({error:'Invalid runner failure'},400);
+       const text=failureTemplates.failures[kind as keyof typeof failureTemplates.failures]+failureTemplates.recovery[recovery as keyof typeof failureTemplates.recovery];
+       const {data:card,error}=await db.from('ted_board_cards').select('*').eq('id',b.card_id).maybeSingle();

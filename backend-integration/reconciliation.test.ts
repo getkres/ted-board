@@ -189,3 +189,20 @@ test('flag-off handler accepts empty or equal key configuration and preserves ba
   }
  }finally{if(before===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=before;}
 });
+
+test('flag-off erased assertions preserve malformed runner-failure responses',{skip:!handlerSource},async()=>{
+ const prior=process.env.TED_RECONCILER_ENABLED;process.env.TED_RECONCILER_ENABLED='false';
+ try {
+  const {pathToFileURL}=await import('node:url');
+  const {createHandler}=await import(pathToFileURL(handlerSource!).href);
+  const legacy=await import(new URL('./legacy-handler-baseline.ts',pathToFileURL(handlerSource!)).href);
+  const db={from:()=>{throw Error('invalid input must not reach the database')}};
+  const current=createHandler(db,'page','worker',{enabled:false,message:'fixture'});
+  const baseline=legacy.createHandler(db,'page','worker',{enabled:false,message:'fixture'});
+  for(const [failure_kind,recovery] of [[{},'held'],[9,'held'],[{toString:'crash'},'held'],['crash',{}],['crash',{toString:'held'}]]){
+   const request=new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({action:'runner_failure',key:'worker',card_id:'c',token:'fixture',failure_kind,recovery})});
+   const a=await current(request.clone()),b=await baseline(request.clone());
+   assert.equal(a.status,b.status);assert.equal(await a.text(),await b.text());
+  }
+ }finally{if(prior===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=prior;}
+});
