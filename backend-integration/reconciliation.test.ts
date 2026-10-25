@@ -49,6 +49,14 @@ test('schema absence, connection failures, and CAS conflicts remain explicit wit
  const empty=await readReconciliation({read:async()=>null,publish:async()=>({ok:true})});
  assert.equal(empty.reconciliation_error,'not_published');
 });
+test('non-retryable PT409 business guards remain HTTP409 for all reconciliation writes',async()=>{
+ const store={read:async()=>null,publish:async()=>{throw {code:'PT409',message:'private guard detail'}},routeTed:async()=>{throw {code:'PT409',message:'private guard detail'}},closeVerified:async()=>{throw {code:'PT409',message:'private guard detail'}}};
+ const guard={card_id:'c-example',expected_updated_at:item.expected_updated_at,expected_revision:4,expected_section:'needs_you',expected_messages:[]};
+ for(const action of ['reconcile_publish','reconcile_route_ted','reconcile_close_verified']){
+  const result=await handleReconciliationAction({method:'POST',principal:'worker',body:{...packet(),...guard,action}},store,now);
+  assert.equal(result?.status,409);assert.equal(JSON.stringify(result).includes('private guard detail'),false);
+ }
+});
 test('malformed stored payload is not advertised as a healthy reconciliation',async()=>{
  const result=await readReconciliation({read:async()=>({generated_at:'invalid',items:[],ted_queue:[],banner:false}) as any,publish:async()=>({ok:true})});
  assert.equal(result.reconciliation,null);assert.equal(result.reconciliation_error,'invalid_snapshot');

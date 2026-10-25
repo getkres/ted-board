@@ -1,0 +1,55 @@
+--- /dev/null
++++ reconciler_transport.py
+@@ -0,0 +1,52 @@
++"""Managed board transport with one attempt and payload-free failure metadata."""
++import json
++import socket
++import urllib.error
++import urllib.parse
++import urllib.request
++
++
++ERROR_KINDS=frozenset(('credentials','http','timeout','transport','response','payload'))
++
++
++class BoardTransportError(RuntimeError):
++ def __init__(self,kind='transport',http_status=None):
++  self.kind=kind if kind in ERROR_KINDS else 'transport'
++  self.http_status=http_status if type(http_status) is int and 100<=http_status<=599 else None
++  super().__init__('Managed board request failed.')
++
++
++class BoardConflict(BoardTransportError):
++ def __init__(self):super().__init__('http',409)
++
++
++class BoardGone(BoardTransportError):
++ def __init__(self):super().__init__('http',404)
++
++
++def call(action=None,page=False,**body):
++ """Keep the existing board wire contract; never replay an obsolete request."""
++ try:
++  from sync import ENDPOINT,load_env
++  cfg=load_env();key=cfg['TED_DECISIONS_KEY' if page or action is None else 'TED_DECISIONS_WORKER_KEY']
++ except Exception:raise BoardTransportError('credentials') from None
++ try:
++  if action is None:
++   url=ENDPOINT+'?'+urllib.parse.urlencode(dict(key=key,**body));data=None;method='GET'
++  else:url=ENDPOINT;data=json.dumps(dict(body,key=key,action=action)).encode();method='POST'
++  request=urllib.request.Request(url,data=data,method=method,headers={'Content-Type':'application/json'})
++ except Exception:raise BoardTransportError('payload') from None
++ try:
++  with urllib.request.urlopen(request,timeout=120 if action=='veto_send' else 25) as response:
++   value=json.load(response)
++  if not isinstance(value,dict):raise ValueError('object response required')
++  return value
++ except urllib.error.HTTPError as exc:
++  if exc.code==409:raise BoardConflict() from None
++  if exc.code==404:raise BoardGone() from None
++  raise BoardTransportError('http',exc.code) from None
++ except (socket.timeout,TimeoutError):raise BoardTransportError('timeout') from None
++ except urllib.error.URLError as exc:
++  raise BoardTransportError('timeout' if isinstance(exc.reason,(socket.timeout,TimeoutError)) else 'transport') from None
++ except ValueError:raise BoardTransportError('response') from None
++ except Exception:raise BoardTransportError('transport') from None

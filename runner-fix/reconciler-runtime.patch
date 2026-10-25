@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,514 @@
+@@ -0,0 +1,563 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -21,6 +21,7 @@
 +import uuid
 +
 +from reconciler import classify_priorities, digest, iso, plan, stamp, unsafe_session, initial_dispatch_allowed, MISSED_RENEWALS
++from reconciler_transport import BoardConflict, ERROR_KINDS
 +
 +PR=re.compile(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)\b')
 +
@@ -29,6 +30,21 @@
 +DIGEST_CARD_ID = 'reconciler-initial-ted-digest'
 +ESCALATIONS = {'escalate_2h', 'escalate_12h', 'review_sla', 'sebastian_escalation', 'verification_review'}
 +PASS_LIMITS = {'retry': 3, 'route': 5, 'create': 5, 'deploy': 5, 'dispatch': 10, 'escalation': 10}
++
++STAGES=frozenset(('startup','store','observe','lease_guard','controls','health','operator',
++ 'plan_publish','authoritative_coverage','publish','publish_acknowledgement','scheduling',
++ 'dispatch','approval_collect','approval_sync','flush','archive','review_queue','output'))
++
++
++class ReconcilerFailure(RuntimeError):
++ def __init__(self,stage,error):
++  self.stage=stage if isinstance(stage,str) and stage in STAGES else 'unknown'
++  kind=getattr(error,'kind',None);status=getattr(error,'http_status',None)
++  self.kind=kind if isinstance(kind,str) and kind in ERROR_KINDS else 'exception'
++  self.http_status=status if type(status) is int and 100<=status<=599 else None
++  super().__init__('Reconciler stage failed.')
++ def diagnostic(self):
++  return dict(event='reconciler_failed',stage=self.stage,error_kind=self.kind,http_status=self.http_status)
 +
 +
 +def action_group(action):
@@ -193,7 +209,7 @@
 +
 +def observe(root,board=None,mockups=None,policy_source=None):
 + sys.path.insert(0,str(root))
-+ board=board or importlib.import_module('board_client')
++ board=board or importlib.import_module('reconciler_transport')
 + feed=board.call()
 + cards=feed.get('cards') if isinstance(feed,dict) else None
 + if not isinstance(cards,list):cards=[];card_coverage='unavailable'
@@ -412,10 +428,16 @@
 + require_leased_cutover(snapshot)
 + partial_cards=snapshot.get('coverage',{}).get('cards','ok')!='ok'
 + if not partial_cards:
-+  if any(snapshot.get('coverage',{}).get(source)!='ok' for source in ('backend_ledger','inbox_policy','remote_jobs')):raise RuntimeError('Complete authoritative backend and inbox observations required before apply')
++  if any(snapshot.get('coverage',{}).get(source)!='ok' for source in ('backend_ledger','inbox_policy','remote_jobs')):raise ReconcilerFailure('authoritative_coverage',RuntimeError())
 +  publish={k:result[k] for k in ('generated_at','items','ted_queue','banner','coverage_defects')}
-+  response=board.call('reconcile_publish',**publish)
-+  if response.get('ok') is not True:raise RuntimeError('Reconciliation publication unconfirmed')
++  try:response=board.call('reconcile_publish',**publish)
++  except BoardConflict:
++   # Reobserve on the next scheduled invocation. No replay, actions, or receipts.
++   result.update(publication_skipped=True,publication_deferred='conflict',selected_actions=[],
++                 failed=[],deferred=[a['id'] for a in result['actions']])
++   return result
++  except Exception as exc:raise ReconcilerFailure('publish',exc) from None
++  if response.get('ok') is not True:raise ReconcilerFailure('publish_acknowledgement',RuntimeError())
 + selected,limited=select_pass(result,completed)
 + if partial_cards:
 +  limited += [a for a in selected if a['kind'] not in ('retry','dead_letter','stop_worker')]
@@ -469,9 +491,11 @@
 +   if a.settle_review or a.redrive:
 +    print('Reconciler pass is busy; operator command was not performed.',file=sys.stderr);return 1
 +   return 0
++ stage='store'
 + try:
 +  store=importlib.import_module('reconciler_sessions').Store(root/'jobs') if apply else None
 +  if a.settle_review:
++   stage='operator'
 +   if not apply:p.error('review settlement requires apply and explicit operator outcome')
 +   with store.locked() as data:
 +    observed=json.loads(json.dumps(data['sessions'].get(a.settle_review,{})))
@@ -483,35 +507,60 @@
 +    if any(current.get(key)!=observed.get(key) for key in ('turn','lease_token','status','reviewing')):raise RuntimeError('review identity changed')
 +    settle_review(data,a.settle_review,a.approval_id,a.review_outcome,a.reason)
 +   return 0
-+  board=importlib.import_module('board_client') if apply else None
++  board=importlib.import_module('reconciler_transport') if apply else None
++  stage='observe'
 +  snapshot=read_json(a.snapshot,None) if a.snapshot else observe(root,policy_source=a.policy_source)
 +  if snapshot is None:raise RuntimeError('Snapshot unavailable')
 +  if apply:
++   stage='lease_guard'
 +   require_leased_cutover(snapshot)
++   stage='controls'
 +   if snapshot['coverage'].get('cards')=='ok':store.controls(board.call('control').get('commands',[]))
++   stage='health'
 +   for cid,health in sample_health(store,time.time()).items():
 +    if cid in snapshot['sessions']:
 +     snapshot['sessions'][cid].update({key:health[key] for key in ('pid_dead','activity_quiet','missed_renewals','health_activity_mtime','health_lease','health_observed_at') if key in health})
 +  if a.redrive:
++   stage='operator'
 +   if not apply:p.error('redrive requires apply and Ted repair reason')
 +   with store.locked() as data:redrive(data['sessions'][a.redrive],a.reason)
 +   return 0
++  stage='plan_publish'
 +  result=run(snapshot,root/'jobs/reconciler.sqlite',time.time(),not apply,store,board)
 +  if apply and not result.get('publication_skipped'):
 +   # All lifecycle mutations are owned here, not by the heartbeat or reaper.
-+   sync_scheduling(store,snapshot);store.tick(reconcile=True);store.collect_approvals(reconcile=True);store.sync_approval_status();store.flush()
++   stage='scheduling';sync_scheduling(store,snapshot)
++   stage='dispatch';store.tick(reconcile=True)
++   stage='approval_collect';store.collect_approvals(reconcile=True)
++   stage='approval_sync';store.sync_approval_status()
++   stage='flush';store.flush()
 +   if os.environ.get('TED_MOCKUP_AUTOARCHIVE_ENABLED')=='true':
++    stage='archive'
 +    from mockup_autoarchive import heartbeat_pass
 +    heartbeat_pass()
-+   write_private(root/'jobs/ted-review-queue.json',dict(generated_at=result['generated_at'],items=[x for x in result['items'] if x['id'] in result['ted_queue']],coverage_defects=result['coverage_defects'],notes=store.read().get('ted_outbox',[])))
++   stage='review_queue';write_private(root/'jobs/ted-review-queue.json',dict(generated_at=result['generated_at'],items=[x for x in result['items'] if x['id'] in result['ted_queue']],coverage_defects=result['coverage_defects'],notes=store.read().get('ted_outbox',[])))
++  stage='output'
 +  if a.output:write_private(a.output,dict(snapshot=snapshot,result=result))
 +  counts={}
 +  for action in result['actions']:counts[action['kind']]=counts.get(action['kind'],0)+1
-+  print(json.dumps(dict(mode='apply' if apply else 'dry_run',items=len(result['items']),actions=counts,coverage_defects=result['coverage_defects']),sort_keys=True))
++  summary=dict(mode='apply' if apply else 'dry_run',items=len(result['items']),actions=counts,coverage_defects=result['coverage_defects'])
++  if result.get('publication_deferred')=='conflict':summary['publication']='deferred_conflict'
++  print(json.dumps(summary,sort_keys=True))
 +  return 0 if not result.get('failed') else 1
++ except Exception as exc:
++  if not isinstance(exc,ReconcilerFailure):exc.reconciler_stage=stage
++  raise
 + finally:
 +  if lock:lock.close()
 +
++
++def cli(argv=None):
++ try:return main(argv)
++ except Exception as exc:
++  failure=exc if isinstance(exc,ReconcilerFailure) else ReconcilerFailure(getattr(exc,'reconciler_stage','startup'),exc)
++  print(json.dumps(failure.diagnostic(),sort_keys=True),file=sys.stderr)
++  return 1
++
++
 +if __name__=='__main__':
-+ try:sys.exit(main())
-+ except Exception as exc:print('Reconciler failed: '+type(exc).__name__,file=sys.stderr);sys.exit(1)
++ sys.exit(cli())

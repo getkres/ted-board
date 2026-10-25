@@ -95,7 +95,7 @@
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
-    "candidate_sha256": "2862f1dd07d728d3c9e853e20cdc79258d0bd6269e911badb23f956b43a6bcf2"
+    "candidate_sha256": "ae696b28dd94a68686695e196e964631503416f6b56c0f48807df9e1c27b96d4"
   },
   "runner_admission.py": {
     "patch": "reconciler-admission.patch",
@@ -137,5 +137,9 @@
     "patch": "reconciler-heartbeat-wire.patch",
     "candidate_sha256": "ac2a7e983021f2f474312ed8f346de9b9806d3acb15d21d15cd16d11bc577f42",
     "source": "heartbeat_wire.py"
+  },
+  "reconciler_transport.py": {
+    "patch": "reconciler-transport.patch",
+    "candidate_sha256": "a8badd88fd1e93dc1c6b3b4138295a6080abf7029f2156fb0f60fbe639b413a9"
   }
 }
