@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler.py
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,291 @@
 +"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
 +import hashlib
 +import json
@@ -129,7 +129,7 @@
 +def plan(snapshot,completed=(),now=None):
 + if now is None:raise ValueError('planner requires an explicit observation time')
 + if not isinstance(snapshot.get('cards'),list):raise ValueError('complete card feed required')
-+ completed=set(completed);items=[];actions=[];coverage=[]
++ completed=set(completed);items=[];actions=[];coverage=[];aging_entities={}
 + def action(kind,entity,generation,payload=None):
 +  aid=digest(kind,entity,generation)
 +  if aid not in completed:actions.append(dict(id=aid,kind=kind,entity=entity,payload=payload or {}))
@@ -240,7 +240,10 @@
 +   phase=workflow_stage(snapshot,cid,now=now)
 +   ps=stamp(w.get('deployment',{}).get('deployed_at')) if phase=='deployed' else stamp(pr.get('merged_at')) if phase=='merged' else stamp(pr.get('created_at'))
 +   ps=ps or start
-+   item('pr:'+digest(w['pr_url']),'pr',cid,'ted',ps,ps+6*3600,workflow_stage(snapshot,cid,now=now),summary='pull request requires delivery evidence')
++   key='pr:'+digest(cid,w['pr_url'])
++   item(key,'pr',cid,'ted',ps,ps+6*3600,workflow_stage(snapshot,cid,now=now),summary='pull request requires delivery evidence')
++   # Publication identity is card-scoped; existing aging receipts remain URL-scoped.
++   aging_entities[key]='pr:'+digest(w['pr_url'])
 + groups={}
 + for m in snapshot.get('mockups',[]):
 +  if m.get('status')=='deleted':continue
@@ -280,7 +283,7 @@
 +  if row['kind']=='card':continue
 +  age=now-stamp(row['action_started_at'])
 +  for hours,kind in ((2,'escalate_2h'),(12,'escalate_12h')):
-+   if age>=hours*3600 and now>=stamp(row['next_action_due']):action(kind,row['id'],[row['stage'],row['action_started_at']],dict(card_id=row['card_id'],owner='ted'))
++   if age>=hours*3600 and now>=stamp(row['next_action_due']):action(kind,aging_entities.get(row['id'],row['id']),[row['stage'],row['action_started_at']],dict(card_id=row['card_id'],owner='ted'))
 +  if row['owner']=='ted' and (row['kind'] in ('pr','sql','approval') or row['status']=='dead_letter'):review_ids.append(row)
 + for row in items:
 +  if row['owner']=='ted' and now>=stamp(row['next_action_due']):review_ids.append(row)
