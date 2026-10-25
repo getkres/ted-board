@@ -75,6 +75,8 @@ MANAGED += """
     with self.locked() as data:
      if current.get('id')!=item['id']:continue
      data['publications'].pop(cid,None)
+     if item['kind']=='failure':s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
+     elif item['kind'] in ('start','resume'):s.pop('recovery_section',None)
  def _publish_failure(self,s,data=None):
   pass
 """

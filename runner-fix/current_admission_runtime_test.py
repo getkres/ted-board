@@ -187,6 +187,40 @@ class CurrentRuntimeTests(unittest.TestCase):
         self.assertEqual(publications[0]['kwargs']['section'],'up_next')
         self.assertNotIn('needs_you',json.dumps(publications))
 
+    def check_alert_then_admission_recovers_section(self, *, managed, lanes=True):
+        self.load(managed=managed,lanes=lanes)
+        card=dict(id='sample',project='synthetic',section='ted_doing',decision_kind=None,
+                  updated_at='2026-10-25T07:00:00Z')
+        with self.store.locked() as data:
+            data['sessions']['sample']['admission_deferred']=dict(turn='t',since=1,count=2,alerted=False)
+        with mock.patch.object(self.module,'call',return_value=dict(cards=[card])):
+            self.tick()
+            if managed:
+                # Use the real publisher while keeping every provider stubbed.
+                self.module.Store._flush_publications(self.store)
+        self.assertEqual(self.store.read()['sessions']['sample'].get('recovery_section'),'up_next')
+        self.assertFalse(self.marker.exists())
+        self.gate.sample=lambda:dict(cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3)
+        self.tick();self.reap()
+        data=self.store.read()
+        self.assertEqual(data['sessions']['sample']['status'],'running')
+        if managed:
+            self.assertEqual(data['publications']['sample']['kind'],'start')
+            guards=data['publications']['sample']['kwargs']
+        else:
+            guards=next(kwargs for args,kwargs in self.out if args[1]=='running')
+        self.assertEqual(guards['section'],'ted_doing')
+        self.assertEqual(guards.get('expected_section'),'up_next')
+
+    def test_managed_alert_then_admission_recovers_section(self):
+        self.check_alert_then_admission_recovers_section(managed=True)
+
+    def test_legacy_lane_alert_then_admission_recovers_section(self):
+        self.check_alert_then_admission_recovers_section(managed=False)
+
+    def test_legacy_nonlane_alert_then_admission_recovers_section(self):
+        self.check_alert_then_admission_recovers_section(managed=False,lanes=False)
+
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)

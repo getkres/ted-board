@@ -65,7 +65,7 @@ def adapt(source, *, managed):
                 "      waiting['alerted']=True\n",
             ]
         else:
-            episode += ["      guards=admission_status_kwargs(s['card_id'])\n", "      waiting['alerted']=guards is not None and bool(publish_live(s['card_id'],'blocked','admission delayed: '+exc.diagnostic.lower(),**guards))\n"]
+            episode += ["      guards=admission_status_kwargs(s['card_id'])\n", "      waiting['alerted']=guards is not None and bool(publish_live(s['card_id'],'blocked','admission delayed: '+exc.diagnostic.lower(),**guards))\n", "      if waiting['alerted']:s['recovery_section']='up_next'\n"]
         episode += ['     if exc.capacity:break\n', '     continue\n']
         lines[boundary:boundary] = episode
         # Keep original launch failure semantics, and clear an obsolete episode.
@@ -193,6 +193,10 @@ def adapt_completion(source):
         "         or s!=completion_snapshot['session'] or data.get('approvals')!=completion_snapshot['approvals']\n"
         "         or (not confirmed and not self._completion_eligible(data,s,item))):continue\n"
         "     data['publications'].pop(cid,None)\n")
+    source = replace_once(source,
+        "     elif item['kind'] in ('start','resume'):s.pop('recovery_section',None)\n",
+        "     elif item['kind']=='admission':s['recovery_section']='up_next'\n"
+        "     elif item['kind'] in ('start','resume'):s.pop('recovery_section',None)\n")
     source=prefix+source+suffix
     ast.parse(source)
     return source
