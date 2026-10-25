@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,509 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -20,7 +20,7 @@
 +import time
 +import uuid
 +
-+from reconciler import classify_priorities, digest, iso, plan, stamp, unsafe_session, MISSED_RENEWALS
++from reconciler import classify_priorities, digest, iso, plan, stamp, unsafe_session, initial_dispatch_allowed, MISSED_RENEWALS
 +
 +PR=re.compile(r'https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)\b')
 +
@@ -116,6 +116,8 @@
 +  from claude_lanes import clear_review
 +  clear_review(session)
 +  session.pop('active_turn',None);session.pop('active_veto_revision',None)
++  remaining=[turn for turn in remaining if turn.get('automatic') is not True and not str(turn.get('id','')).startswith('reconciler-retry-')]
++  session['queue']=remaining
 +  session.pop('stop_requested',None);session.pop('kill_requested_at',None)
 +  session.update(status='queued' if remaining else 'stopped',last_line='user stop settled, no retry of cancelled attempt')
 +  return True
@@ -126,6 +128,17 @@
 + session['queue']=[dict(id='reconciler-retry-'+action['id'],kind='work',automatic=True,message='Resume from REPORT.md and your files. Verify prior effects before continuing. '+old.get('message','')[:12000])]+remaining
 + session.update(status='queued',last_line='safe retry queued with backoff')
 + return True
++
++
++def settle_review(data,card_id,approval_id,outcome,reason):
++ if outcome not in ('done','failed') or not isinstance(reason,str) or not reason.strip() or len(reason)>240 or re.search(r'[\x00-\x1f\x7f]',reason):raise ValueError('explicit review outcome and short operator reason required')
++ session=data.get('sessions',{}).get(card_id,{})
++ approval=data.get('approvals',{}).get(approval_id,{})
++ if session.get('status')!='dead_letter' or session.get('pid') or session.get('reviewing')!=approval_id or approval.get('status')!='reviewing' or approval.get('card_id')!=card_id:raise ValueError('current dead-lettered review identity required')
++ from claude_lanes import clear_review
++ approval.update(status=outcome,reason=reason,settled_by='ted',settled_at=time.time(),sync_status=True)
++ clear_review(session);session.pop('active_turn',None);session.pop('active_veto_revision',None)
++ session.update(status='done' if outcome=='done' else 'dead_letter',last_line='operator settled review outcome',review_settlement=dict(approval_id=approval_id,outcome=outcome,reason=reason,at=time.time()))
 +
 +
 +def redrive(session,reason):
@@ -189,6 +202,9 @@
 + if len(valid)!=len(cards):card_coverage='invalid_rows'
 + cards=valid
 + s=local_snapshot(root,cards);s['coverage']['cards']=card_coverage
++ from reconciler_gate import read_dispatch_policy
++ s['dispatch_policy']=read_dispatch_policy(Path(root)/'jobs/reconciler-config.json')
++ if s['dispatch_policy'] is None:s['coverage']['dispatch_policy']='invalid'
 + try:
 +  feed=(mockups or importlib.import_module('mockup_client')).call()
 +  rows=feed.get('mockups')
@@ -338,8 +354,19 @@
 +   if ok and kind=='dead_letter':store._out(data,current,'retries exhausted or unsafe to repeat, ted owns this recovery','reconciler-dlq-'+action['id'])
 +   return ok
 + if kind=='dispatch':
-+  c=next((c for c in snapshot['cards'] if c['id']==cid),None)
-+  if not c:return False
++  from board_card_snapshot import fetch_cards
++  try:cards=fetch_cards(call=board.call)
++  except (OSError,RuntimeError,ValueError):return False
++  c=next((c for c in cards if c['id']==cid),None)
++  from reconciler_gate import read_dispatch_policy
++  if not hasattr(store,'root'):return False
++  fresh=dict(snapshot,dispatch_policy=read_dispatch_policy(store.root/'reconciler-config.json'))
++  try:
++   remote=board.call(page=True,resource='jobs')
++   if not isinstance(remote,dict) or not isinstance(remote.get('jobs'),list):return False
++  except (OSError,RuntimeError,ValueError):return False
++  fresh['external_jobs']=[j for j in remote['jobs'] if isinstance(j,dict) and j.get('card_id')==cid and j.get('status') in ('running','queued','untracked','waiting_approval')]
++  if not c or c.get('section') not in ('up_next','ted_doing') or not initial_dispatch_allowed(fresh,c):return False
 +  return store.enqueue(c,'Resume the card from REPORT.md and its files. Deliver and verify the requested outcome, and retain an accurate blocked state until it is live.','reconciler-dispatch-'+action['id'],engine='codex') is True
 + if kind=='escalation_digest':
 +  if any(c['id']==cid for c in snapshot['cards']):return True
@@ -417,7 +444,7 @@
 +  for card in snapshot['cards']:
 +   session=data['sessions'].get(card['id'])
 +   if session is None:continue
-+   for key in ('priority_class','explicit_ask','created_at','action_started_at'):
++   for key in ('priority_class','explicit_ask','created_at','action_started_at','metadata','reconciler_hold'):
 +    if key in card:session[key]=card[key]
 +
 +
@@ -427,7 +454,7 @@
 +
 +
 +def main(argv=None):
-+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,default=Path.home()/'ted-ops/ted-board');p.add_argument('--snapshot',type=Path);p.add_argument('--output',type=Path);p.add_argument('--dry-run',action='store_true');p.add_argument('--apply',action='store_true');p.add_argument('--policy-source',type=Path);p.add_argument('--redrive');p.add_argument('--reason');a=p.parse_args(argv)
++ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,default=Path.home()/'ted-ops/ted-board');p.add_argument('--snapshot',type=Path);p.add_argument('--output',type=Path);p.add_argument('--dry-run',action='store_true');p.add_argument('--apply',action='store_true');p.add_argument('--policy-source',type=Path);p.add_argument('--redrive');p.add_argument('--reason');p.add_argument('--settle-review');p.add_argument('--approval-id');p.add_argument('--review-outcome',choices=('done','failed'));a=p.parse_args(argv)
 + apply=a.apply and not a.dry_run
 + if a.apply and a.dry_run:p.error('choose dry-run or apply')
 + from reconciler_gate import reconciler_enabled
@@ -441,6 +468,18 @@
 +  except BlockingIOError:return 0
 + try:
 +  store=importlib.import_module('reconciler_sessions').Store(root/'jobs') if apply else None
++  if a.settle_review:
++   if not apply:p.error('review settlement requires apply and explicit operator outcome')
++   with store.locked() as data:
++    observed=json.loads(json.dumps(data['sessions'].get(a.settle_review,{})))
++    trial=json.loads(json.dumps(data));settle_review(trial,a.settle_review,a.approval_id,a.review_outcome,a.reason)
++   lease=observed.get('lease') if isinstance(observed.get('lease'),dict) else {}
++   if not lease.get('pid') or not lease.get('identity') or not confirmed_stop(dict(observed,pid=lease['pid'],identity=lease['identity']),allow_kill=False):raise RuntimeError('review settlement requires confirmed process absence')
++   with store.locked() as data:
++    current=data['sessions'].get(a.settle_review,{})
++    if any(current.get(key)!=observed.get(key) for key in ('turn','lease_token','status','reviewing')):raise RuntimeError('review identity changed')
++    settle_review(data,a.settle_review,a.approval_id,a.review_outcome,a.reason)
++   return 0
 +  board=importlib.import_module('board_client') if apply else None
 +  snapshot=read_json(a.snapshot,None) if a.snapshot else observe(root,policy_source=a.policy_source)
 +  if snapshot is None:raise RuntimeError('Snapshot unavailable')

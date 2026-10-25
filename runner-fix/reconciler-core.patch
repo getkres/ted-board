@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler.py
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,274 @@
 +"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
 +import hashlib
 +import json
@@ -86,6 +86,30 @@
 + previous=c.get('reconciliation_stage') or snapshot.get('workflows',{}).get(cid,{}).get('last_stage')
 + rank={'build':0,'pr':1,'merged':2,'deployed':3,'verified':4}
 + return previous if rank.get(previous,-1)>rank[observed] else observed
++
++
++def dispatch_policy_valid(policy):
++ if not isinstance(policy,dict):return False
++ for key in ('allow_card_ids','hold_card_ids'):
++  rows=policy.get(key,[])
++  if not isinstance(rows,list) or len(rows)>2000 or any(not isinstance(cid,str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',cid) for cid in rows) or len(set(rows))!=len(rows):return False
++ return True
++
++
++def automatic_hold(snapshot,card):
++ cid=card.get('id');policy=snapshot.get('dispatch_policy')
++ if 'dispatch_policy' in snapshot and not dispatch_policy_valid(policy):return True
++ metadata=card.get('metadata') if isinstance(card.get('metadata'),dict) else {}
++ if metadata.get('reconciler_hold') not in (None,False) or card.get('reconciler_hold') not in (None,False):return True
++ if dispatch_policy_valid(policy) and cid in policy.get('hold_card_ids',[]):return True
++ session=snapshot.get('sessions',{}).get(cid,{})
++ if card.get('live_state')=='running' and not session.get('turn'):return True
++ return any(j.get('card_id')==cid and j.get('status') in ('running','queued','untracked','waiting_approval') for j in snapshot.get('external_jobs',[]) if isinstance(j,dict))
++
++
++def initial_dispatch_allowed(snapshot,card):
++ policy=snapshot.get('dispatch_policy')
++ return dispatch_policy_valid(policy) and card.get('id') in policy.get('allow_card_ids',[]) and not automatic_hold(snapshot,card)
 +
 +
 +def plan(snapshot,completed=(),now=None):
@@ -174,7 +198,7 @@
 +   if s.get('stop_requested') and not lease_missing:
 +    row['owner']='ted';review_ids.append(row)
 +    action('stop_worker',cid,[s.get('turn'),s.get('kill_requested_at') or 'stop'],dict(card_id=cid,expected_turn=s.get('turn'),expected_lease_token=s.get('lease_token')))
-+   elif (expired or failed) and stage!='verified':
++   elif (expired or failed) and stage!='verified' and not automatic_hold(snapshot,c):
 +    unsafe=unsafe_session(s)
 +    attempt=int(s.get('retry_count') or 0)
 +    kind='dead_letter' if not s.get('lease_token') or unsafe or attempt>=RETRY_LIMIT or int(s.get('automatic_dispatch_count') or 0)>=LIFETIME_DISPATCH_LIMIT or s.get('artifact_error') else 'retry'
@@ -184,7 +208,7 @@
 +    if kind=='dead_letter':row['status']='dead_letter';review_ids.append(row)
 +   elif status=='dead_letter':
 +    row['owner']='ted';row['status']='dead_letter';review_ids.append(row)
-+  elif c.get('section') in ('up_next','ted_doing') and owner=='ted' and not review and not has_chain and not s.get('turn') and not s.get('started_at') and not s.get('queue') and not s.get('automatic_dispatched'):
++  elif c.get('section') in ('up_next','ted_doing') and owner=='ted' and not review and not has_chain and not s.get('turn') and not s.get('started_at') and not s.get('queue') and not s.get('automatic_dispatched') and initial_dispatch_allowed(snapshot,c):
 +   action('dispatch',cid,s.get('first_enqueued_at') or c.get('created_at') or 'initial',dict(card_id=cid))
 + for a in snapshot.get('approvals',[]):
 +  if a.get('status') in ('done','failed','superseded','rejected'):continue

@@ -2,6 +2,8 @@
 import hashlib
 import json
 import os
+import plistlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -13,6 +15,13 @@ HERE = Path(__file__).resolve().parent
 
 
 class Packaging(unittest.TestCase):
+    def test_launchd_path_resolves_private_operator_tools(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home=Path(temp);binary=home/'.local/bin/gh';binary.parent.mkdir(parents=True);binary.write_text('#!/bin/sh\necho fixture-gh\n');binary.chmod(0o700)
+            text=(HERE/'reconciler-launchd.plist').read_text().replace('__TED_HOME__',str(home)).replace('__TED_BOARD_ROOT__',str(home/'ted-ops/ted-board'))
+            plist=plistlib.loads(text.encode());env=plist.get('EnvironmentVariables',{})
+            self.assertEqual(shutil.which('gh',path=env.get('PATH',os.defpath)),str(binary))
+
     def test_relative_paths_reconstruct_and_source_drift_is_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

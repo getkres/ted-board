@@ -66,10 +66,48 @@ class LeaseDispatch(unittest.TestCase):
         def topology(*args):
             self.assertFalse(held, 'auth observation must not block lease renewal')
             return dict(enabled=False, account2_ready=False, account3_ready=False)
+        def admission():
+            self.assertFalse(held, 'host observation must not block lease renewal')
+            return dict(cap=0)
         with patch.object(self.store, 'locked', locked), \
                 patch.object(sessions.lanes, 'topology', side_effect=topology), \
-                patch.object(sessions, 'admission_state', return_value=dict(cap=0)):
+                patch.object(sessions, 'admission_state', side_effect=admission):
             self.store.tick(reconcile=True)
+
+    def test_changed_approval_artifact_is_marked_unsafe_for_automatic_recovery(self):
+        self.enqueue()
+        with self.store.locked() as data:
+            s=data['sessions']['x'];s.update(turn='prior',lease_token='f',queue=[dict(id='review',kind='review',approval_id='a')])
+            data['approvals']['a']=dict(id='a',card_id='x',kind='db',status='approved',digest='approved',content='fixture')
+        with patch.object(sessions,'admission_state',return_value=dict(cap=64)), patch.object(sessions,'artifact',return_value=dict(digest='changed')):
+            self.store.tick(reconcile=True)
+        self.assertTrue(self.store.read()['sessions']['x'].get('artifact_error'))
+        self.assertEqual(self.store.read()['approvals']['a']['status'],'superseded')
+
+    def test_default_managed_enqueue_preserves_claude_engine(self):
+        self.store.enqueue(dict(id='default',title='Fixture'),'work','default')
+        self.assertEqual(self.store.read()['sessions']['default']['engine'],'claude')
+
+    def test_automatic_first_start_rechecks_permission_and_direct_worker_state(self):
+        self.store.enqueue(dict(id='x',title='Fixture',project='Fixture',section='up_next'),'work','reconciler-dispatch-first',engine='codex')
+        config=Path(self.tmp.name)/'reconciler-config.json'
+        for allow,live_state,expected in (([], 'blocked',0),(['x'],'running',0),(['x'],'blocked',1)):
+            config.write_text(json.dumps(dict(enabled=True,dispatch=dict(allow_card_ids=allow,hold_card_ids=[]))))
+            def call(**kw):
+                return dict(jobs=[]) if kw.get('resource') else dict(cards=[dict(id='x',project='Fixture',section='up_next',live_state=live_state)])
+            with patch.object(sessions,'call',side_effect=call), patch.object(sessions,'admission_state',return_value=dict(cap=64)), \
+                    patch.object(sessions,'identity',return_value='fixture'), patch.object(sessions.subprocess,'Popen',return_value=types.SimpleNamespace(pid=98765)) as spawn:
+                self.store.tick(reconcile=True)
+                self.assertEqual(spawn.call_count,expected,(allow,live_state))
+
+    def test_explicit_parked_hold_prevents_automatic_retry_spawn(self):
+        self.enqueue()
+        Path(self.tmp.name,'reconciler-config.json').write_text(json.dumps(dict(enabled=True,dispatch=dict(allow_card_ids=['x'],hold_card_ids=['x']))))
+        with self.store.locked() as data:
+            data['sessions']['x'].update(status='queued',started_at=1,queue=[dict(id='reconciler-retry-held',kind='work',automatic=True,message='resume')])
+        with patch.object(sessions,'admission_state',return_value=dict(cap=64)), patch.object(sessions.subprocess,'Popen',side_effect=AssertionError('parked automatic work must not spawn')):
+            self.store.tick(reconcile=True)
+        self.assertEqual(self.store.read()['sessions']['x']['status'],'queued')
 
     def enqueue(self, cid='x', **fields):
         card = dict(id=cid, title='Synthetic work', **fields)

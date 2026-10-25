@@ -171,7 +171,7 @@ class FreshReview(unittest.TestCase):
    s['cards'][0]['updated_at']=r.iso(NOW+n)
    self.assertNotIn('dispatch',[x['kind'] for x in r.plan(s,now=NOW+n)['actions']])
  def test_dispatch_generation_uses_first_enqueue_not_card_updated_at(self):
-  s=snapshot();s['sessions']={'c-one':dict(status='idle',first_enqueued_at=NOW-200,queue=[])}
+  s=snapshot();s['dispatch_policy']=dict(allow_card_ids=['c-one'],hold_card_ids=[]);s['sessions']={'c-one':dict(status='idle',first_enqueued_at=NOW-200,queue=[])}
   a=next(x['id'] for x in r.plan(s,now=NOW)['actions'] if x['kind']=='dispatch')
   s['cards'][0]['updated_at']=r.iso(NOW)
   b=next(x['id'] for x in r.plan(s,now=NOW)['actions'] if x['kind']=='dispatch')

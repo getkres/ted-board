@@ -93,6 +93,38 @@ class RuntimeTests(unittest.TestCase):
               'active_claude_managed','active_turn','active_veto_revision'):
    self.assertNotIn(key,s,key)
 
+ def test_stop_discards_automatic_queue_but_retains_human_requests(self):
+  s={'turn':'t','lease_token':'f','stop_requested':True,'queue':[{'id':'human'},{'id':'auto','automatic':True},{'id':'reconciler-retry-old'}]}
+  a={'id':'stop','kind':'stop_worker','payload':{'expected_turn':'t','expected_lease_token':'f'}}
+  self.assertTrue(d.recover_session(s,a,lambda s:True))
+  self.assertEqual(s['queue'],[{'id':'human'}])
+ def test_operator_can_settle_a_dead_lettered_review_without_restarting_it(self):
+  data={'sessions':{'c':dict(status='dead_letter',pid=None,reviewing='a',turn='t',lease_token='f',review_context='private',active_turn={'kind':'review'},claude_lane='design')},'approvals':{'a':dict(id='a',card_id='c',status='reviewing')}}
+  d.settle_review(data,'c','a','failed','verified that the action did not complete')
+  self.assertEqual(data['approvals']['a']['status'],'failed');self.assertTrue(data['approvals']['a']['sync_status'])
+  self.assertNotIn('reviewing',data['sessions']['c']);self.assertNotIn('active_turn',data['sessions']['c'])
+  self.assertEqual(data['sessions']['c']['claude_lane'],'design');self.assertEqual(data['sessions']['c']['status'],'dead_letter')
+  with self.assertRaises(ValueError):d.settle_review(data,'c','a','done','stale duplicate request')
+ def test_review_settlement_cli_refuses_a_live_reviewer_without_mutating_metadata(self):
+  data={'sessions':{'c':dict(status='dead_letter',pid=None,reviewing='a',turn='t',lease_token='f',lease=dict(pid=123,identity='matching'))},'approvals':{'a':dict(id='a',card_id='c',status='reviewing')}}
+  @contextlib.contextmanager
+  def locked():yield data
+  store=types.SimpleNamespace(locked=locked)
+  with tempfile.TemporaryDirectory() as temp,patch.dict(d.os.environ,{'TED_RECONCILER_ENABLED':'true'}),patch.object(d.socket,'gethostname',return_value='test-mini'),patch.object(d.importlib,'import_module',return_value=types.SimpleNamespace(Store=lambda root:store)),patch.object(d,'confirmed_stop',return_value=False):
+   Path(temp,'jobs').mkdir()
+   with self.assertRaisesRegex(RuntimeError,'process absence'):
+    d.main(['--apply','--root',temp,'--settle-review','c','--approval-id','a','--review-outcome','failed','--reason','verified not applied'])
+  self.assertEqual(data['approvals']['a']['status'],'reviewing');self.assertEqual(data['sessions']['c']['reviewing'],'a')
+ def test_review_settlement_cli_records_only_the_verified_local_outcome(self):
+  data={'sessions':{'c':dict(status='dead_letter',pid=None,reviewing='a',turn='t',lease_token='f',lease=dict(pid=123,identity='matching'))},'approvals':{'a':dict(id='a',card_id='c',status='reviewing')}}
+  @contextlib.contextmanager
+  def locked():yield data
+  store=types.SimpleNamespace(locked=locked)
+  with tempfile.TemporaryDirectory() as temp,patch.dict(d.os.environ,{'TED_RECONCILER_ENABLED':'true'}),patch.object(d.socket,'gethostname',return_value='test-mini'),patch.object(d.importlib,'import_module',return_value=types.SimpleNamespace(Store=lambda root:store)) as imports,patch.object(d,'confirmed_stop',return_value=True) as stopped:
+   Path(temp,'jobs').mkdir()
+   self.assertEqual(d.main(['--apply','--root',temp,'--settle-review','c','--approval-id','a','--review-outcome','done','--reason','verified the exact approved effect']),0)
+  self.assertEqual(imports.call_count,1);self.assertEqual(stopped.call_args.kwargs,{'allow_kill':False})
+  self.assertEqual(data['approvals']['a']['status'],'done');self.assertNotIn('reviewing',data['sessions']['c'])
  def test_renewed_current_lease_invalidates_an_old_recovery_proposal(self):
   import time
   s={'turn':'t','lease_token':'f','status':'running','lease_expires_at':time.time()+150}

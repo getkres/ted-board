@@ -93,7 +93,7 @@ class LegacyIsolation(unittest.TestCase):
                 module=self.sessions(ROOT/'sessions.py','invalid_config_legacy')
             store=module.Store(Path(temp)/'jobs')
             store.enqueue(dict(id='fixture',title='fixture'),'work','receipt',engine='codex')
-            with patch.object(module.os,'cpu_count',return_value=8),patch.object(module.os,'getloadavg',return_value=(17,0,0)),patch.object(module.subprocess,'Popen',side_effect=AssertionError('load guard must prevent a launch')):
+            with patch.object(module.os,'cpu_count',return_value=8),patch.object(module.os,'getloadavg',return_value=(25,0,0)),patch.object(module.subprocess,'Popen',side_effect=AssertionError('load guard must prevent a launch')):
                 store.tick()
             self.assertEqual(store.read()['sessions']['fixture']['status'],'queued')
 

@@ -1,9 +1,9 @@
 {
   "sessions.py": {
     "patch": "reconciler-sessions.patch",
-    "candidate_sha256": "1a4ae7d19368a86c5f7f7779af8399a13bcbfc8bd5af9ed608da4a58b47ff98d",
+    "candidate_sha256": "fe0616401827c0b092d58206f4a36f718381321c555bf8163cb4b432df587193",
     "source": "sessions.py",
-    "baseline_sha256": "28ebba740b41f52d046596e33db02ecb89afd039ef44199163cead4485ce01e9"
+    "baseline_sha256": "f1a7aaccd26e162b255049915a9b9cf1749e5070d2ee98fca0cd6945a7f12d72"
   },
   "session_worker.py": {
     "patch": "reconciler-session_worker.patch",
@@ -55,9 +55,9 @@
   },
   "reconciler_sessions.py": {
     "patch": "reconciler-managed-sessions.patch",
-    "candidate_sha256": "7edc3e00bbd212500afbdc5d5933688ae9d3cb47b8f52281f4d7ab6c4ab479d8",
+    "candidate_sha256": "a0fa26c1e44125a5544802f73e8d9c40562e6632ad2dbcf66e93d7a654eb1f8f",
     "source": "sessions.py",
-    "baseline_sha256": "28ebba740b41f52d046596e33db02ecb89afd039ef44199163cead4485ce01e9"
+    "baseline_sha256": "f1a7aaccd26e162b255049915a9b9cf1749e5070d2ee98fca0cd6945a7f12d72"
   },
   "reconciler_worker.py": {
     "patch": "reconciler-managed-worker.patch",
@@ -91,11 +91,11 @@
   },
   "reconciler.py": {
     "patch": "reconciler-core.patch",
-    "candidate_sha256": "53b7cc39f933aeba15617704f72d002b73d4ef735b7c17b671c21344799848af"
+    "candidate_sha256": "4f51c3da0b1f67143fde65e906d4c64eb4fe2365f4fda53811feb9b4ad19ce30"
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
-    "candidate_sha256": "5b3a938cee0ab0f63e414694ecb4d9256f35470ae0fcf57e38e4cc2794496f56"
+    "candidate_sha256": "2e9306dc65fbeb319b70098659673a71d1eb294cde59e841057a038ae52e6dc9"
   },
   "runner_admission.py": {
     "patch": "reconciler-admission.patch",
@@ -119,7 +119,7 @@
   },
   "reconciler_gate.py": {
     "patch": "reconciler-gate.patch",
-    "candidate_sha256": "85dfd604dd34fb0b7148324763d08f4f7ef77a08fc6b88c02b082b752ca93424"
+    "candidate_sha256": "6758232cf611ac0d56e53e125551861c5a07d93400ec074c18fb7be269f0173b"
   },
   "reconciler_services.py": {
     "patch": "reconciler-services.patch",

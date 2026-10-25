@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_gate.py
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,38 @@
 +"""Safe opt-in boundary. Invalid configuration never crashes a legacy caller."""
 +import json
 +import os
@@ -27,3 +27,15 @@
 +        if strict:
 +            raise RuntimeError('invalid reconciler configuration blocks apply') from None
 +        return False
++
++
++def read_dispatch_policy(config_path):
++    from reconciler import dispatch_policy_valid
++    path=Path(config_path)
++    try:
++        if path.is_symlink():return None
++        value=json.loads(path.read_text()) if path.exists() else {}
++        policy=value.get('dispatch',{}) if isinstance(value,dict) else None
++        if not dispatch_policy_valid(policy):return None
++        return {key:list(policy.get(key,[])) for key in ('allow_card_ids','hold_card_ids')}
++    except (OSError,ValueError,TypeError):return None
