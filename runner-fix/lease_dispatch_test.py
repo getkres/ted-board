@@ -122,6 +122,19 @@ class LeaseDispatch(unittest.TestCase):
                 return dict(jobs=[dict(id='card-x',card_id='x',status=status)]) if kw.get('resource') else dict(cards=[dict(id='x',project='Fixture',section='up_next',live_state='blocked')])
             with self.subTest(own_status=status),patch.object(sessions,'call',side_effect=own_active):self.assertEqual(self.store._initial_dispatch_permissions(),set())
 
+    def test_managed_admission_does_not_read_or_overwrite_legacy_capacity(self):
+        import runner_admission
+        legacy=Path(runner_admission.__file__).with_name('capacity.json')
+        old=legacy.read_bytes() if legacy.exists() else None
+        try:
+            legacy.write_text(json.dumps(dict(total_workers=64,load_per_cpu=3,engines=dict(claude=4,sonnet=16))))
+            config=runner_admission.load_capacity()
+            self.assertEqual(config['load_per_cpu'],2);self.assertEqual(config['engines'],dict(claude=2,sonnet=8))
+            self.assertEqual(json.loads(legacy.read_text())['load_per_cpu'],3)
+        finally:
+            if old is None:legacy.unlink()
+            else:legacy.write_bytes(old)
+
     def test_default_managed_enqueue_preserves_claude_engine(self):
         self.store.enqueue(dict(id='default',title='Fixture'),'work','default')
         self.assertEqual(self.store.read()['sessions']['default']['engine'],'claude')

@@ -59,6 +59,18 @@ class PlannerTests(unittest.TestCase):
    elif 'approval' in case:s['approvals']=[dict(id='a',card_id='c-one',status='future_active' if case.startswith('unknown') else 'pending')]
    else:s['vetoes']=[dict(id='v',card_id='c-one',status='future_active' if case.startswith('unknown') else 'uncertain')]
    self.assertNotIn('close_verified',[a['kind'] for a in r.plan(s,now=NOW)['actions']],case)
+ def test_real_card_pending_control_keys_hold_route_and_close(self):
+  cases=[{key:True} for key in ('pending_approval','approval_pending','pending_decision','veto_pending')]
+  cases += [dict(pending_approval_kinds=['db']),dict(approval=dict(status='pending')),dict(veto=dict(status='pending')),dict(approval=dict(status='unknown')),dict(veto=dict(status='unknown'))]
+  cases += [dict(approval=dict(status='done')),dict(veto=dict(status='sent'))]
+  for details in cases:
+   terminal=details in (dict(approval=dict(status='done')),dict(veto=dict(status='sent')))
+   c=card(section='needs_you',revision=7,messages=[],**details)
+   self.assertEqual('route_ted' in [a['kind'] for a in r.plan(snapshot([c]),now=NOW)['actions']],terminal,details)
+   c['section']='up_next';s=snapshot([c]);url='https://github.com/example/test/pull/1'
+   s['workflows']={'c-one':dict(pr_url=url,deployment=dict(verified=True,deployed_at=r.iso(NOW-5),revision='sha'),verification=dict(ok=True,verified_at=r.iso(NOW-1),revision='sha',card_revision=7))}
+   s['prs']={url:dict(state='MERGED',merged_at=r.iso(NOW-10),merge_revision='sha')}
+   self.assertEqual('close_verified' in [a['kind'] for a in r.plan(s,now=NOW)['actions']],terminal,details)
  def test_missing_owner_and_due_are_visible_and_stable(self):
   s=snapshot();a=r.plan(s,now=NOW);b=r.plan(s,now=NOW+120)
   self.assertEqual(a['items'][0]['owner'],'ted')

@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler.py
-@@ -0,0 +1,284 @@
+@@ -0,0 +1,288 @@
 +"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
 +import hashlib
 +import json
@@ -37,6 +37,10 @@
 +def protected_decision(snapshot,card):
 + cid=card.get('id')
 + if card.get('live_state')=='waiting_on_you':return True
++ if any(card.get(key) for key in ('pending_approval','approval_pending','pending_decision','veto_pending','pending_approval_kinds')):return True
++ for key,terminal in (('approval',{'done','failed','rejected','superseded'}),('veto',{'stopped','invalidated','sent','failed'})):
++  value=card.get(key)
++  if isinstance(value,dict) and value.get('status') not in terminal:return True
 + if card.get('answer') is None and (card.get('options') or card.get('steps')):return True
 + if card.get('veto_status') not in (None,'stopped','invalidated','sent','failed'):return True
 + for resource,terminal in (('approvals',{'done','failed','rejected','superseded'}),('vetoes',{'stopped','invalidated','sent','failed'})):

@@ -49,7 +49,7 @@ def main():
   target.chmod(0o600)
   if sha(target)!=row['candidate_sha256']:raise RuntimeError('candidate checksum mismatch for '+name)
  # Unchanged private adapters and backend siblings support offline integration tests.
- for name in ('board_client.py','sync.py','mockup_client.py','board_reply.py','dispatch_pause.py'):
+ for name in ('board_client.py','sync.py','mockup_client.py','board_reply.py','dispatch_pause.py','capacity.json'):
   source=a.baseline/name
   if source.is_file():shutil.copyfile(source,a.output/name);(a.output/name).chmod(0o600)
  for source in (a.baseline/'supabase/functions/ted-board').iterdir():

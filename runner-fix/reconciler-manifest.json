@@ -91,7 +91,7 @@
   },
   "reconciler.py": {
     "patch": "reconciler-core.patch",
-    "candidate_sha256": "9a5b1696c762cec0b0d07587a03eac2524174b90cb2757062dac698b4eeb71a5"
+    "candidate_sha256": "bc73debb3ed09a65f2a0b6aa6662396597e6d845a55597b4da421aa1590f2fdd"
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
@@ -99,7 +99,7 @@
   },
   "runner_admission.py": {
     "patch": "reconciler-admission.patch",
-    "candidate_sha256": "048eb3398a1370071b108e76aa28dd86626a2091f7d2b0fe7be9c48918f89b7f"
+    "candidate_sha256": "cad91cf35d24dc0fe6a9c0ef3c26932ab0f0f10bcbf60e8a30a78b000b1823ee"
   },
   "inbox_policy.py": {
     "patch": "reconciler-inbox-policy.patch",
@@ -112,10 +112,6 @@
   "mockup_autoarchive.py": {
     "patch": "mockup-autoarchive.patch",
     "candidate_sha256": "269eaf03f753c488030762ab350aaff461260796eed2aa0561a216caa8a1ad99"
-  },
-  "capacity.json": {
-    "patch": "reconciler-capacity.patch",
-    "candidate_sha256": "1c1b235d7bea1175c71759ac7a7d82c80ede58c949ea53114bfedb49e6506aa6"
   },
   "reconciler_gate.py": {
     "patch": "reconciler-gate.patch",
@@ -132,5 +128,9 @@
   "board_card_snapshot.py": {
     "patch": "reconciler-board-card-snapshot.patch",
     "candidate_sha256": "8299b42814f227087a0a436ea75854b479e1870ca4bead9daceb7c49e095d19c"
+  },
+  "reconciler-capacity.json": {
+    "patch": "reconciler-capacity.patch",
+    "candidate_sha256": "1c1b235d7bea1175c71759ac7a7d82c80ede58c949ea53114bfedb49e6506aa6"
   }
 }

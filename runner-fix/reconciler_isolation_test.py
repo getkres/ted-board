@@ -89,6 +89,22 @@ class LegacyIsolation(unittest.TestCase):
                         store.tick()
                     self.assertEqual(sum(s['status'] == 'running' for s in store.read()['sessions'].values()), expected)
 
+    def test_enabled_legacy_lanes_keep_live_capacity_while_managed_is_installed(self):
+        legacy=json.loads((ROOT/'capacity.json').read_text())
+        self.assertEqual(legacy['load_per_cpu'],3);self.assertEqual(legacy['engines'],dict(claude=4,sonnet=16))
+        for path in (BASE/'sessions.py',ROOT/'sessions.py'):
+            module=self.sessions(path,'lane_caps_'+path.parent.name)
+            with tempfile.TemporaryDirectory() as temp:
+                store=module.Store(temp)
+                for engine,count in (('claude',5),('sonnet',17)):
+                    for n in range(count):store.enqueue(dict(id=engine+str(n),title='Fixture'),'work',engine+str(n),engine=engine)
+                def prepare(session,*args):session.update(active_claude_lane='design',active_claude_managed=True)
+                layout=dict(enabled=True,account2_ready=True,account3_ready=False)
+                with patch.dict(os.environ,{'TED_CLAUDE_CAPACITY_CONFIG':str(ROOT/'capacity.json')}),patch.object(module.lanes,'topology',return_value=layout),patch.object(module.lanes,'prepare',side_effect=prepare),patch.object(module.os,'cpu_count',return_value=8),patch.object(module.os,'getloadavg',return_value=(20,0,0)),patch.object(module,'identity',return_value='fixture'),patch.object(module.subprocess,'Popen',return_value=types.SimpleNamespace(pid=98765)):
+                    store.tick()
+                running=[v for v in store.read()['sessions'].values() if v['status']=='running']
+                self.assertEqual(sum(v['engine']=='claude' for v in running),4);self.assertEqual(sum(v['engine']=='sonnet' for v in running),16)
+
     def test_flag_off_load_guard_is_unchanged_and_bad_config_does_not_activate(self):
         import reconciler_gate
         with tempfile.TemporaryDirectory() as temp:

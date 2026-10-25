@@ -1,5 +1,5 @@
 --- /dev/null
-+++ capacity.json
++++ reconciler-capacity.json
 @@ -0,0 +1,15 @@
 +{
 +  "total_workers": 64,

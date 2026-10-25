@@ -16,7 +16,7 @@
 +from reconciler_gate import reconciler_enabled
 +
 +
-+CAPACITY_PATH = Path(__file__).resolve().parent / 'capacity.json'
++CAPACITY_PATH = Path(__file__).resolve().parent / 'reconciler-capacity.json'
 +
 +
 +def load_capacity(path=None):
