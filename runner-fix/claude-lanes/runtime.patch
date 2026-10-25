@@ -57,7 +57,7 @@
 +def job_type(card, explicit=None):
 +    value = explicit or card.get('job_type')
 +    if value is not None:
-+        if value not in JOB_TYPES:
++        if not isinstance(value, str) or value not in JOB_TYPES:
 +            raise ValueError('Invalid Claude job type')
 +        return value
 +    # Existing callers have titles, but do not all have structured job metadata.
@@ -83,7 +83,7 @@
 +            raise ValueError()
 +        if not number(value['load_per_cpu']) or value['load_per_cpu'] <= 0:
 +            raise ValueError()
-+        if set(value['engines']) != {'claude', 'sonnet'} or any(type(v) is not int or v < 1 for v in value['engines'].values()):
++        if not isinstance(value['engines'], dict) or set(value['engines']) != {'claude', 'sonnet'} or any(type(v) is not int or v < 1 for v in value['engines'].values()):
 +            raise ValueError()
 +        return value
 +    except (OSError, ValueError, KeyError, TypeError):
@@ -331,11 +331,14 @@
 +    return jobs
 --- /dev/null
 +++ b/capacity.json
-@@ -0,0 +1,5 @@
+@@ -0,0 +1,8 @@
 +{
 +  "total_workers": 64,
-+  "load_per_cpu": 2,
-+  "engines": {"claude": 4, "sonnet": 16}
++  "load_per_cpu": 3,
++  "engines": {
++    "claude": 4,
++    "sonnet": 16
++  }
 +}
 --- a/sessions.py
 +++ b/sessions.py
@@ -412,7 +415,7 @@
 +  try:layout['capacity']=lanes.capacity()
 +  except lanes.Unavailable as exc:
 +   layout['error']=str(exc)
-+   layout['capacity']=dict(total_workers=64,load_per_cpu=2,engines=dict(claude=0,sonnet=0))
++   layout['capacity']=dict(total_workers=64,load_per_cpu=3,engines=dict(claude=0,sonnet=0))
 +  return self._tick_lanes(layout)
 +
 + def _tick_legacy(self):

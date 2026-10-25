@@ -32,7 +32,7 @@ class LaneTests(unittest.TestCase):
         self.config = self.root / 'config.json'
         self.config.write_text('{"enabled": true}')
         self.capacity = self.root / 'capacity.json'
-        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=2, engines=dict(claude=4, sonnet=16))))
+        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=3, engines=dict(claude=4, sonnet=16))))
         self.store = sessions.Store(self.root / 'jobs')
         self.card = dict(id='x', title='Design mockups', body='Synthetic brief')
         self.spawns = []
@@ -431,7 +431,7 @@ class LaneTests(unittest.TestCase):
 
     def test_load_guard_prevents_new_jobs_even_with_account_two_active(self):
         self.fill('codex', 1); self.fill('claude', 1); self.fill('sonnet', 1)
-        with patch.object(sessions.os, 'getloadavg', return_value=(17, 0, 0)):
+        with patch.object(sessions.os, 'getloadavg', return_value=(25, 0, 0)):
             self.store.tick()
         self.assertEqual(self.spawns, [])
 
@@ -622,7 +622,7 @@ class LaneTests(unittest.TestCase):
         self.assertFalse(any(key.startswith('ANTHROPIC_') for key in self.spawns[0][1]))
 
     def test_active_cap_comes_from_capacity_json(self):
-        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=2, engines=dict(claude=1, sonnet=2))))
+        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=3, engines=dict(claude=1, sonnet=2))))
         self.fill('claude', 3); self.fill('sonnet', 4); self.store.tick()
         self.assertEqual(sum(inp['session']['engine'] == 'claude' for inp, _ in self.spawns), 1)
         self.assertEqual(sum(inp['session']['engine'] == 'sonnet' for inp, _ in self.spawns), 2)
@@ -634,6 +634,16 @@ class LaneTests(unittest.TestCase):
         except claude_lanes.Unavailable: self.fail('invalid capacity must hold managed work without crashing the tick')
         self.assertEqual(self.spawns, [])
         self.assertEqual(self.state()['status'], 'queued')
+
+    def test_capacity_engine_array_is_held_without_crashing(self):
+        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=3, engines=['claude', 'sonnet'])))
+        self.enqueue()
+        try: self.store.tick()
+        except Exception: self.fail('malformed engine capacities must hold launches without crashing')
+        self.assertEqual(self.spawns, [])
+
+    def test_unhashable_job_type_is_a_validation_error(self):
+        with self.assertRaises(ValueError): self.enqueue(job_type={'unexpected': True})
 
     def test_managed_failure_retains_current_failure_routing(self):
         self.enqueue(); self.store.tick()
