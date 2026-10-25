@@ -12,4 +12,4 @@ for name in ('reconciler-gate.patch','reconciler-core.patch','reconciler-runtime
  subprocess.run(['patch','--batch','--fuzz=0','-s','-p0','-i',str(HERE/name)],cwd=SOURCE,check=True,capture_output=True)
 sys.path.insert(0,str(SOURCE))
 
-shutil.copyfile(HERE/'capacity.json',SOURCE/'reconciler-capacity.json')
+shutil.copyfile(HERE/'reconciler-capacity.json',SOURCE/'reconciler-capacity.json')

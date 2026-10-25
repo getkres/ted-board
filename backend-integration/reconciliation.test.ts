@@ -206,3 +206,22 @@ test('flag-off erased assertions preserve malformed runner-failure responses',{s
   }
  }finally{if(prior===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=prior;}
 });
+
+test('managed missing approval returns Gone while conflicts and other failures retain status',{skip:!handlerSource},async()=>{
+ const prior=process.env.TED_RECONCILER_ENABLED;
+ try {
+  const {pathToFileURL}=await import('node:url');const {createHandler}=await import(pathToFileURL(handlerSource!).href);
+  for(const enabled of [true,false]){
+   process.env.TED_RECONCILER_ENABLED=String(enabled);
+   for(const [code,expected] of [['P0002',enabled?404:500],['22023',409],['XX000',500],[null,200]] as const){
+    const calls:unknown[]=[];
+    const db={rpc:async(name:string,args:unknown)=>{calls.push([name,args]);return {data:code?null:{ok:true},error:code?{code,message:'private diagnostic'}:null}}};
+    const handler=createHandler(db,'page','worker',{enabled:false,message:'fixture'});
+    const response=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({action:'approval_result',key:'worker',approval_id:'test-missing-approval',status:'superseded',reason:''})}));
+    assert.equal(response.status,expected);const body=await response.json();assert.equal(JSON.stringify(body).includes('private diagnostic'),false);
+    if(!code)assert.deepEqual(body,{ok:true});
+    assert.deepEqual(calls,[['ted_board_approval_result_with_reason',{p_id:'test-missing-approval',p_status:'superseded',p_reason:''}]]);
+   }
+  }
+ }finally{if(prior===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=prior;}
+});

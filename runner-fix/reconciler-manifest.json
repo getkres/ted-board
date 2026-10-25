@@ -85,7 +85,7 @@
   },
   "reconciler_handler.ts": {
     "patch": "reconciler-managed-handler.patch",
-    "candidate_sha256": "ded91c87225efcaf5549c7eb9cc2d469f6551349c044fbdb387d727b134a7baf",
+    "candidate_sha256": "3a89b2843e6ac60474d210e757a56e5d18a52a6bfa8f56e4e26ed7f6b11d807b",
     "source": "handler.ts",
     "baseline_sha256": "85eff3b0d09c7fc41af22bf5de1210662035931b7bb01f61a26c02de551da867"
   },
@@ -95,7 +95,7 @@
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
-    "candidate_sha256": "637126d46a8a17ae23bf22c346a973cae46972a01075a3c7ed737c039cb04929"
+    "candidate_sha256": "2862f1dd07d728d3c9e853e20cdc79258d0bd6269e911badb23f956b43a6bcf2"
   },
   "runner_admission.py": {
     "patch": "reconciler-admission.patch",

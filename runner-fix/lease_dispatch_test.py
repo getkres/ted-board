@@ -740,7 +740,7 @@ class AdmissionPressure(unittest.TestCase):
         helper = self.helper()
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'capacity.json'
-            config = json.loads((HERE / 'capacity.json').read_text())
+            config = json.loads((HERE / 'reconciler-capacity.json').read_text())
             config['total_workers'] = 7
             config['engines']['claude'] = 1
             config['account2_engines']['claude'] = 3

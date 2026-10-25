@@ -34,7 +34,7 @@ python3 scripts/check_data_api_grants.py --root "$TED_BOARD_ROOT"
 python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 ```
 
-The current installed legacy handler has two pre-existing TypeScript errors at the runner-failure `Object.hasOwn` calls, where parsed values have type unknown. The wrapper preserves those exact source bytes when the support import and route are removed, so its legacy branch retains that upstream typing limitation. The isolated managed handler adds explicit string guards and passes `deno check`; the wrapper is exercised by the offline `--no-check` tests. Do not claim the inherited legacy wrapper passes type checking.
+The unchanged live rollback handler has two inherited Object.hasOwn unknown-key errors. The deployed wrapper adds exactly two marked PropertyKey assertions, erased at runtime, and the full actual index.ts startup type-checks cleanly. Removing exactly those assertions plus support and route seams restores the exact rollback bytes. The managed handler retains its explicit string guards, and malformed-input response comparison proves flag-off behavior is unchanged.
 
 `legacy-baseline/` and `backend/legacy-handler-baseline.ts` are private test fixtures in the candidate. Do not deploy those fixtures. A missing RECONCILER_CANDIDATE fails the private CI suite. Public CI explicitly runs only the planner, runtime, review regressions, and packaging tests that it can reconstruct without installed private sources.
 
@@ -66,7 +66,7 @@ The backend handler redirect has its own opt-in environment flag, `TED_RECONCILE
 
 ## Managed safety behavior
 
-Capacity.json applies only to the managed path. It retains 64 total, load above twice CPU count as the stop threshold, separate base Opus 2 and Sonnet 8 worker limits, two urgent reserved slots, and the memory guard. Reviews are exempt from model worker caps, and they still consume global capacity. Enabled, verified account 2 selects the configured 4/16 worker limits. Missing capacity blocks managed admission and leaves legacy behavior intact.
+Reconciler-capacity.json applies only to the managed path; legacy capacity.json stays unchanged. It retains 64 total, load above twice CPU count as the stop threshold, separate base Opus 2 and Sonnet 8 worker limits, two urgent reserved slots, and the memory guard. Reviews are exempt from model worker caps, and they still consume global capacity. Enabled, verified account 2 selects the configured 4/16 worker limits. Missing capacity blocks managed admission and leaves legacy behavior intact.
 
 A pass attempts at most 3 retries, 5 Ted routes or recovery holds, 5 card creations, 5 delivery advances or closures, 10 dispatch proposals, and 10 escalations, oldest first. Managed starts are also limited to 10 total and 3 retries. Initial escalation proposals become one deterministic ranked digest with atomic covered receipts. Partial card feeds cannot mark that initial digest complete. Limited or failed work retains no success receipt.
 

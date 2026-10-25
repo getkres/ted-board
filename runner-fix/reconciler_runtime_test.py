@@ -46,6 +46,21 @@ class RuntimeTests(unittest.TestCase):
     self.assertEqual(session['status'],'dead_letter');self.assertEqual(journal.completed(),{'dlq'})
     self.assertTrue(d.execute_recorded(action,journal,lambda a: (_ for _ in ()).throw(AssertionError('duplicate recovery'))))
    stopped.assert_called_once();store._out.assert_called_once()
+ def test_main_sampling_preserves_observed_ready_result_before_planning(self):
+  from unittest.mock import Mock
+  now=1800000000
+  original=dict(status='running',turn='t',lease_token='f',lease_expires_at=now-1,pid=123,identity='fixture',result_ready=True)
+  snapshot=dict(cards=[dict(id='c',title='Fixture',section='ted_doing',created_at='2026-10-23T00:00:00Z',updated_at='2026-10-23T00:00:00Z')],sessions={'c':original},coverage={'cards':'ok'},approvals=[],mockups=[],prs={},workflows={})
+  store=types.SimpleNamespace(controls=Mock());board=types.SimpleNamespace(call=Mock(return_value=dict(commands=[])))
+  health=dict(original,pid_dead=True,activity_quiet=True,missed_renewals=6);health.pop('result_ready')
+  def planned(observed,*args):
+   self.assertTrue(observed['sessions']['c'].get('result_ready'))
+   self.assertEqual(observed['sessions']['c']['missed_renewals'],6)
+   self.assertNotIn('retry',[a['kind'] for a in d.plan(observed,now=now)['actions']])
+   return dict(publication_skipped=True,items=[],actions=[],coverage_defects=[],failed=[])
+  def imported(name):return types.SimpleNamespace(Store=lambda root:store) if name=='reconciler_sessions' else board
+  with tempfile.TemporaryDirectory() as temp,patch.dict(d.os.environ,{'TED_RECONCILER_ENABLED':'true'}),patch.object(d.socket,'gethostname',return_value='test-mini'),patch.object(d.importlib,'import_module',side_effect=imported),patch.object(d,'observe',return_value=snapshot),patch.object(d,'sample_health',return_value={'c':health}),patch.object(d,'run',side_effect=planned):
+   Path(temp,'jobs').mkdir();self.assertEqual(d.main(['--apply','--root',temp]),0)
  def test_dry_run_never_constructs_effect_store_or_executes_actions(self):
   s={'cards':[],'sessions':{},'approvals':[],'mockups':[],'coverage':{}}
   with tempfile.TemporaryDirectory() as tmp,patch.object(d,'execute',side_effect=AssertionError('effect called')):

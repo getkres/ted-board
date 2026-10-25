@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,512 @@
+@@ -0,0 +1,514 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -489,7 +489,9 @@
 +  if apply:
 +   require_leased_cutover(snapshot)
 +   if snapshot['coverage'].get('cards')=='ok':store.controls(board.call('control').get('commands',[]))
-+   snapshot['sessions'].update(sample_health(store,time.time()))
++   for cid,health in sample_health(store,time.time()).items():
++    if cid in snapshot['sessions']:
++     snapshot['sessions'][cid].update({key:health[key] for key in ('pid_dead','activity_quiet','missed_renewals','health_activity_mtime','health_lease','health_observed_at') if key in health})
 +  if a.redrive:
 +   if not apply:p.error('redrive requires apply and Ted repair reason')
 +   with store.locked() as data:redrive(data['sessions'][a.redrive],a.reason)
