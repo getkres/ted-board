@@ -247,14 +247,32 @@ class Policy(unittest.TestCase):
                                 batch='Home v1' if link == 'batch' else None)
                     self.assertEqual(self.candidates(rows, [card]), [], (project, link, verdict))
 
-    def test_terminal_authoritative_links_match_across_projects(self):
-        for link in ('explicit', 'title'):
-            for section in ('done', 'killed'):
-                card = dict(id='build', project='Bookish', section=section,
-                            title='build approved: Home v1' if link == 'title' else 'Other work',
-                            batch='Home v1' if link == 'batch' else None)
-                result = self.candidates([frame(card_id='build' if link == 'explicit' else None)], [card])
-                self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+    def test_terminal_explicit_links_match_across_projects(self):
+        for section in ('done', 'killed'):
+            card = dict(id='build', project='Bookish', section=section, title='Other work')
+            result = self.candidates([frame(card_id='build')], [card])
+            self.assertEqual(result[0]['reason'], 'linked_card_' + section)
+
+    def test_terminal_title_completion_is_scoped_to_the_batch_project(self):
+        for section in ('done', 'killed'):
+            for verdict in (None, 'needs_work'):
+                with self.subTest(section=section, verdict=verdict):
+                    cards = [dict(id='build-a', project='ProjectA', section=section,
+                                  title='build approved: Shared v1')]
+                    rows = [frame('a', batch='Shared v1', project='ProjectA', verdict=verdict),
+                            frame('b', batch='Shared v1', project='ProjectB', verdict=verdict)]
+                    result = self.candidates(rows, cards)
+                    self.assertEqual([(r['project'], r['batch'], r['reason']) for r in result],
+                                     [('ProjectA', 'Shared v1', 'linked_card_' + section)])
+
+    def test_missing_explicit_card_holds_reviewed_and_stale_batches(self):
+        cards = [unrelated_card()]
+        reviewed = [frame(verdict='approved', card_id='missing-card')]
+        stale = [frame(card_id='missing-card'),
+                 frame('new', batch='Home v2', created_at=RECENT)]
+        for rows in (reviewed, stale):
+            with self.subTest(rows=rows):
+                self.assertEqual(self.candidates(rows, cards), [])
 
     def test_terminal_batch_metadata_alone_does_not_archive_unreviewed_frames(self):
         card = dict(id='build', project='Bookish', section='done', title='Other work', batch='Home v1')
