@@ -18,3 +18,5 @@ jobs:
           python-version: '3.12'
       - run: python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
       - run: python3 scripts/check_data_api_grants.py
+      - run: python3 runner-fix/legacy_dispatch_pause_test.py
+      - run: python3 runner-fix/legacy_pause_control_test.py

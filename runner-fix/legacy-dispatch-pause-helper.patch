@@ -1,0 +1,32 @@
+--- /dev/null
++++ dispatch_pause.py
+@@ -0,0 +1,29 @@
++"""A fail-closed admission marker shared by every legacy Store.tick caller."""
++import json
++from pathlib import Path
++import sys
++
++PAUSE_PATH=Path(__file__).resolve().parent/'jobs'/'dispatch-pause.json'
++
++def unique_object(pairs):
++ value={}
++ for key,item in pairs:
++  if key in value:raise ValueError('duplicate marker key')
++  value[key]=item
++ return value
++
++def paused(path=None):
++ path=Path(path) if path is not None else PAUSE_PATH
++ try:
++  if path.is_symlink():raise ValueError('symlink marker')
++  try:
++   with path.open('r') as stream:raw=stream.read(4097)
++   if len(raw)>4096:raise ValueError('oversized marker')
++   value=json.loads(raw,object_pairs_hook=unique_object)
++  except FileNotFoundError:return False
++  if not isinstance(value,dict) or set(value)!={'paused'} or type(value['paused']) is not bool:
++   raise ValueError('invalid marker')
++  return value['paused']
++ except Exception:
++  print('Invalid dispatch pause marker; new starts remain paused.',file=sys.stderr)
++  return True
