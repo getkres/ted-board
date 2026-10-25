@@ -233,7 +233,7 @@ class Policy(unittest.TestCase):
                      dict(id='x', project='Fictora', section='done', title='build approved: Home v10'),
                      dict(id='x', project='Fictora', section='done', title='Other', body='mockup ID: abc')):
             with self.subTest(card=card):
-                self.assertEqual(self.candidates([frame(card_id='missing')], [card]), [])
+                self.assertEqual(self.candidates([frame()], [card]), [])
 
     def test_authoritative_links_block_active_cards_regardless_of_project(self):
         for project in ('Fictora', 'Bookish'):
@@ -246,6 +246,18 @@ class Policy(unittest.TestCase):
                                 title='build approved: Home v1' if link == 'title' else 'Other work',
                                 batch='Home v1' if link == 'batch' else None)
                     self.assertEqual(self.candidates(rows, [card]), [], (project, link, verdict))
+
+    def test_active_cross_project_link_blocks_terminal_completion(self):
+        for link in ('title', 'batch'):
+            for completion in ('title', 'explicit'):
+                with self.subTest(link=link, completion=completion):
+                    cards = [dict(id='done', project='Fictora', section='done',
+                                  title='build approved: Home v1' if completion == 'title' else 'Build'),
+                             dict(id='active', project='Bookish', section='up_next',
+                                  title='build approved: Home v1' if link == 'title' else 'Other work',
+                                  batch='Home v1' if link == 'batch' else None)]
+                    rows = [frame(card_id='done' if completion == 'explicit' else None)]
+                    self.assertEqual(self.candidates(rows, cards), [])
 
     def test_terminal_explicit_links_match_across_projects(self):
         for section in ('done', 'killed'):
