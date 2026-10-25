@@ -1,6 +1,6 @@
 --- /dev/null
 +++ mockup_autoarchive.py
-@@ -0,0 +1,331 @@
+@@ -0,0 +1,338 @@
 +#!/usr/bin/env python3
 +"""Archive reviewed, completed, or stale superseded mockup batches on the mini.
 +
@@ -100,6 +100,9 @@
 +                for k in ('id', 'project', 'batch', 'title'))
 +                or row.get('status') not in ('open', 'picked', 'archived') or row['id'] in seen):
 +            raise ValueError('Invalid mockup snapshot')
++        if row.get('card_id') is not None and (not isinstance(row['card_id'], str)
++                or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}', row['card_id'])):
++            raise ValueError('Invalid mockup snapshot')
 +        seen.add(row['id'])
 +        groups.setdefault((row['project'], row['batch']), []).append(row)
 +    if any(not isinstance(card, dict) or any(not isinstance(card.get(k), str)
@@ -120,6 +123,8 @@
 +        decision = dict(project=project, batch=batch, ids=sorted(row['id'] for row in active),
 +                        total=len(rows), reviewable=len(reviewable), ignored=len(active)-len(reviewable))
 +        explicit = {row.get('card_id') for row in rows if isinstance(row.get('card_id'), str)}
++        if not explicit.issubset({card['id'] for card in cards}):
++            continue
 +        ids = {row['id'] for row in rows}
 +        linked = [card for card in cards if (
 +            card['id'] in explicit or card['title'] == 'build approved: ' + batch
@@ -130,14 +135,16 @@
 +                continue
 +            result.append(dict(decision, reason='all_reviewed'))
 +            continue
++        completion_links = [card for card in linked
++                            if card['id'] in explicit or card['project'] == project]
 +        whole_batch_link = any(card['id'] in explicit or card['title'] == 'build approved: ' + batch
-+                               for card in linked)
++                               for card in completion_links)
 +        every_frame_reviewed = bool(reviewable) and all(
 +            _verdict(row) in VERDICTS | {'needs_work'} for row in reviewable)
-+        if (linked and all(card['section'] in ('done', 'killed') for card in linked)
++        if (completion_links and all(card['section'] in ('done', 'killed') for card in linked)
 +                and (whole_batch_link or every_frame_reviewed)):
-+            reason = 'linked_card_killed' if any(card['section'] == 'killed' for card in linked) else 'linked_card_done'
-+            result.append(dict(decision, reason=reason, card_ids=sorted(card['id'] for card in linked)))
++            reason = 'linked_card_killed' if any(card['section'] == 'killed' for card in completion_links) else 'linked_card_done'
++            result.append(dict(decision, reason=reason, card_ids=sorted(card['id'] for card in completion_links)))
 +            continue
 +        if any(card['section'] not in ('done', 'killed') for card in linked):
 +            continue
