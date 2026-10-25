@@ -1,0 +1,11 @@
+--- a/sessions.py
++++ b/sessions.py
+@@ -557,3 +557,8 @@
+     if lanes.execution_engine(s)=='sonnet':jobs[-1]['worker_engine']='sonnet'
+   jobs+=lanes.summaries(data)
+   return jobs,[{k:a[k] for k in ('id','card_id','kind','summary','content','digest')} for a in data['approvals'].values() if a['status']=='pending']
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_sessions import Store, engine_command, lease_matches, matching_result
++# END RECONCILER ROUTE

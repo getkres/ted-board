@@ -1,0 +1,17 @@
+--- /dev/null
++++ runner_failure_templates.json
+@@ -0,0 +1,14 @@
++{
++  "author": "ted",
++  "failures": {
++    "timeout": "[ted-runner-failure:v1:timeout] worker run finished with a timeout; ted owns recovery from the job files.",
++    "no_result": "[ted-runner-failure:v1:no_result] worker run finished without a final result; ted owns recovery from the job files.",
++    "startup_failure": "[ted-runner-failure:v1:startup_failure] worker run finished with a startup failure; ted owns recovery from the job files.",
++    "crash": "[ted-runner-failure:v1:crash] worker run finished with a crash; ted owns recovery from the job files."
++  },
++  "recovery": {
++    "retry": " one retry is queued from the job files.",
++    "suppressed": " retry suppressed, newer message queued.",
++    "held": " no automatic retry remains."
++  }
++}

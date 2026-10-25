@@ -18,3 +18,16 @@ jobs:
           python-version: '3.12'
       - run: python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
       - run: python3 scripts/check_data_api_grants.py
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_runtime_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_packaging_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_review_test.py'
+      - run: python3 -m unittest discover -s runner-fix -p 'reconciler_dispatch_test.py'
+      - run: node --test tests/aging_wip_test.cjs
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno test --no-check --allow-read --allow-env backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts
+      - run: deno check backend-integration/reconciliation.ts backend-integration/snapshots.ts
+      - run: python3 runner-fix/legacy_dispatch_pause_test.py
+      - run: python3 runner-fix/legacy_pause_control_test.py

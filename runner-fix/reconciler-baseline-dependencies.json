@@ -1,0 +1,8 @@
+{
+  "inbox_policy.py": "a62725578312b4acdd3a8c0d25498680a6bff1125943042ff6a8492ccc05c410",
+  "runner_failure_templates.json": "e2bbfe7473e7768fb70a7944316bc2bbefa3e6d281bb46f2a2d8e30c39eddb07",
+  "supabase/functions/ted-board/runner_failure_templates.json": "e2bbfe7473e7768fb70a7944316bc2bbefa3e6d281bb46f2a2d8e30c39eddb07",
+  "dispatch_pause.py": "3ef811adbd133c31cba9104ebc077f90de129e0447c207b2537ddc98777c488f",
+  "claude_lanes.py": "fe51e51bcf5202920eac4d3907200a8746c1cf76b0ab1b376265830001b89c23",
+  "capacity.json": "d8e9fb320632827e0dc67e539c65190f2deb5517f6e9c9379a991bde7bc96f70"
+}

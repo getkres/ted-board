@@ -1,0 +1,127 @@
+--- /dev/null
++++ runner_admission.py
+@@ -0,0 +1,124 @@
++"""Resource admission for the mini. No provider throughput assumptions are used."""
++from datetime import datetime
++import json
++import math
++import os
++from pathlib import Path
++import re
++import subprocess
++
++GIB = 1024 ** 3
++
++
++from reconciler_gate import reconciler_enabled
++
++
++CAPACITY_PATH = Path(__file__).resolve().parent / 'reconciler-capacity.json'
++
++
++def load_capacity(path=None):
++    try:
++        path = Path(path) if path is not None else CAPACITY_PATH
++        if path.is_symlink():
++            raise ValueError()
++        value = json.loads(path.read_text())
++        for key in ('total_workers', 'urgent_reserved'):
++            if type(value[key]) is not int or value[key] < 0:
++                raise ValueError()
++        if value['total_workers'] < 1 or value['urgent_reserved'] > value['total_workers']:
++            raise ValueError()
++        for key in ('load_per_cpu', 'minimum_available_gib'):
++            if type(value[key]) not in (int, float) or not math.isfinite(value[key]) or value[key] <= 0:
++                raise ValueError()
++        for key in ('engines', 'account2_engines'):
++            if set(value[key]) != {'claude', 'sonnet'} or any(type(v) is not int or v < 1 for v in value[key].values()):
++                raise ValueError()
++        if type(value['review_exempt']) is not bool:
++            raise ValueError()
++        return value
++    except (OSError, ValueError, KeyError, TypeError):
++        raise RuntimeError('capacity config is missing or invalid') from None
++
++
++def stamp(value):
++    try:
++        result = float(value) if isinstance(value, (int, float)) else datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
++        return result if math.isfinite(result) else 0
++    except (ValueError, TypeError, OverflowError):
++        return 0
++
++
++def priority_key(session):
++    metadata = session.get('metadata') if isinstance(session.get('metadata'), dict) else {}
++    priority = session.get('priority_class', metadata.get('priority_class'))
++    explicit = session.get('explicit_ask', metadata.get('explicit_ask'))
++    rank = 0 if priority == 'urgent' or explicit is True else 1 if priority in ('launch', 'revenue', 'client_revenue') else 2
++    age = stamp(session.get('action_started_at') or session.get('created_at') or session.get('first_enqueued_at'))
++    return rank, age, str(session.get('card_id', session.get('id', '')))
++
++
++def available_memory():
++    """Conservative reclaimable bytes from vm_stat, excluding overlapping purgeable pages."""
++    try:
++        result = subprocess.run(['/usr/bin/vm_stat'], capture_output=True, text=True, timeout=5)
++        if result.returncode != 0:
++            return None
++        header = re.search(r'page size of (\d+) bytes', result.stdout)
++        if not header:
++            return None
++        pages = {}
++        for name in ('free', 'inactive', 'speculative'):
++            match = re.search(r'^Pages ' + name + r':\s+(\d+)\.', result.stdout, re.M)
++            if not match:
++                return None
++            pages[name] = int(match.group(1))
++        return sum(pages.values()) * int(header.group(1))
++    except (OSError, ValueError, subprocess.TimeoutExpired):
++        return None
++
++
++def admission_state():
++    try:
++        capacity = load_capacity()
++        cpus = os.cpu_count()
++        load = os.getloadavg()[0]
++        available = available_memory()
++        if not cpus or not math.isfinite(load) or load < 0 or available is None:
++            return dict(cap=0, reason='host observation unavailable')
++        if available < capacity['minimum_available_gib'] * GIB:
++            return dict(cap=0, reason='available memory below configured minimum')
++        if load > capacity['load_per_cpu'] * cpus:
++            return dict(cap=0, reason='host load above admission ceiling')
++        return dict(cap=capacity['total_workers'], reason='within host budget', capacity=capacity)
++    except (OSError, ValueError, RuntimeError):
++        return dict(cap=0, reason='host or capacity observation unavailable')
++
++
++def effective_engine(session, turn=None):
++    return 'claude' if session.get('reviewing') or (turn or {}).get('kind') == 'review' else session.get('engine', 'codex')
++
++
++def is_review(session, turn=None):
++    return bool(session.get('reviewing') or (turn or {}).get('kind') == 'review')
++
++
++def can_admit(session, turn, running, cap, capacity=None, account2_ready=False, reserve=True):
++    try:
++        capacity = capacity or load_capacity()
++    except RuntimeError:
++        return False
++    cap = min(cap, capacity['total_workers'])
++    if cap <= 0 or len(running) >= cap:
++        return False
++    urgent = priority_key(session)[0] == 0
++    ordinary = [s for s in running if priority_key(s)[0] != 0]
++    if reserve and not urgent and len(ordinary) >= max(0, cap - capacity['urgent_reserved']):
++        return False
++    if capacity['review_exempt'] and is_review(session, turn):
++        return True
++    engine = effective_engine(session, turn)
++    caps = capacity['account2_engines'] if account2_ready else capacity['engines']
++    if engine not in caps:
++        return True
++    peers = [s for s in running if effective_engine(s) == engine and not (capacity['review_exempt'] and is_review(s))]
++    return len(peers) < caps[engine]

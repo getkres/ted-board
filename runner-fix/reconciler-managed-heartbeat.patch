@@ -1,0 +1,20 @@
+--- a/jobs_heartbeat.py
++++ b/reconciler_heartbeat.py
+@@ -8,7 +8,7 @@
+ import sys
+ import time
+ from board_client import call
+-from sessions import Store, identity
++from reconciler_sessions import Store, identity
+ 
+ 
+ def untracked(jobs):
+@@ -40,7 +40,7 @@
+   from fresh_ted import dispatch
+   dispatch()
+  except Exception as exc:print('Fresh Ted dispatch failed: '+type(exc).__name__,file=sys.stderr)
+- store=Store();store.controls(call('control').get('commands',[]));store.tick();store.collect_approvals();store.sync_approval_status();store.flush()
++ store=Store()
+  jobs,approvals=store.snapshot();jobs+=untracked(jobs)
+  try:
+   from fresh_ted import health_job

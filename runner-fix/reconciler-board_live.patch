@@ -1,0 +1,14 @@
+--- a/board_live.py
++++ b/board_live.py
+@@ -204,6 +204,11 @@
+   if changed or failed:print(f'Live status: {changed} updated, {failed} deferred.',flush=True)
+   return 1 if failed else 0
+ 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_services import legacy_noop as main
++# END RECONCILER ROUTE
+ if __name__=='__main__':
+  try:sys.exit(main())
+  except Exception as exc:print('Live status reaper failed: '+type(exc).__name__,file=sys.stderr);sys.exit(1)

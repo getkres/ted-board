@@ -66,3 +66,7 @@ The board response should include `lines: [{id, name}]` in display order. IDs mu
 Older board feeds can supply `line` plus `line_name` or `project` on authenticated cards, pods, and roadmap payloads. Only identities with a recorded name are shown. No client directory ships in the static bundle. Metadata resets with the access key, and successful polls refresh it. While authentication is pending, no generic directory is invented. Only a rejected 401 or 403 board request enables the generic Line 1 through Line 10 fallback.
 
 The current board feed can return only `{cards, pod_pulse}`, with projects identified by their existing `project` labels. When no line directory is supplied, the frontend derives one line per distinct project label in pod-pulse order, reusing recorded line IDs when available or encoding stable route IDs from those labels. Cards map to these lines through `project`, and the original pod-pulse records remain available in Spaces and pod details. Roadmap renders these lines with missing lanes marked not logged. This fallback requires no backend changes or bundled business names.
+
+## Manual mockup archive
+
+The scoped page archive integration is documented in [MOCKUP-ARCHIVE-QA.md](../docs/MOCKUP-ARCHIVE-QA.md). Its private handler patch is a separate review artifact. The frontend remains disabled until the existing authenticated handler advertises `archive_enabled: true`. No database migration or grant change is required.

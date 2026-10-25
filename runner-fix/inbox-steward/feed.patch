@@ -1,0 +1,9 @@
+--- a/handler.ts
++++ b/handler.ts
+@@ -72 +72,5 @@
+-      const {data,error} = await db.from('ted_board_cards').select('*').order('sort').order('id').limit(500);
++      const section = new URL(req.url).searchParams.get('section');
++      if (section !== null && section !== 'needs_you') return json({error:'Invalid card section filter'},400);
++      let cardsQuery = db.from('ted_board_cards').select('*');
++      if (section === 'needs_you') cardsQuery = cardsQuery.eq('section','needs_you');
++      const {data,error} = await cardsQuery.order('sort').order('id').limit(500);

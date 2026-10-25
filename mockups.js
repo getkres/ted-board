@@ -92,7 +92,7 @@ class MockupsView {
     this.batchRequestIds.clear();
     this.close();
   }
-  async api(method, body) {
+  async api(method, body, transport = {}) {
     const controller = new AbortController(),
       timeout = setTimeout(() => controller.abort(), 30000);
     try {
@@ -101,6 +101,7 @@ class MockupsView {
           (method === "GET" ? "?key=" + encodeURIComponent(this.getKey()) : ""),
         {
           method,
+          ...(transport.keepalive ? {keepalive:true} : {}),
           headers: method === "GET" ? {} : { "Content-Type": "text/plain" },
           body: body
             ? JSON.stringify({ key: this.getKey(), ...body })
@@ -408,7 +409,7 @@ class MockupsView {
     return card;
   }
   verdict(m) {
-    return m.verdict || (m.status === "picked" ? "approved" : null);
+    return m.verdict || ((m.status === "picked" || m.status === "archived" && m.picked_at) ? "approved" : null);
   }
   batchKey(project, batch) {
     return JSON.stringify([project, batch]);

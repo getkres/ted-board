@@ -1,0 +1,32 @@
+--- sessions.py
++++ sessions.py
+@@ -12,6 +12,9 @@
+ import time
+ import uuid
+ import claude_lanes as lanes
++# LEGACY DISPATCH PAUSE IMPORT
++from dispatch_pause import paused as dispatch_paused
++# END LEGACY DISPATCH PAUSE IMPORT
+ from board_client import BoardConflict, BoardGone, call
+ from live_status import instructions, publish_live
+ from inbox_policy import failure_kind, failure_message, FAILURE_LINE, approval_line
+@@ -276,6 +279,9 @@
+     if s['queue']:s['status']='queued'
+     elif s['status']=='done' and veto_revision is None:
+      publish_live(s['card_id'],'blocked','ted review',section='up_next')
++   # LEGACY DISPATCH PAUSE GUARD
++   if dispatch_paused():return
++   # END LEGACY DISPATCH PAUSE GUARD
+    running=sum(s['status']=='running' for s in data['sessions'].values())
+    claude_running=sum(s['status']=='running' and s.get('engine')=='claude' for s in data['sessions'].values())
+    sonnet_running=sum(s['status']=='running' and s.get('engine')=='sonnet' for s in data['sessions'].values())
+@@ -392,6 +398,9 @@
+       s.pop('recovery_section',None)
+    for s in data['sessions'].values():
+     if s['status']=='running':self._settle_turn(data,s)
++   # LEGACY DISPATCH PAUSE GUARD
++   if dispatch_paused():return
++   # END LEGACY DISPATCH PAUSE GUARD
+    running=sum(s['status']=='running' for s in data['sessions'].values())
+    claude_running=sum(s['status']=='running' and lanes.execution_engine(s)=='claude' for s in data['sessions'].values())
+    sonnet_running=sum(s['status']=='running' and lanes.execution_engine(s)=='sonnet' for s in data['sessions'].values())
