@@ -55,7 +55,7 @@
   },
   "reconciler_sessions.py": {
     "patch": "reconciler-managed-sessions.patch",
-    "candidate_sha256": "4ed96a1ef1524c0084f70010a0a79b2b860e0f95de0c6d0fea047fe18131fe10",
+    "candidate_sha256": "af9096fac1920c2d1439a07f3889106439d926c0e111065f83992b1b38925501",
     "source": "sessions.py",
     "baseline_sha256": "d066e4e627afd2a31fe54b0fc2f43495e6abc29fcb15cd213e3279c7ee7807a3"
   },
@@ -91,11 +91,11 @@
   },
   "reconciler.py": {
     "patch": "reconciler-core.patch",
-    "candidate_sha256": "e6b33c663374c25216ad9cf9cdffa942251d6f471a93e2793e932173d775215e"
+    "candidate_sha256": "c8cbd5a1000aac01ad0efbec9db62941ffdf6de76bc7f0d6a3b912b69e8a4f37"
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
-    "candidate_sha256": "e5acf63338f58b8ef6f0716c93f9d72e95aa64499c457eaa4741206172041321"
+    "candidate_sha256": "041972b2828f1dbe0a5ea0fbca0854899f5689f706f106a949a049b40375a776"
   },
   "runner_admission.py": {
     "patch": "reconciler-admission.patch",

@@ -27,6 +27,18 @@ class PlannerTests(unittest.TestCase):
   for status in ('pending','approved','reviewing'):
    s=snapshot([card(section='needs_you',revision=7,messages=[])]);s['approvals']=[dict(id='a',card_id='c-one',status=status,kind='db')]
    self.assertNotIn('route_ted',[x['kind'] for x in r.plan(s,now=NOW)['actions']],status)
+ def test_verified_close_carries_the_observed_revision_and_timestamp(self):
+  c=card(revision=7);s=snapshot([c]);url='https://github.com/example/test/pull/1'
+  s['workflows']={'c-one':dict(pr_url=url,deployment=dict(verified=True,deployed_at=r.iso(NOW-5),revision='sha'),verification=dict(ok=True,verified_at=r.iso(NOW-1),revision='sha',card_revision=7))}
+  s['prs']={url:dict(state='MERGED',merged_at=r.iso(NOW-10),merge_revision='sha')}
+  close=next(a for a in r.plan(s,now=NOW)['actions'] if a['kind']=='close_verified')
+  self.assertEqual(close['payload']['expected_revision'],7);self.assertEqual(close['payload']['expected_updated_at'],c['updated_at'])
+  c['revision']=True;s['workflows']['c-one']['verification']['card_revision']=True
+  self.assertNotIn('close_verified',[a['kind'] for a in r.plan(s,now=NOW)['actions']])
+ def test_unknown_approval_and_veto_states_hold_operational_routing(self):
+  for resource in ('approvals','vetoes'):
+   s=snapshot([card(section='needs_you',revision=7,messages=[])]);s[resource]=[dict(id='a',card_id='c-one',status='future_active_state')]
+   self.assertNotIn('route_ted',[x['kind'] for x in r.plan(s,now=NOW)['actions']],resource)
  def test_missing_owner_and_due_are_visible_and_stable(self):
   s=snapshot();a=r.plan(s,now=NOW);b=r.plan(s,now=NOW+120)
   self.assertEqual(a['items'][0]['owner'],'ted')

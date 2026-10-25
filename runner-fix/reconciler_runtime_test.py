@@ -23,6 +23,13 @@ class RuntimeTests(unittest.TestCase):
   self.assertTrue(d.execute(action,None,{},board))
   self.assertEqual(board.call.call_args.kwargs['expected_revision'],7)
   self.assertEqual(board.call.call_args.kwargs['expected_messages'],messages)
+ def test_verified_close_forwards_the_planned_revision_guard(self):
+  from unittest.mock import Mock
+  board=types.SimpleNamespace(call=Mock(return_value=dict(ok=True)))
+  action=dict(kind='close_verified',payload=dict(card_id='c',expected_updated_at='2026-10-23T20:00:00Z',expected_revision=7))
+  self.assertTrue(d.execute(action,None,dict(cards=[dict(id='c',revision=8)]),board))
+  self.assertEqual(board.call.call_args.kwargs['expected_revision'],7)
+  self.assertEqual(board.call.call_args.kwargs['expected_updated_at'],'2026-10-23T20:00:00Z')
  def test_dry_run_never_constructs_effect_store_or_executes_actions(self):
   s={'cards':[],'sessions':{},'approvals':[],'mockups':[],'coverage':{}}
   with tempfile.TemporaryDirectory() as tmp,patch.object(d,'execute',side_effect=AssertionError('effect called')):

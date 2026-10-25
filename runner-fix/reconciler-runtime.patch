@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,513 @@
+@@ -0,0 +1,512 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -390,8 +390,7 @@
 + if kind in ('escalate_2h','escalate_12h','review_sla'):return True  # one ranked queue and banner avoid a note flood
 + if kind=='repair_metadata':return True  # atomic reconcile_publish already persisted this metadata
 + if kind=='close_verified':
-+  card=next((c for c in snapshot['cards'] if c['id']==cid),{})
-+  return board.call('reconcile_close_verified',card_id=cid,expected_updated_at=card.get('updated_at')).get('ok') is True
++  return board.call('reconcile_close_verified',card_id=cid,expected_updated_at=p.get('expected_updated_at'),expected_revision=p.get('expected_revision')).get('ok') is True
 + if kind in ('advance_deploy','advance_verify'):
 +  # Ranked Ted queue is the safe stage executor for repo-specific merge, deploy,
 +  # and verify policy. The next obligation is opened even while a card is done.

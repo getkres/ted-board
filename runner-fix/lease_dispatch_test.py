@@ -117,6 +117,10 @@ class LeaseDispatch(unittest.TestCase):
         def own(**kw):
             return dict(jobs=[dict(id='card-x',card_id='x',status='queued')]) if kw.get('resource') else dict(cards=[dict(id='x',project='Fixture',section='up_next',live_state='blocked')])
         with patch.object(sessions,'call',side_effect=own):self.assertEqual(self.store._initial_dispatch_permissions(),{'x'})
+        for status in ('running','waiting_approval','untracked'):
+            def own_active(**kw):
+                return dict(jobs=[dict(id='card-x',card_id='x',status=status)]) if kw.get('resource') else dict(cards=[dict(id='x',project='Fixture',section='up_next',live_state='blocked')])
+            with self.subTest(own_status=status),patch.object(sessions,'call',side_effect=own_active):self.assertEqual(self.store._initial_dispatch_permissions(),set())
 
     def test_default_managed_enqueue_preserves_claude_engine(self):
         self.store.enqueue(dict(id='default',title='Fixture'),'work','default')

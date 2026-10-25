@@ -5,7 +5,7 @@ export type ReconciliationItem = {
  stage:string; priority:0|1|2; summary:string; expected_updated_at?:string;
 };
 export type Reconciliation = {generated_at:string;items:ReconciliationItem[];banner:boolean;ted_queue:string[];coverage_defects?:string[]};
-export type CloseVerified = {card_id:string;expected_updated_at:string};
+export type CloseVerified = {card_id:string;expected_updated_at:string;expected_revision:number};
 export type RouteTed = {card_id:string;expected_section:'needs_you';expected_updated_at:string;expected_revision:number;expected_messages:unknown[];line:string};
 export type ReconciliationStore = {read():Promise<Reconciliation|null>;publish(value:Reconciliation):Promise<Record<string,unknown>>;routeTed?(value:RouteTed):Promise<Record<string,unknown>>;closeVerified?(value:CloseVerified):Promise<Record<string,unknown>>};
 type Request = {method:string;principal:'page'|'worker'|null;body?:unknown};
@@ -97,8 +97,8 @@ export async function handleReconciliationAction(request:Request,store:Reconcili
  try{
   if(close){
    const card_id=text(body.card_id,64),expected_updated_at=timestamp(body.expected_updated_at);
-   if(!cardPattern.test(card_id))throw Error('Invalid close');
-   value={card_id,expected_updated_at};
+   if(!cardPattern.test(card_id)||!Number.isSafeInteger(body.expected_revision)||Number(body.expected_revision)<=0)throw Error('Invalid close');
+   value={card_id,expected_updated_at,expected_revision:body.expected_revision as number};
   }else if(route){
    const card_id=text(body.card_id,64),expected_updated_at=timestamp(body.expected_updated_at),line=text(body.line??'awaiting ted review',240);
    if(!cardPattern.test(card_id)||body.expected_section!=='needs_you'||!Number.isSafeInteger(body.expected_revision)||Number(body.expected_revision)<=0||!Array.isArray(body.expected_messages))throw Error('Invalid route');
@@ -119,7 +119,7 @@ export function createSupabaseReconciliationStore(client:SupabaseReconciliationC
  return {
   async read(){const {data,error}=await client.rpc('ted_board_reconciliation_read');if(error)throw error;return data as Reconciliation|null},
   async closeVerified(value){
-   const {data,error}=await client.rpc('ted_board_reconcile_close_verified',{p_card_id:value.card_id,p_expected_updated_at:value.expected_updated_at});
+   const {data,error}=await client.rpc('ted_board_reconcile_close_verified',{p_card_id:value.card_id,p_expected_updated_at:value.expected_updated_at,p_expected_revision:value.expected_revision});
    if(error)throw error;
    if(!data||typeof data!=='object'||Array.isArray(data)||(data as Record<string,unknown>).ok!==true)throw Error('Invalid close acknowledgement');
    return data as Record<string,unknown>;

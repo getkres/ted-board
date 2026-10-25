@@ -248,7 +248,7 @@
 +   remote=call(page=True,resource='jobs')
 +   if not isinstance(remote,dict) or not isinstance(remote.get('jobs'),list):return set()
 +  except (OSError,RuntimeError,ValueError):return set()
-+  snapshot=dict(sessions=sessions,dispatch_policy=policy,external_jobs=[j for j in remote['jobs'] if isinstance(j,dict) and j.get('card_id') in pending and j.get('status') in ('running','untracked','queued','waiting_approval') and j.get('id')!=sessions.get(j.get('card_id'),{}).get('id')])
++  snapshot=dict(sessions=sessions,dispatch_policy=policy,external_jobs=[j for j in remote['jobs'] if isinstance(j,dict) and j.get('card_id') in pending and j.get('status') in ('running','untracked','queued','waiting_approval') and not (j.get('status')=='queued' and j.get('id')==sessions.get(j.get('card_id'),{}).get('id'))])
 +  return {card['id'] for card in cards if card['id'] in pending and card.get('section') in ('up_next','ted_doing') and initial_dispatch_allowed(snapshot,card)}
 +
 + def tick(self,reconcile=False):

@@ -120,7 +120,7 @@ test('private handler preserves Jobs controls and restricts reconciliation write
  assert.equal(written.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_publish'));
  const route=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_route_ted',key:'worker-test',card_id:'c-example',expected_section:'needs_you',expected_updated_at:item.expected_updated_at,expected_revision:1,expected_messages:[],line:'review queued'})}));
  assert.equal(route.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_route_ted'));
- const closed=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_close_verified',key:'worker-test',card_id:'c-example',expected_updated_at:item.expected_updated_at})}));
+ const closed=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_close_verified',key:'worker-test',card_id:'c-example',expected_updated_at:item.expected_updated_at,expected_revision:1})}));
  assert.equal(closed.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_close_verified'));
  if(prior===undefined)delete process.env.TED_RECONCILER_ENABLED;else process.env.TED_RECONCILER_ENABLED=prior;
 });
@@ -131,7 +131,7 @@ test('degraded snapshots retain explicit bounded coverage identifiers through pu
  for(const coverage_defects of [['private token value'],['mockups','mockups'],Array.from({length:501},(_,i)=>'source'+i)])assert.throws(()=>validateReconciliationPublish({...packet(),coverage_defects},now));
 });
 test('verified closure requires worker credentials, a source guard, and a configured durable evidence hook',async()=>{
- const body={action:'reconcile_close_verified',card_id:'c-example',expected_updated_at:item.expected_updated_at};
+ const body={action:'reconcile_close_verified',card_id:'c-example',expected_updated_at:item.expected_updated_at,expected_revision:4};
  const missing={read:async()=>null,publish:async()=>({ok:true})};
  assert.equal((await handleReconciliationAction({method:'POST',principal:'page',body},missing,now))?.status,403);
  assert.equal((await handleReconciliationAction({method:'POST',principal:'worker',body},missing,now))?.status,503);
@@ -141,7 +141,22 @@ test('verified closure requires worker credentials, a source guard, and a config
  let request:unknown;
  const configured={...missing,closeVerified:async(value:unknown)=>{request=value;return {ok:true}}};
  assert.equal((await handleReconciliationAction({method:'POST',principal:'worker',body},configured,now))?.status,200);
- assert.deepEqual(request,{card_id:'c-example',expected_updated_at:item.expected_updated_at});
+ assert.deepEqual(request,{card_id:'c-example',expected_updated_at:item.expected_updated_at,expected_revision:4});
+});
+test('verified closure rejects missing and invalid content revision before the store is called',async()=>{
+ let writes=0;
+ const store={read:async()=>null,publish:async()=>({ok:true}),closeVerified:async()=>{writes++;return {ok:true}}};
+ for(const expected_revision of [undefined,null,0,-1,1.5,'1',Number.MAX_SAFE_INTEGER+1,Infinity]){
+  const result=await handleReconciliationAction({method:'POST',principal:'worker',body:{action:'reconcile_close_verified',card_id:'c-example',expected_updated_at:item.expected_updated_at,expected_revision}},store,now);
+  assert.equal(result?.status,400);
+ }
+ assert.equal(writes,0);
+});
+test('verified closure adapter forwards the exact observed content revision',async()=>{
+ const calls:unknown[]=[];
+ const store=createSupabaseReconciliationStore({rpc:async(name,args)=>{calls.push([name,args]);return {data:{ok:true},error:null}}});
+ await store.closeVerified!({card_id:'c-example',expected_updated_at:item.expected_updated_at!,expected_revision:9} as any);
+ assert.deepEqual(calls,[['ted_board_reconcile_close_verified',{p_card_id:'c-example',p_expected_updated_at:item.expected_updated_at,p_expected_revision:9}]]);
 });
 
 test('quarantines one malformed item and invalid queue entries without losing valid work',()=>{
