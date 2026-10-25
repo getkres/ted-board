@@ -35,7 +35,7 @@ class Marker(unittest.TestCase):
  def test_invalid_or_symlink_marker_fails_closed(self):
   with tempfile.TemporaryDirectory() as temp,contextlib.redirect_stderr(io.StringIO()):
    path=Path(temp)/'pause.json'
-   for text in ('{','[]','{}','{"paused":"false"}','{"paused":false,"unknown":true}'):
+   for text in ('{','[]','{}','{"paused":"false"}','{"paused":false,"unknown":true}','{"paused":true,"paused":false}','['*1000,'['*200000):
     path.write_text(text);self.assertTrue(dispatch_pause.paused(path),text)
    path.unlink();path.symlink_to(Path(temp)/'missing');self.assertTrue(dispatch_pause.paused(path))
 
