@@ -1,6 +1,6 @@
 --- /dev/null
 +++ mockup_autoarchive.py
-@@ -0,0 +1,335 @@
+@@ -0,0 +1,338 @@
 +#!/usr/bin/env python3
 +"""Archive reviewed, completed, or stale superseded mockup batches on the mini.
 +
@@ -99,6 +99,9 @@
 +        if (not isinstance(row, dict) or any(not isinstance(row.get(k), str) or not row[k]
 +                for k in ('id', 'project', 'batch', 'title'))
 +                or row.get('status') not in ('open', 'picked', 'archived') or row['id'] in seen):
++            raise ValueError('Invalid mockup snapshot')
++        if row.get('card_id') is not None and (not isinstance(row['card_id'], str)
++                or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}', row['card_id'])):
 +            raise ValueError('Invalid mockup snapshot')
 +        seen.add(row['id'])
 +        groups.setdefault((row['project'], row['batch']), []).append(row)
