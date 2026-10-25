@@ -69,6 +69,8 @@ MANAGED += """
       valid=True
      if not valid:
       if current.get('id')==item['id']:data['publications'].pop(cid,None)
+    try:confirmed=publish_live(cid,item['state'],item['line'],raise_gone=True,**item['kwargs'])
+    except RuntimeError:confirmed=False
     if not confirmed:continue
     with self.locked() as data:
      if current.get('id')!=item['id']:continue
@@ -118,7 +120,7 @@ class AdapterTests(unittest.TestCase):
         self.assertIn('env=lanes.environment(s,env)', result)
         self.assertIn("p=shared_admission.Gate().spawn(", result)
         self.assertNotIn('or overloaded:break', result)
-        self.assertIn("section='up_next'", result)
+        self.assertIn("guards=admission_status_kwargs", result)
         self.assertIn('except shared_admission.Deferred as exc:', result)
         self.assertLess(result.index('    try:'), result.index("    atomic(str(prefix)"))
 

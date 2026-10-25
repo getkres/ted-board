@@ -31,6 +31,7 @@ class CompletionPublicationTests(unittest.TestCase):
    self.store._queue_publication(data,self.session,'blocked','ted review','complete',section='up_next')
    data['ted_outbox']=[dict(card_id='sample',text='retained review note')];data['review_queue']=['preserved']
   self.card=dict(id='sample',project='example',section='up_next',live_state='blocked',live_status='ted review',decision_kind=None)
+  self.card['updated_at']='2026-10-25T07:00:00Z'
   self.response=dict(cards=[self.card]);self.publish_effect=lambda *a,**k:False
   def get(*a,**k):
    self.calls.append((a,k));self.assertEqual(a,());self.assertEqual(k,dict(page=True));return copy.deepcopy(self.response)
@@ -52,6 +53,49 @@ class CompletionPublicationTests(unittest.TestCase):
  def test_existing_successful_publish_still_uses_normal_ack(self):
   self.publish_effect=lambda *a,**k:True
   self.assertFalse(self.flush()['publications']);self.assertFalse(self.calls)
+ def test_confirmed_completion_still_requires_terminal_envelope(self):
+  original=self.store.read()
+  for fields in (dict(status='running'),dict(pid=12345),dict(queue=[dict(id='next')])):
+   with self.subTest(fields=fields):
+    self.mutate(lambda d:(d.clear(),d.update(copy.deepcopy(original))))
+    self.mutate(lambda d:d['sessions']['sample'].update(fields))
+    self.mutate(lambda d:d['publications']['sample'].update(status=d['sessions']['sample']['status']))
+    self.publish_effect=lambda *a,**k:True
+    self.assertTrue(self.flush()['publications'])
+ def test_confirmed_completion_preserves_durable_metadata_delivery(self):
+  original=self.store.read()
+  for extra in (dict(side_effecting=True),dict(review_session_id='old',review_claude_lane='research',review_claude_config_dir='dedicated')):
+   with self.subTest(extra=extra):
+    self.mutate(lambda d:(d.clear(),d.update(copy.deepcopy(original))))
+    self.mutate(lambda d:d['sessions']['sample'].update(extra))
+    self.publish_effect=lambda *a,**k:True
+    self.assertFalse(self.flush()['publications']);self.assertFalse(self.calls)
+ def test_admission_delivery_uses_fresh_update_guard_and_preserves_up_next(self):
+  self.mutate(lambda d:d['sessions']['sample'].update(status='queued',queue=[dict(id='next')]))
+  self.mutate(lambda d:self.store._queue_publication(d,d['sessions']['sample'],'blocked','admission delayed: memorycapacity','admission',section='up_next'))
+  sent=[]
+  def publish(*args,**kwargs):sent.append(kwargs);return kwargs==dict(raise_gone=True,expected_updated_at=self.card['updated_at'])
+  self.publish_effect=publish
+  self.assertFalse(self.flush()['publications']);self.assertEqual(len(self.calls),1)
+  self.assertEqual(sent,[dict(raise_gone=True,expected_updated_at=self.card['updated_at'])])
+ def test_admission_ted_doing_handoff_keeps_existing_section_guard(self):
+  self.card['section']='ted_doing'
+  self.mutate(lambda d:self.store._queue_publication(d,d['sessions']['sample'],'blocked','admission delayed: memorycapacity','admission',section='up_next'))
+  def publish(*args,**kwargs):return kwargs==dict(raise_gone=True,section='up_next',expected_updated_at=self.card['updated_at'])
+  self.publish_effect=publish;self.assertFalse(self.flush()['publications'])
+ def test_admission_get_cannot_publish_after_local_turn_changes(self):
+  self.mutate(lambda d:self.store._queue_publication(d,d['sessions']['sample'],'blocked','admission delayed: memorycapacity','admission',section='up_next'))
+  def get(*a,**k):self.mutate(lambda d:d['sessions']['sample'].update(turn='new',status='running'));return copy.deepcopy(self.response)
+  self.get_effect=get
+  with mock.patch.object(self.module,'publish_live',side_effect=AssertionError('stale admission must stay local')):
+   self.assertTrue(self.flush()['publications'])
+ def test_admission_malformed_or_protected_get_keeps_publication_local(self):
+  self.mutate(lambda d:self.store._queue_publication(d,d['sessions']['sample'],'blocked','admission delayed: memorycapacity','admission',section='up_next'))
+  for change in (dict(section='needs_you'),dict(decision_kind='send_email'),dict(updated_at=None)):
+   with self.subTest(change=change):
+    self.response=dict(cards=[dict(self.card,**change)])
+    with mock.patch.object(self.module,'publish_live',side_effect=AssertionError('unsafe admission must remain local')):
+     self.assertTrue(self.flush()['publications'])
  def test_snapshot_failures_and_ambiguity_remain_pending(self):
   invalid=[None,{},dict(ok=False,cards=[self.card]),dict(truncated=True,cards=[self.card]),dict(has_more=True,cards=[self.card]),dict(error='refused',cards=[self.card]),dict(cards='bad'),dict(cards=[]),dict(cards=[self.card,self.card]),
            dict(cards=[self.card]*500),dict(cards=[dict(self.card,section='ted_doing')]),dict(cards=[dict(self.card,live_state='done')]),
@@ -80,8 +124,7 @@ class CompletionPublicationTests(unittest.TestCase):
    with self.subTest(change=change):
     self.mutate(lambda d:(d.clear(),d.update(copy.deepcopy(original))))
     self.mutate(lambda d:d['publications']['sample'].update(change))
-    with mock.patch.object(self.module,'publish_live',side_effect=AssertionError('invalid completion must stay local')):
-     self.assertTrue(self.flush()['publications'])
+    self.assertTrue(self.flush()['publications'])
   self.assertFalse(self.calls)
  def test_get_errors_remain_pending(self):
   for exception in (OSError('fixture'),RuntimeError('fixture'),ValueError('fixture'),TypeError('fixture')):
@@ -97,8 +140,7 @@ class CompletionPublicationTests(unittest.TestCase):
    with self.subTest(change=changeset):
     self.mutate(lambda d:(d.clear(),d.update(copy.deepcopy(original))))
     self.mutate(lambda d:d['sessions'].__setitem__('sample',dict(self.session,**changeset)))
-    with mock.patch.object(self.module,'publish_live',side_effect=AssertionError('unsafe completion must stay local')):
-     self.assertTrue(self.flush()['publications'])
+    self.assertTrue(self.flush()['publications'])
   self.assertFalse(self.calls)
  def test_live_old_worker_or_group_and_unknown_census_refuse_ack(self):
   for response in (types.SimpleNamespace(returncode=0,stdout='12345 12345 S\n'),types.SimpleNamespace(returncode=0,stdout='12346 12345 S\n'),
@@ -124,7 +166,10 @@ class CompletionPublicationTests(unittest.TestCase):
   for kind in ('failure','admission','start','resume','unknown'):
    with self.subTest(kind=kind):
     self.mutate(lambda d:d['publications']['sample'].update(kind=kind))
-    self.flush();self.assertFalse(self.calls)
+    self.calls.clear()
+    with mock.patch.object(self.store,'_completion_target_exists',side_effect=AssertionError('only complete can use fallback')):
+     self.assertTrue(self.flush()['publications'])
+    self.assertEqual(len(self.calls),1 if kind=='admission' else 0)
 
 if __name__=='__main__':
  p=argparse.ArgumentParser();p.add_argument('--runtime-root',type=Path,required=True);args,rest=p.parse_known_args()
