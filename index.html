@@ -45,6 +45,7 @@ dialog{position:fixed;inset:0;border:0;margin:0;padding:0;max-width:none;max-hei
 <noscript><div class="shell state"><h2>JavaScript is needed</h2><p>Open this link in Safari or Chrome to use your board.</p></div></noscript>
 <script src="decision-kinds.js"></script>
 <script src="mockups.js"></script>
+<script src="mockup-archive.js"></script>
 <script src="mockups-v3.js"></script>
 <script src="markup-v3.js"></script>
 <script>installMarkupV3(MockupsV3);</script>
@@ -346,7 +347,7 @@ function renderJobs(main){
   const lanes=el('section','claude-lanes');lanes.setAttribute('aria-label','Claude account lanes');lanes.append(el('h3',null,'Claude account lanes'),el('p','job-meta','Usage from dispatched jobs only. Plan-wide usage unavailable from CLI.'));
   const rows=el('div','job-list');
   for(const j of laneRows){
-   const row=el('article','card claude-lane-summary');const names={'claude-lane-main':'Account 1: Ted and interactive work','claude-lane-design':'Account 2: design, art, and design review','claude-lane-research':'Account 3: research, analysis, and review gates'};
+   const row=el('article','card claude-lane-summary');const names={'claude-lane-main':'Account 1: Ted and interactive work','claude-lane-design':j.lane_role==='all_managed'?'Account 2: all Claude and Sonnet workers':'Account 2: design, art, and other workers','claude-lane-research':'Account 3: research, analysis, and review gates'};
    row.append(el('h4',null,names[j.id]),el('p','job-meta',j.last_line||'Limit status unknown'));
    const usage=j.lane_usage||{},valid=n=>Number.isFinite(n)&&n>=0&&typeof n==='number';
    const counts=[['input_tokens','input'],['output_tokens','output'],['cache_read_input_tokens','cache read'],['cache_creation_input_tokens','cache write']].filter(([key])=>valid(usage[key])).map(([key,label])=>usage[key].toLocaleString()+' '+label);
@@ -362,7 +363,7 @@ function renderJobs(main){
  const counts=BoardStatus.workerCounts(state.cards,state.jobs,state.jobsLoaded);main.append(el('p','work-summary jobs-work-summary',counts?counts.running+' running · '+counts.queued+' queued · '+counts.stale+' stale in Ted doing':'Checking workers'));
  const list=el('div','job-list');const active=state.jobs.filter(j=>j.id!=='fresh-ted-health'&&j.lane_summary!==true&&['running','queued','waiting_approval','untracked'].includes(j.status));
  if(!state.jobsLoaded)list.append(el('p','status','Loading jobs…'));else if(!active.length)list.append(el('p','status','No active jobs.'));
- for(const j of active){const box=el('article','card');box.dataset.status=j.status;box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',j.engine+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
+ for(const j of active){const box=el('article','card');box.dataset.status=j.status;box.append(el('h3',null,j.title));const age=j.started_at?Math.max(0,Math.floor((Date.now()/1000-j.started_at)/60))+' min':'not started';box.append(el('p','job-meta',(j.worker_engine==='sonnet'?'sonnet':j.engine)+' · '+j.status+' · '+age));box.append(el('p','card-body',j.last_line||'Waiting for activity'));
   const stale=!j.heartbeat_at||Date.now()-Date.parse(j.heartbeat_at)>120000;if(stale)box.append(el('p','job-warning','Mini heartbeat is stale. Controls will wait for it to reconnect.'));
   const actions=el('div','job-actions');const kill=button('Kill','',()=>control('kill',{job_id:j.id,pid:j.pid??null,identity:j.identity||''}));kill.disabled=stale;actions.append(kill);
   if(j.card_id)actions.append(button('Open','',()=>openJobCard(j.card_id)));box.append(actions);list.append(box)

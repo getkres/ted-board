@@ -1,0 +1,11 @@
+--- jobs_heartbeat.py
++++ jobs_heartbeat.py
+@@ -49,4 +49,8 @@
+  if not isinstance(clearance,dict) or clearance.get('ok') is not True or not isinstance(clearance.get('cleared'),list):
+   raise RuntimeError('Veto clearance was not confirmed')
++ try:
++  from mockup_autoarchive import heartbeat_pass
++  heartbeat_pass()
++ except Exception as exc:print('Mockup auto-archive failed: '+type(exc).__name__,file=sys.stderr)
+  print('Heartbeat published: '+str(len(jobs))+' jobs, '+str(len(approvals))+' pending approvals.')
+  return 0
