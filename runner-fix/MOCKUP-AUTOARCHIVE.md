@@ -1,8 +1,8 @@
 # Mockup auto-archive handoff
 
-Finished batches should leave the Mockups wall without requiring another upload. This adds a private helper and a small hook to the mini's existing heartbeat. It uses the existing worker-authenticated archive action, preserves pins, images, verdicts, and Storage, and changes no browser tab or database schema.
+Finished batches should leave the Mockups wall without requiring another upload. This supplies a private helper to the mini's existing dedicated reconciler owner. It uses the existing worker-authenticated archive action, preserves pins, images, verdicts, and Storage, and changes no browser tab or database schema.
 
-The runtime is intentionally excluded from the public repository. The focused patches follow the existing runner-fix convention. They are staged for Ted review and have not been installed or enabled.
+The runtime is intentionally excluded from the public repository. The focused patches follow the existing runner-fix convention. The safety follow-up is staged for Ted review. The installed managed reconciler already contains the older helper with its archive flag off; this follow-up replaces only that helper after hash verification.
 
 ## Policy
 
@@ -26,13 +26,13 @@ Staleness adds the five-day inactivity requirement to the same creation and verd
 
 Every rule also waits for any active Undo window to expire. Dry-run records `would_archive` with the reason and evidence. Apply rereads the mockup, pin, and card snapshots immediately before each archive, skips any changed decision, and writes a durable `archive_attempt`.
 
-The archive request uses only the explicit active frame IDs from that recheck, in lists of at most 500 IDs to respect the existing API limit. An upload arriving after the last GET is never included or archived unseen. Each receipt must confirm exactly the length of its requested ID list, excluding already archived rows. The log records `archived` only after every request succeeds. A failed later request records `archive_failed` and the confirmed partial count. Errors record only their type, with no raw transport details. One failed batch does not stop later batches. A read or audit-log failure stops the pass; the heartbeat catches the failure and keeps its existing work intact.
+The archive request uses only the explicit active frame IDs from that recheck, in lists of at most 500 IDs to respect the existing API limit. An upload arriving after the last GET is never included or archived unseen. Each receipt must confirm exactly the length of its requested ID list, excluding already archived rows. The log records `archived` only after every request succeeds. A failed later request records `archive_failed` and the confirmed partial count. Errors record only their type, with no raw transport details. One failed batch does not stop later batches. A read or audit-log failure stops the pass. The dedicated owner reports a sanitized failed invocation after its already completed reconciliation work; the persisted throttle bounds another archive attempt. Disable the archive flag and diagnose that failure before declaring observation successful.
 
 The existing API cannot condition an ID archive on unchanged verdict or pin state. A verdict or pin can still arrive on one of those known frames after the final GET. Eliminating that interval atomically would require a separately reviewed backend change. No such backend change is included here.
 
 ## Heartbeat cadence and log backoff
 
-The enabled heartbeat runs the archive pass at most once per ten minutes. Its last start time is persisted before any network read, so failed passes also consume the interval. The exact ten-minute boundary permits a new pass. Separate heartbeat processes and module reloads share the same local state and exclusive file lock; the lock covers the pass and serializes it with CLI apply runs using the same log. Lock acquisition uses nonblocking attempts with a one-second deadline. A busy lock raises a sanitized timeout before network access or control-state changes, allowing the heartbeat to continue without waiting for a hung apply. A saved timestamp up to ten minutes ahead keeps the pass throttled. A timestamp more than ten minutes ahead is treated as a clock jump and replaced with the current attempt time, allowing recovery. Direct CLI runs remain available for a deliberate dry-run or separately authorized apply.
+The enabled dedicated reconciler calls the heartbeat helper, which runs the archive pass at most once per ten minutes. Its last start time is persisted before any network read, so failed passes also consume the interval. The exact ten-minute boundary permits a new pass. Separate heartbeat processes and module reloads share the same local state and exclusive file lock; the lock covers the pass and serializes it with CLI apply runs using the same log. Lock acquisition uses nonblocking attempts with a one-second deadline. A busy lock raises a sanitized timeout before network access or control-state changes, allowing the heartbeat to continue without waiting for a hung apply. A saved timestamp up to ten minutes ahead keeps the pass throttled. A timestamp more than ten minutes ahead is treated as a clock jump and replaced with the current attempt time, allowing recovery. Direct CLI runs remain available for a deliberate dry-run or separately authorized apply.
 
 Repeated `archive_failed` and `skipped_changed` outcomes append one log line for the batch until their state changes. The saved fingerprint excludes the pass timestamp and private error text, and includes the outcome, reason, frame IDs, counts, sanitized error type, and any changed candidate observed during recheck. A changed outcome or evidence emits a new line. If a batch stops qualifying on a later apply or enabled heartbeat initial read, its saved outcome is cleared, so a later recurrence is visible again. Successful archives always log. Every batch archive attempt still gets its durable `archive_attempt` entry even when a repeated failure outcome is suppressed.
 
@@ -42,46 +42,33 @@ Dry-run bypasses the state file and lock entirely. It never creates, reads, prun
 
 ## Verify before installation
 
-The tests reconstruct the archive helper and the exact shared new-file artifact from `inbox-steward/runtime.patch` in a temporary directory, use synthetic snapshots, and never import production transports. This public-only check skips the private heartbeat integration:
+Use the actual mini launchd interpreter, `/Library/Developer/CommandLineTools/usr/bin/python3`, for private checks. The public suite reconstructs the archive and shared helper in a temporary directory and skips its one private heartbeat check. A private candidate should contain the current managed sources, the reviewed new archive helper, the unchanged shared helper, and a disposable off configuration. Never copy live journals or credentials into a public checkout.
 
 ```sh
-python3 runner-fix/mockup_autoarchive_test.py
-python3 scripts/check_data_api_grants.py
-python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
+TED_RUNTIME_SOURCE="$TED_CANDIDATE" /Library/Developer/CommandLineTools/usr/bin/python3 -B "$TED_REVIEW/runner-fix/mockup_autoarchive_test.py"
+/Library/Developer/CommandLineTools/usr/bin/python3 -B "$TED_REVIEW/scripts/check_data_api_grants.py"
+/Library/Developer/CommandLineTools/usr/bin/python3 -B -m unittest discover -s "$TED_REVIEW/tests" -p test_data_api_grants.py
 ```
 
-The shared module is delivered once in the hash-checked steward runtime bundle. Prepare that bundle offline from its reviewed private baseline, then copy only `board_card_snapshot.py` into the archive candidate. This preparation does not install or run the steward:
+The shared `board_card_snapshot.py` delivered by the steward and reconciler bundles is the same artifact. Its SHA-256 is `8299b42814f227087a0a436ea75854b479e1870ca4bead9daceb7c49e095d19c`. Verify and preserve the existing file when it already matches. The reviewed archive helper is `d7f7629670f9fff00a90f712a187d55d52356f40b7bd1d13de33e0e965d42563`. The reconciler manifest pins this new archive artifact, while every other reconciler manifest entry and runtime patch stays unchanged.
 
-```sh
-python3 "$TED_REVIEW/runner-fix/inbox-steward/prepare_candidate.py" \
-  --source "$TED_STEWARD_BASELINE" --dest "$TED_STEWARD_CANDIDATE"
-cp "$TED_STEWARD_CANDIDATE/board_card_snapshot.py" "$TED_CANDIDATE/board_card_snapshot.py"
-```
+Reconstruct only the new-file archive patch in a new private directory, then include the existing hash-verified shared helper. Compile both files and test a disposable copy containing actual installed dependencies. Refuse mismatches or unexpected module drift instead of stacking patches.
 
-`TED_STEWARD_BASELINE` is the PR 36 baseline release named in its manifest, and `TED_STEWARD_CANDIDATE` is a new private destination. Keep the shared module beside both installed consumers when updating either runtime. Refuse a mismatched existing shared module instead of silently overwriting it.
+## Managed ownership and rollout
 
-To exercise the actual candidate heartbeat, copy the mini's current `jobs_heartbeat.py` into a private candidate directory, then dry-run and apply both patches there. Refuse drift instead of forcing a patch:
+In managed mode the sole archive caller is the existing `co.ted.card-reconciler` owner, through `reconciler_runtime.py`. Its independent `TED_MOCKUP_AUTOARCHIVE_ENABLED` environment flag remains false through review, installation, compilation, and the GET-only preview. The existing board-jobs heartbeat stays off for archives. Do not apply the historical `jobs-heartbeat-autoarchive.patch` to a managed installation, and do not alter the legacy heartbeat, managed heartbeat, reconciler lifecycle code, dispatch configuration, capacity, Claude lane configuration, or journals.
 
-```sh
-cd "$TED_CANDIDATE"
-patch --dry-run -p0 < "$TED_REVIEW/runner-fix/mockup-autoarchive.patch"
-patch --dry-run -p0 < "$TED_REVIEW/runner-fix/jobs-heartbeat-autoarchive.patch"
-patch -p0 < "$TED_REVIEW/runner-fix/mockup-autoarchive.patch"
-patch -p0 < "$TED_REVIEW/runner-fix/jobs-heartbeat-autoarchive.patch"
-TED_RUNTIME_SOURCE="$TED_CANDIDATE" python3 "$TED_REVIEW/runner-fix/mockup_autoarchive_test.py"
-PYTHONPATH="$TED_BOARD_ROOT" python3 "$TED_CANDIDATE/mockup_autoarchive.py" --dry-run --log "$TED_CANDIDATE/dry-run.jsonl"
-```
+The helper defaults to dry-run. Both CLI `--apply` and the dedicated owner's heartbeat helper require the exact flag value `true`. A disabled helper creates no log, state, or lock file. The existing 120-second dedicated schedule calls the helper, and the helper's durable ten-minute throttle controls archive frequency. No new routine is required.
 
-`TED_BOARD_ROOT` is the private mini runtime, `TED_REVIEW` is this PR checkout, and `TED_CANDIDATE` is a separate private candidate directory. The dry-run makes only existing GET requests, prints candidates, and records the requested local audit log without changing lock or state files. Its output contains no credentials, image URLs, card bodies, or feedback text. The job report contains the refreshed live candidate list. The original one-time cleanup was completed separately by Ted and is outside this fix round. Keep production evidence and backups private.
+Ted must review the exact PR head and a fresh GET-only preview before enabling future archives. Source installation and flag activation are separate steps:
 
-## Review and enable on the mini
+1. Complete the reconciler observation and preceding queue work. Record the current helper/shared-module hashes, dedicated plist bytes and mode, loaded/disabled state, old heartbeat flag state, and archive log/state/lock presence. Save private backups, including a GET snapshot of frames, pins, and card identities, before any enabled archive tick. Preserve journals, later feedback, and every prior rollout receipt.
+2. Temporarily disable the dedicated launchd owner, wait for its invocation to exit naturally, and unload it only when idle. Do not signal or adopt worker groups. The other managed actors keep their existing states. Acquire the existing session lock and recheck the exact source and plist before-images.
+3. Atomically install only the reviewed `mockup_autoarchive.py`, preserving its mode. Preserve a matching shared snapshot module rather than rewriting it. Leave the dedicated archive flag false. Use a file fsync, atomic rename, and parent-directory fsync. Compile the actual installed helper and shared module with the launchd interpreter, then run the focused offline tests in a disposable tree overlaid with the installed bytes.
+4. Run the installed helper with `--dry-run` and a private backup audit path. This makes only GET requests and does not touch the production archive state or lock. Review every proposed project, batch, reason, and explicit frame ID. A nonzero exit, incomplete feed, or unexpected proposal holds activation.
+5. After Ted's authorized enablement, atomically set only `TED_MOCKUP_AUTOARCHIVE_ENABLED=true` in the existing dedicated plist. Keep the old board-jobs heartbeat archive flag absent or false. While the dedicated service is unloaded, run one controlled reconciler apply pass with the archive flag true and its normal managed configuration. This is an actual archive-capable tick and belongs only to Ted. Record its exit, ledger readback, archive audit events, receipt counts, and protected decision/approval hashes.
+6. Restore the original dedicated loaded/disabled state with the new plist after that tick succeeds. The existing `RunAtLoad` can execute a pass, so do not launch an overlapping manual tick. Observe for at least ten minutes, including the first throttle boundary. Confirm one owner, successful reconciliation, expected archive evidence, no unrelated batches, unchanged verdicts/pins/Storage, healthy old heartbeat, and preserved protected decisions. Leave the source card open until real observation succeeds.
 
-The default CLI mode and `--dry-run` perform no archives. Both CLI `--apply` and the heartbeat require the exact environment value `TED_MOCKUP_AUTOARCHIVE_ENABLED=true`. When the flag is absent, the heartbeat makes no archive-related reads or writes. Do not run the full heartbeat as a smoke test: it already dispatches jobs and processes existing board controls.
+The default private audit log is `~/ted-ops/ted-board/mockup-autoarchive.jsonl`. Its sibling `.state.json` and `.state.lock` files remain private. Preserve them as evidence and ongoing control state.
 
-Ted must review the PR and the current dry-run before approving future automatic archives. This flag is an implementation gate, not authorization to bypass the standing database rule. The model worker must stop at the review handoff. No one-time SQL application is part of this fix round.
-
-After that separate authorization, back up the mini's current `jobs_heartbeat.py`, archive helper, shared snapshot helper, and state file when present. Dry-run the patches against those exact sources, install the reviewed archive helper, shared snapshot helper, and heartbeat hunk, and rerun the offline tests against the installed sources. The flag stays absent throughout installation. Then rerun the helper's live dry-run and compare the current candidates before Ted changes the environment of the existing heartbeat to enable future archives. No new launchd agent, cron, scheduled task, or worker is needed.
-
-The default private audit log is `~/ted-ops/ted-board/mockup-autoarchive.jsonl`; CLI `--log` can select another private path. Every record includes the exact project, batch, reason, active frame IDs, and policy evidence. Keep this log outside the public repository.
-
-Rollback first removes the flag from the existing heartbeat environment, then restores the backed-up heartbeat, archive helper, shared snapshot helper, and local state file when present. This stops future archives and leaves the log intact. Already archived batches require Ted's separately reviewed status restoration from the private backup. Do not restore verdicts, pins, or Storage, and do not overwrite later feedback.
+Rollback first disables only the dedicated archive flag and naturally drains that owner. Restore the backed-up archive helper and original dedicated plist atomically, verify the shared helper remains unchanged, and restore the original service state. Keep the managed reconciler gate, dispatch configuration, lane settings, capacity, journals, audit log, and newest archive control state. Source rollback stops future archives; it does not unarchive remote frames. Any remote status restoration requires Ted's separate exact-ID review and must preserve later verdicts, pins, feedback, and Storage. Do not restore an old ledger or overwrite later feedback.

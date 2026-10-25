@@ -111,7 +111,7 @@
   },
   "mockup_autoarchive.py": {
     "patch": "mockup-autoarchive.patch",
-    "candidate_sha256": "269eaf03f753c488030762ab350aaff461260796eed2aa0561a216caa8a1ad99"
+    "candidate_sha256": "d7f7629670f9fff00a90f712a187d55d52356f40b7bd1d13de33e0e965d42563"
   },
   "reconciler_gate.py": {
     "patch": "reconciler-gate.patch",
