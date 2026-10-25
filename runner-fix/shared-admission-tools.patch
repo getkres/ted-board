@@ -4,7 +4,7 @@
 +"""Reviewed local operational tools."""
 --- /dev/null
 +++ b/scripts/shared_admission.py
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,354 @@
 +#!/usr/bin/env python3
 +"""One host-local resource gate for cooperating model and scheduled commands."""
 +import argparse
@@ -41,6 +41,28 @@
 +        self.error_name = error_type.__name__ if isinstance(error_type, type) and issubclass(error_type, Exception) else None
 +        self.diagnostic = reason_code + (':' + self.error_name if self.error_name else '')
 +        super().__init__(self.diagnostic)
++
++
++def defer_turn(session, turn, exc, *, approval=None, now=None):
++    """Restore unstarted work without leaving execution authority or a model lease."""
++    now = time.time() if now is None else now
++    session['queue'].insert(0, turn)
++    session.update(status='queued', pid=None, last_line='queued: admission ' + exc.diagnostic.lower())
++    for key in ('active_turn', 'active_veto_revision', 'lease', 'lease_token', 'lease_expires_at',
++                'active_claude_lane', 'active_claude_config_dir', 'active_claude_managed'):
++        session.pop(key, None)
++    if approval is not None:
++        approval.update(status='approved', sync_status=True)
++        session.pop('reviewing', None)
++        session.pop('review_context', None)
++    # Durable work and review account affinity, including a valid resume identity,
++    # remain unchanged. The next tick revalidates the original artifact and lane.
++    waiting = session.get('admission_deferred', {})
++    if waiting.get('turn') != turn['id']:
++        waiting = dict(turn=turn['id'], since=now, count=0, alerted=False)
++    waiting.update(count=waiting.get('count', 0) + 1, reason=exc.reason_code, error=exc.error_name)
++    session['admission_deferred'] = waiting
++    return waiting
 +
 +
 +def parse_vm_stat(text):
@@ -339,7 +361,7 @@
 +    sys.exit(main())
 --- /dev/null
 +++ b/tests/test_shared_admission.py
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,341 @@
 +import json
 +import contextlib
 +import io
@@ -630,6 +652,53 @@
 +        self.assertIn('EvidenceUnavailable', error.getvalue())
 +        self.assertIn('ValueError', error.getvalue())
 +        self.assertNotIn('private-sentinel', error.getvalue())
++
++
++class DeferredTurnTests(unittest.TestCase):
++    def test_refusal_preserves_exact_turn_and_affinity_but_drops_transient_lease(self):
++        turn = dict(id='turn1', kind='work', message='synthetic', automatic=True)
++        session = dict(queue=[], turn='turn1', active_turn=turn, lease_token='token',
++                       lease_expires_at=100, lease=dict(token='token'), active_veto_revision=7,
++                       active_claude_lane='design', active_claude_config_dir='private', active_claude_managed=True,
++                       claude_lane='design', claude_config_dir='dedicated', session_id='resume')
++        episode = admission.defer_turn(session, turn, admission.Deferred('MemoryCapacity'), now=10)
++        self.assertEqual(session['queue'], [turn])
++        self.assertEqual(session['status'], 'queued')
++        self.assertIsNone(session['pid'])
++        self.assertEqual(session['claude_lane'], 'design')
++        self.assertEqual(session['claude_config_dir'], 'dedicated')
++        self.assertEqual(session['session_id'], 'resume')
++        for key in ('lease', 'lease_token', 'lease_expires_at', 'active_turn', 'active_veto_revision',
++                    'active_claude_lane', 'active_claude_config_dir', 'active_claude_managed'):
++            self.assertNotIn(key, session)
++        self.assertEqual(episode['since'], 10)
++        self.assertEqual(episode['count'], 1)
++
++    def test_refused_review_retains_resume_account_and_revalidates_approval_next_tick(self):
++        turn = dict(id='review1', kind='review', approval_id='a')
++        approval = dict(status='reviewing')
++        session = dict(queue=[], reviewing='a', review_context='transient', review_session_id='resume',
++                       review_claude_lane='research', review_claude_config_dir='dedicated')
++        admission.defer_turn(session, turn, admission.Deferred('LoadCapacity'), approval=approval, now=10)
++        self.assertEqual(approval, dict(status='approved', sync_status=True))
++        self.assertNotIn('reviewing', session)
++        self.assertNotIn('review_context', session)
++        self.assertEqual(session['review_session_id'], 'resume')
++        self.assertEqual(session['review_claude_lane'], 'research')
++        self.assertEqual(session['review_claude_config_dir'], 'dedicated')
++
++    def test_repeated_same_turn_keeps_first_deferral_and_new_turn_resets_it(self):
++        turn = dict(id='t', kind='work')
++        session = dict(queue=[])
++        admission.defer_turn(session, turn, admission.Deferred('LoadCapacity'), now=10)
++        session['queue'].pop()
++        admission.defer_turn(session, turn, admission.Deferred('MemoryCapacity'), now=20)
++        self.assertEqual(session['admission_deferred']['since'], 10)
++        self.assertEqual(session['admission_deferred']['count'], 2)
++        session['queue'].pop()
++        admission.defer_turn(session, dict(id='other', kind='work'), admission.Deferred('LoadCapacity'), now=30)
++        self.assertEqual(session['admission_deferred']['since'], 30)
++        self.assertEqual(session['admission_deferred']['count'], 1)
 +
 +
 +if __name__ == '__main__':

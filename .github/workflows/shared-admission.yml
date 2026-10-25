@@ -22,3 +22,4 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 runner-fix/shared_admission_test.py
+      - run: python3 runner-fix/shared_runtime_admission_test.py

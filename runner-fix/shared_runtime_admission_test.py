@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Exercise current lane and managed adapters without provider or live state access."""
+import ast
+import importlib.util
+from pathlib import Path
+import tempfile
+import unittest
+
+HERE = Path(__file__).resolve().parent
+
+
+def adapter():
+    spec = importlib.util.spec_from_file_location('prepare_shared_admission', HERE / 'prepare_shared_admission.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Synthetic statement surfaces only. Actual private runtimes are validated separately.
+LEGACY = '''import uuid
+class Store:
+ def _tick_lanes(self,layout):
+  with self.locked() as data:
+   overloaded=os.getloadavg()[0]>capacity['load_per_cpu']*(os.cpu_count() or 8)
+   for s in data['sessions'].values():
+    if running>=capacity['total_workers'] or overloaded:break
+    turn=s['queue'][0]
+    prefix=Path(s['cwd'])/s['turn']
+    Path(str(prefix)+'.result.json').unlink(missing_ok=True)
+    atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
+    env=lanes.environment(s,env)
+    try:
+     with open(str(prefix)+'.log','a') as log:
+      os.chmod(log.name,0o600)
+      p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
+     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time())
+    except OSError:
+     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s)
+'''
+MANAGED = '''import uuid
+class Store:
+ def tick(self,reconcile=False):
+  managed=True
+  with self.locked() as data:
+   for s in pending:
+    turn=s['queue'][0]
+    prefix=Path(s['cwd'])/s['turn']
+    Path(str(prefix)+'.result.json').unlink(missing_ok=True)
+    atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
+    env=lanes.environment(s,env)
+    launches+=1;retry_launches+=retrying
+    if automatic:s['automatic_dispatch_count']=int(s.get('automatic_dispatch_count') or 0)+1
+    try:
+     with open(str(prefix)+'.log','a') as log:
+      os.chmod(log.name,0o600)
+      p=subprocess.Popen([PYTHON,str(ROOT/'reconciler_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
+     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time())
+     if managed:s['lease'].update(pid=s['pid'],identity=s['identity'])
+    except OSError:
+     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s,data if managed else None)
+'''
+
+
+class AdapterTests(unittest.TestCase):
+    def test_lane_source_preserves_environment_and_routes_spawn(self):
+        result = adapter().adapt(LEGACY, managed=False)
+        ast.parse(result)
+        self.assertIn('env=lanes.environment(s,env)', result)
+        self.assertIn("p=shared_admission.Gate().spawn(", result)
+        self.assertNotIn('or overloaded:break', result)
+        self.assertIn("section='up_next'", result)
+        self.assertIn('except shared_admission.Deferred as exc:', result)
+        self.assertLess(result.index('    try:'), result.index("    atomic(str(prefix)"))
+
+    def test_managed_source_preserves_lease_handshake_and_counts_only_success(self):
+        result = adapter().adapt(MANAGED, managed=True)
+        ast.parse(result)
+        self.assertIn("if managed:s['lease'].update(pid=s['pid'],identity=s['identity'])", result)
+        self.assertLess(result.index('p=shared_admission.Gate().spawn'), result.index('launches+=1;retry_launches+=retrying'))
+        self.assertIn("self._queue_publication(data,s,'blocked'", result)
+        self.assertIn("'admission',section='up_next'", result)
+        self.assertLess(result.index('    try:'), result.index("    atomic(str(prefix)"))
+
+    def test_combined_legacy_prefix_input_line_is_also_protected(self):
+        source = LEGACY.replace("    prefix=Path(s['cwd'])/s['turn']\n", "").replace(
+            "    atomic(str(prefix)", "    prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)")
+        result = adapter().adapt(source, managed=False)
+        self.assertLess(result.index('    try:'), result.index("     atomic(str(prefix)"))
+
+    def test_unknown_or_already_adapted_source_is_refused(self):
+        with self.assertRaises(ValueError):
+            adapter().adapt('import uuid\n', managed=True)
+        result = adapter().adapt(LEGACY, managed=False)
+        with self.assertRaises(ValueError):
+            adapter().adapt(result, managed=False)
+
+
+if __name__ == '__main__':
+    unittest.main()
