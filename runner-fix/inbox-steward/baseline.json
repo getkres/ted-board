@@ -14,7 +14,7 @@
     "veto-mail.ts": "5e9d05efb6ec626f8471e1491ece45ce517a1801bb938287b281ac7b41c7f704"
   },
   "patches": {
-    "runtime.patch": "4d3d37b6c79259e46b8ade59013320196fc7d9502bc9f5177175af7edff0babf",
+    "runtime.patch": "1f3438f641385c69d6e4ce919f8edf7ae6b7b4442f0494c5aa2af038cde37120",
     "feed.patch": "63ffcde8ca8ba1dd3464c9b00692889a9cd7daab682a0384b0596383862c281f"
   }
 }
