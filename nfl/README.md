@@ -25,4 +25,8 @@ A proprietary team version is a separate proposal using data the team and its ve
 
 node --test nfl/play.test.cjs
 
-Existing engine checks remain in the local project at ~/biz/nfl/prototype/weekly/engine.test.js. The browser and PDF verification records for this delivery are retained in the job directory.
+The play/import tests run against the published parser and evidence gate. Additional browser, model integrity, and PDF checks are documented in the delivery review.
+
+## Rush-count and blitzer label audit
+
+The snapshot contains one eligible dropback where the five-plus-rush label differs from the at-least-one-blitzer label: Chicago, week 3, in the training period. All held-out labels coincide in this public subset. Consequently, most stored outcome metrics are identical, while Chicago's fitting probabilities differ. A fresh independent recomputation of all 96 team/outcome groups reproduced each stored Brier to 1e-12. These are still separate source fields and separate target computations. Their near identity limits how much distinct evidence the public blitzer output supplies.
