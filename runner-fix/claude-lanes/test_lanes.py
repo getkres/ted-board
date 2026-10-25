@@ -670,6 +670,13 @@ class LaneTests(unittest.TestCase):
         self.assertNotIn('--resume', sessions.engine_command(inp['session'], 'fixture', Path('fixture')))
         self.assertEqual(inp['session'].get('legacy_main_session_id'), 'main-only-session')
 
+    def test_stale_enabled_layout_cannot_launch_after_flag_disable(self):
+        self.enqueue()
+        layout = claude_lanes.topology(sessions.CLAUDE, str(self.store.root))
+        self.config.write_text('{"enabled": false}')
+        with self.assertRaises(claude_lanes.Unavailable):
+            claude_lanes.prepare(self.state(), False, self.store.read(), sessions.CLAUDE, layout)
+
     def test_main_cap_rejection_does_not_leave_active_lane_metadata(self):
         self.fill('claude', 3, legacy=True); self.store.tick()
         self.assertEqual(len(self.spawns), 2)

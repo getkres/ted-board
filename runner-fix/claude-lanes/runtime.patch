@@ -223,7 +223,7 @@
 +        raise Unavailable(cfg['error'])
 +    if lane not in LANES or not isinstance(directory, str) or not Path(directory).is_absolute():
 +        raise Unavailable('waiting for valid claude session affinity')
-+    if lane != 'main' and not cfg['enabled']:
++    if lane != 'main' and (not cfg['enabled'] or not enabled()):
 +        raise Unavailable('waiting for claude lanes to be enabled')
 +    if lane != 'main':
 +        if not cfg['account2_ready'] or (lane == 'research' and not cfg['account3_ready']):
