@@ -4,7 +4,7 @@
 +"""Reviewed local operational tools."""
 --- /dev/null
 +++ b/scripts/shared_admission.py
-@@ -0,0 +1,354 @@
+@@ -0,0 +1,398 @@
 +#!/usr/bin/env python3
 +"""One host-local resource gate for cooperating model and scheduled commands."""
 +import argparse
@@ -41,6 +41,19 @@
 +        self.error_name = error_type.__name__ if isinstance(error_type, type) and issubclass(error_type, Exception) else None
 +        self.diagnostic = reason_code + (':' + self.error_name if self.error_name else '')
 +        super().__init__(self.diagnostic)
++
++
++class Cancelled(Exception):
++    """A CLI stop request received before admission committed execution."""
++    def __init__(self, signum):
++        self.signum = signum
++        super().__init__('cancelled before admission')
++
++
++def check_cancelled(cancelled):
++    signum = cancelled() if cancelled is not None else None
++    if signum:
++        raise Cancelled(signum)
 +
 +
 +def defer_turn(session, turn, exc, *, approval=None, now=None):
@@ -127,7 +140,7 @@
 +        self.sample = sample
 +
 +    @contextlib.contextmanager
-+    def locked(self):
++    def locked(self, cancelled=None):
 +        # Parent locations are operator-owned. Refuse custom aliases before resolving.
 +        for part in [*reversed(self.root.parents), self.root]:
 +            alias = part in (Path('/var'), Path('/tmp')) and part.resolve() == Path('/private') / part.name
@@ -163,7 +176,17 @@
 +            try:
 +                self.private_file(lock)
 +                os.fchmod(lock, 0o600)
-+                fcntl.flock(lock, fcntl.LOCK_EX)
++                if cancelled is None:
++                    fcntl.flock(lock, fcntl.LOCK_EX)
++                else:
++                    while True:
++                        check_cancelled(cancelled)
++                        try:
++                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
++                            break
++                        except BlockingIOError:
++                            time.sleep(.05)
++                    check_cancelled(cancelled)
 +                yield directory
 +            finally:
 +                os.close(lock)
@@ -217,7 +240,7 @@
 +            except FileNotFoundError:
 +                pass
 +
-+    def spawn(self, command, *, lane, **kwargs):
++    def spawn(self, command, *, lane, cancelled=None, **kwargs):
 +        if lane not in LANES or not command:
 +            raise ValueError('valid lane and command required')
 +        if kwargs.pop('start_new_session', True) is not True:
@@ -226,37 +249,51 @@
 +        spawn_error = None
 +        committed = False
 +        try:
-+            with self.locked() as directory:
-+                leases = self.read(directory)
-+                table = processes()
-+                groups = {p['pgid'] for p in table.values()}
-+                # A live leader with a different identity proves group reuse.
-+                # With no leader, surviving group members still reserve capacity.
-+                leases = [row for row in leases if row['pgid'] in groups and
-+                          (row['pgid'] not in table or table[row['pgid']]['identity'] == row['identity'])]
-+                sample = self.sample()
-+                validate_pressure(sample)
-+                if sample['load'] + sum(row['cpu'] for row in leases) + CPU_PER_RUN > 2 * sample['cores']:
-+                    raise Deferred('LoadCapacity')
-+                floor = max(4 * GIB, .10 * sample['total_bytes'])
-+                if sample['available_bytes'] - sum(row['memory_bytes'] for row in leases) - MEMORY_PER_RUN < floor:
-+                    raise Deferred('MemoryCapacity')
-+                token = uuid.uuid4().hex
-+                guarded = [sys.executable, str(Path(__file__).resolve()), '_child', '--state-dir', str(self.root),
-+                           '--token', token, '--', *map(str, command)]
++            check_cancelled(cancelled)
++            with self.locked(cancelled=cancelled) as directory:
 +                try:
-+                    child = subprocess.Popen(guarded, start_new_session=True, **kwargs)
-+                except Exception as exc:
-+                    # Launch errors are not admission evidence or capacity failures.
-+                    spawn_error = exc
++                    leases = self.read(directory)
++                    table = processes()
++                    groups = {p['pgid'] for p in table.values()}
++                    # A live leader with a different identity proves group reuse.
++                    # With no leader, surviving group members still reserve capacity.
++                    leases = [row for row in leases if row['pgid'] in groups and
++                              (row['pgid'] not in table or table[row['pgid']]['identity'] == row['identity'])]
++                    sample = self.sample()
++                    validate_pressure(sample)
++                    if sample['load'] + sum(row['cpu'] for row in leases) + CPU_PER_RUN > 2 * sample['cores']:
++                        raise Deferred('LoadCapacity')
++                    floor = max(4 * GIB, .10 * sample['total_bytes'])
++                    if sample['available_bytes'] - sum(row['memory_bytes'] for row in leases) - MEMORY_PER_RUN < floor:
++                        raise Deferred('MemoryCapacity')
++                    token = uuid.uuid4().hex
++                    guarded = [sys.executable, str(Path(__file__).resolve()), '_child', '--state-dir', str(self.root),
++                               '--token', token, '--', *map(str, command)]
++                    check_cancelled(cancelled)
++                    try:
++                        child = subprocess.Popen(guarded, start_new_session=True, **kwargs)
++                    except Exception as exc:
++                        # Launch errors are not admission evidence or capacity failures.
++                        spawn_error = exc
++                        raise
++                    check_cancelled(cancelled)
++                    owner = processes().get(child.pid)
++                    if not owner or owner['pgid'] != child.pid:
++                        raise ValueError('unverified child')
++                    leases.append(dict(token=token, lane=lane, pgid=child.pid, identity=owner['identity'],
++                                       memory_bytes=MEMORY_PER_RUN, cpu=CPU_PER_RUN))
++                    check_cancelled(cancelled)
++                    self.write(directory, leases)
++                    check_cancelled(cancelled)
++                    committed = True
++                except BaseException:
++                    # A replaced state file may already contain the reservation.
++                    # Reap an uncommitted helper before releasing its authorization lock.
++                    if child is not None and not committed:
++                        uncommitted = child
++                        child = None
++                        self.stop_uncommitted(uncommitted)
 +                    raise
-+                owner = processes().get(child.pid)
-+                if not owner or owner['pgid'] != child.pid:
-+                    raise ValueError('unverified child')
-+                leases.append(dict(token=token, lane=lane, pgid=child.pid, identity=owner['identity'],
-+                                   memory_bytes=MEMORY_PER_RUN, cpu=CPU_PER_RUN))
-+                self.write(directory, leases)
-+                committed = True
 +            return child
 +        except EVIDENCE_ERRORS as exc:
 +            if exc is spawn_error:
@@ -311,7 +348,10 @@
 +    gate = Gate(args.state_dir)
 +    child = None
 +    handlers = {}
++    pending_signal = None
 +    def forward(signum, frame):
++        nonlocal pending_signal
++        pending_signal = signum
 +        if child is None:
 +            return
 +        try:
@@ -340,9 +380,13 @@
 +        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
 +            handlers[signum] = signal.getsignal(signum)
 +            signal.signal(signum, forward)
-+        child = gate.spawn(command, lane=args.lane)
++        child = gate.spawn(command, lane=args.lane, cancelled=lambda: pending_signal)
++        if pending_signal is not None:
++            forward(pending_signal, None)
 +        result = child.wait()
 +        return result if result >= 0 else 128 - result
++    except Cancelled as exc:
++        return 128 + exc.signum
 +    except Deferred as exc:
 +        print('admission deferred: ' + exc.diagnostic, file=sys.stderr)
 +        return 75
@@ -361,7 +405,7 @@
 +    sys.exit(main())
 --- /dev/null
 +++ b/tests/test_shared_admission.py
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,399 @@
 +import json
 +import contextlib
 +import io
@@ -496,10 +540,18 @@
 +        self.assertFalse(marker.exists())
 +
 +    def test_exited_helper_during_failed_commit_still_defers(self):
-+        with mock.patch.object(self.gate, 'write', side_effect=OSError('private-sentinel')), \
-+             mock.patch.object(os, 'killpg', side_effect=ProcessLookupError):
++        children=[]
++        original=subprocess.Popen
++        def start(*args,**kwargs):
++            child=original(*args,**kwargs);children.append(child);return child
++        def fail_commit(*args):
++            children[-1].terminate();children[-1].wait(timeout=5)
++            raise OSError('private-sentinel')
++        with mock.patch.object(self.gate, 'write', side_effect=fail_commit), \
++             mock.patch.object(admission.subprocess,'Popen',side_effect=start):
 +            with self.assertRaises(admission.Deferred):
 +                self.spawn()
++        self.assertTrue(all(child.poll() is not None for child in children))
 +
 +    def test_cli_preserves_arguments_and_exit_status(self):
 +        marker = self.root.parent / 'literal argument'
@@ -594,7 +646,7 @@
 +                self.assertNotIn(b'private-sentinel', err)
 +                self.assertEqual(out, b'')
 +
-+    def test_forwarding_is_installed_before_spawn_and_noops_without_child(self):
++    def test_stop_before_spawn_exits_without_running_command(self):
 +        saved = {s:signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
 +        self.addCleanup(lambda: [signal.signal(s,h) for s,h in saved.items()])
 +        signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -609,8 +661,58 @@
 +             mock.patch.object(self.gate, 'spawn', start):
 +            result = admission.main(['run','--','%s'%sys.executable,'-c',
 +                                     'from pathlib import Path; Path(%r).touch()'%str(marker)])
-+        self.assertEqual(result,0)
-+        self.assertTrue(marker.exists())
++        self.assertEqual(result,143)
++        self.assertFalse(marker.exists())
++
++    def test_stop_while_waiting_for_gate_never_runs_after_lock_releases(self):
++        ready=self.root.parent/'ready'
++        marker=self.root.parent/'cancelled-command'
++        code = """import importlib.util,sys
++from pathlib import Path
++spec=importlib.util.spec_from_file_location('gate',sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++Original=m.Gate
++class ReadyGate(Original):
++ def __init__(self,root):super().__init__(root,sample=lambda:dict(cores=18,load=0,available_bytes=32*1024**3,total_bytes=64*1024**3))
++ def spawn(self,*a,**k):Path(sys.argv[2]).touch();return super().spawn(*a,**k)
++m.Gate=ReadyGate
++raise SystemExit(m.main(['run','--state-dir',sys.argv[3],'--',sys.executable,'-c','from pathlib import Path;Path('+repr(sys.argv[4])+').touch()']))
++"""
++        with self.gate.locked():
++            child=subprocess.Popen([sys.executable,'-c',code,str(Path(admission.__file__)),str(ready),str(self.root),str(marker)],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
++            deadline=time.monotonic()+5
++            while not ready.exists() and child.poll() is None and time.monotonic()<deadline:time.sleep(.01)
++            self.assertTrue(ready.exists(),'wrapper did not reach admission')
++            child.send_signal(signal.SIGTERM)
++            try:child.wait(timeout=2)
++            except subprocess.TimeoutExpired:pass
++        out,err=child.communicate(timeout=5)
++        self.assertEqual(child.returncode,143,(out,err))
++        self.assertFalse(marker.exists())
++
++    def test_cancel_during_commit_never_executes_the_committed_helper(self):
++        marker=self.root.parent/'cancelled-commit'
++        pending=[0]
++        write=self.gate.write
++        def commit(directory,leases):
++            write(directory,leases);pending[0]=signal.SIGTERM
++        with mock.patch.object(self.gate,'write',side_effect=commit):
++            with self.assertRaises(admission.Cancelled):
++                self.gate.spawn([sys.executable,'-c','from pathlib import Path;Path(%r).touch()'%str(marker)],lane='direct',cancelled=lambda:pending[0])
++        self.assertFalse(marker.exists())
++
++    def test_failed_durability_after_replace_reaps_helper_before_releasing_lock(self):
++        marker=self.root.parent/'failed-commit'
++        write=self.gate.write;stop=self.gate.stop_uncommitted
++        def commit(directory,leases):
++            write(directory,leases);raise OSError('private-sentinel')
++        def delayed_stop(child):
++            deadline=time.monotonic()+.2
++            while not marker.exists() and time.monotonic()<deadline:time.sleep(.01)
++            stop(child)
++        with mock.patch.object(self.gate,'write',side_effect=commit),mock.patch.object(self.gate,'stop_uncommitted',side_effect=delayed_stop):
++            with self.assertRaises(admission.Deferred):
++                self.gate.spawn([sys.executable,'-c','from pathlib import Path;Path(%r).touch()'%str(marker)],lane='direct')
++        self.assertFalse(marker.exists())
 +
 +    def test_cleanup_timeout_kills_and_reaps_before_deferring(self):
 +        children = []
