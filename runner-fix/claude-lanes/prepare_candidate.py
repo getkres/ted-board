@@ -15,6 +15,9 @@ def main():
     args.dest.mkdir(parents=True, mode=0o700)
     for name in ('sessions.py', 'session_worker.py'):
         shutil.copy2(args.source / name, args.dest / name)
+    for name in ('inbox_policy.py', 'runner_failure_templates.json'):
+        if (args.source / name).exists():
+            shutil.copy2(args.source / name, args.dest / name)
     patch = Path(__file__).resolve().with_name('runtime.patch')
     command = ['patch', '--batch', '--fuzz=0', '-p1', '-i', str(patch)]
     for options in (['--dry-run'], []):
