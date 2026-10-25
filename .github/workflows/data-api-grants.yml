@@ -22,3 +22,9 @@ jobs:
       - run: python3 -m unittest discover -s runner-fix -p 'reconciler_runtime_test.py'
       - run: python3 -m unittest discover -s runner-fix -p 'reconciler_packaging_test.py'
       - run: python3 -m unittest discover -s runner-fix -p 'reconciler_review_test.py'
+      - run: node --test tests/aging_wip_test.cjs
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno test --no-check --allow-read --allow-env backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts
+      - run: deno check backend-integration/reconciliation.ts backend-integration/snapshots.ts

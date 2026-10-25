@@ -79,6 +79,20 @@ class RuntimeTests(unittest.TestCase):
   a={'id':'a','kind':'retry','payload':{'expected_turn':'t','expected_lease_token':'f','attempt':1,'retry_at':'2027-01-15T08:01:00Z'}}
   self.assertFalse(d.recover_session(s,a,lambda s:True));a['kind']='stop_worker'
   self.assertTrue(d.recover_session(s,a,lambda s:True));self.assertEqual(s['status'],'queued');self.assertEqual(s['queue'],[{'id':'new'}]);self.assertFalse(s.get('stop_requested'))
+ def test_stopped_review_clears_review_and_active_account_state(self):
+  s={'turn':'t','lease_token':'f','stop_requested':True,'queue':[{'id':'new'}],
+     'reviewing':'approval','review_context':'private review','review_session_id':'review-thread',
+     'review_claude_lane':'design','review_claude_config_dir':'private',
+     'active_claude_lane':'design','active_claude_config_dir':'private','active_claude_managed':True,
+     'active_turn':{'id':'old','kind':'review'},'active_veto_revision':4}
+  a={'id':'stop','kind':'stop_worker','payload':{'expected_turn':'t','expected_lease_token':'f'}}
+  self.assertTrue(d.recover_session(s,a,lambda s:True))
+  self.assertEqual(s['queue'],[{'id':'new'}])
+  for key in ('reviewing','review_context','review_session_id','review_claude_lane',
+              'review_claude_config_dir','active_claude_lane','active_claude_config_dir',
+              'active_claude_managed','active_turn','active_veto_revision'):
+   self.assertNotIn(key,s,key)
+
  def test_renewed_current_lease_invalidates_an_old_recovery_proposal(self):
   import time
   s={'turn':'t','lease_token':'f','status':'running','lease_expires_at':time.time()+150}

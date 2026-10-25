@@ -1,6 +1,6 @@
 --- a/sessions.py
 +++ b/sessions.py
-@@ -313,3 +313,8 @@
+@@ -369,3 +369,8 @@
    for s in data['sessions'].values():
     jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})
    return jobs,[{k:a[k] for k in ('id','card_id','kind','summary','content','digest')} for a in data['approvals'].values() if a['status']=='pending']

@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
+import tempfile
 from unittest.mock import Mock,patch
 
 candidate=os.environ.get('RECONCILER_CANDIDATE')
@@ -48,7 +49,11 @@ class IntegrationTests(unittest.TestCase):
   board.resolve_rule.assert_not_called()
  def test_steward_cannot_mutate_under_reconciler(self):
   with patch.dict(os.environ,{'TED_RECONCILER_ENABLED':'true'}):
-   m=load('inbox_steward');m.snapshot=lambda:([],[],[]);m.move_card=Mock(side_effect=AssertionError('legacy mutation'))
-   self.assertTrue(m.run_once()['dry_run'])
+   m=load('inbox_steward');m.fetch_cards=lambda:[];m.move_card=Mock(side_effect=AssertionError('legacy mutation'))
+   m.disabled=lambda root:False
+   with tempfile.TemporaryDirectory() as temp:
+    result=m.run_once(root=temp)
+    self.assertTrue(result['dry_run']);self.assertEqual(result['failed'],0)
+    self.assertEqual(list(Path(temp).iterdir()),[])
 
 if __name__=='__main__':unittest.main()

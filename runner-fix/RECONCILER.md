@@ -4,6 +4,8 @@ Prepared for Ted re-review. Nothing is installed, enabled, deployed, or database
 
 ## Isolation boundary
 
+The manifest pins the current legacy source bytes, and the separate baseline-dependency manifest pins the installed inbox policy plus both failure-template copies. Any drift requires a fresh reconstruction and review. The managed policy preserves the current exact runner-provenance rules and adds only the separate conservative managed hold classifier. The managed Claude lane helper is the exact new-module artifact from the landed standalone lane bundle.
+
 The managed implementation lives in reconstructed `reconciler_sessions.py`, `reconciler_worker.py`, `reconciler_status.py`, `reconciler_card.py`, `reconciler_heartbeat.py`, `reconciler_handler.ts`, the pure planner, and the driver. Source-derived modules are reconstructed from pinned private sources and reviewed patches. They are never installed in place of the legacy implementations.
 
 Each legacy file receives one marked guarded redirect. Removing that block restores every original source byte. The TypeScript handler also has one side-effect-free support import. Flag off retains the existing `claude` enqueue default, section moves, 64 total workers, separate 2/8 model limits, current load guard, and handler construction with empty or equal keys. It does not read capacity.json. Invalid enable configuration prints a fixed warning, returns disabled to legacy callers, and blocks explicit apply, including when the enable environment override is true.
@@ -22,15 +24,17 @@ python3 runner-fix/reconstruct_reconciler.py \
 
 CI=true RECONCILER_CANDIDATE="$CANDIDATE" python3 -m unittest discover -s runner-fix -p '*reconciler*test.py'
 TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/lease_dispatch_test.py
-TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/failure_routing_test.py
+TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/managed_failure_routing_test.py
 PYTHONPATH="$CANDIDATE${PYTHONPATH:+:$PYTHONPATH}" TED_RUNTIME_SOURCE="$CANDIDATE" python3 runner-fix/mockup_autoarchive_test.py
-RECONCILIATION_HANDLER_SOURCE="$CANDIDATE/backend/handler.ts" TED_RUNTIME_SOURCE="$CANDIDATE/backend" deno test --no-check --allow-read --allow-env backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts runner-fix/failure_handler_test.ts
-deno check backend-integration/reconciliation.ts backend-integration/snapshots.ts "$CANDIDATE/backend/handler.ts" "$CANDIDATE/backend/reconciler_handler.ts"
+TED_RECONCILER_ENABLED=true RECONCILIATION_HANDLER_SOURCE="$CANDIDATE/backend/handler.ts" TED_RUNTIME_SOURCE="$CANDIDATE/backend" deno test --no-check --allow-read --allow-env backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts runner-fix/failure_handler_test.ts
+deno check backend-integration/reconciliation.ts backend-integration/snapshots.ts "$CANDIDATE/backend/reconciler_handler.ts"
 node --test tests/aging_wip_test.cjs
 python3 scripts/check_data_api_grants.py
 python3 scripts/check_data_api_grants.py --root "$TED_BOARD_ROOT"
 python3 -m unittest discover -s tests -p 'test_data_api_grants.py'
 ```
+
+The current installed legacy handler has two pre-existing TypeScript errors at the runner-failure `Object.hasOwn` calls, where parsed values have type unknown. The wrapper preserves those exact source bytes when the support import and route are removed, so its legacy branch retains that upstream typing limitation. The isolated managed handler adds explicit string guards and passes `deno check`; the wrapper is exercised by the offline `--no-check` tests. Do not claim the inherited legacy wrapper passes type checking.
 
 `legacy-baseline/` and `backend/legacy-handler-baseline.ts` are private test fixtures in the candidate. Do not deploy those fixtures. A missing RECONCILER_CANDIDATE fails the private CI suite. Public CI explicitly runs only the planner, runtime, review regressions, and packaging tests that it can reconstruct without installed private sources.
 
@@ -53,7 +57,7 @@ The backend handler redirect has its own opt-in environment flag, `TED_RECONCILE
 ## Mini cutover, only after review and separate authorization
 
 1. Confirm the host is the mini. Record the reviewed commit. Back up every installed file named in the reconstruction manifest, existing capacity and enable files, the current steward release, launchd plists, and the sessions ledger into a private timestamped directory. Preserve file modes and dedicated Claude account affinity. Do not use old cap-3 or cap-16 backups as the rollback baseline.
-2. Pause the existing dispatch producers and settle all legacy attempts through the existing operator controls. Running or unsettled lease-less sessions block `--apply` before any remote mutation. A dead PID with a still-running ledger row still requires Ted to review and settle that old attempt. Do not call Store.tick() merely to drain, because the legacy method can start queued work. This packet does not adopt, kill, or retry legacy lease-less workers.
+2. Inspect the fresh dry-run list of every proposed first dispatch before applying. The planner has no parked-card hold marker, so resolve deliberately parked cards through existing operator controls and review the exact start set before first enablement. Pause the existing dispatch producers and settle all legacy attempts through the existing operator controls. Running or unsettled lease-less sessions block `--apply` before any remote mutation. A dead PID with a still-running ledger row still requires Ted to review and settle that old attempt. Do not call Store.tick() merely to drain, because the legacy method can start queued work. This packet does not adopt, kill, or retry legacy lease-less workers.
 3. Reconstruct again against the current live hashes and repeat the offline checks. Refuse drift. Install the manifest's reviewed legacy redirects and isolated modules as one set while producers remain paused. Install the candidate backend files through the separate authorized deployment process. Leave the hourly skill unchanged. Do not stack earlier PR 40, PR 41, failure-routing, or old PR 45 runtime patches over this bundle.
 4. Keep the local enable flag false during flag-off verification. Verify the legacy source comparison, default engine, section moves, model caps, missing-capacity behavior, and empty-key handler behavior again. Capacity and managed imports must have no effect on legacy operation.
 5. Render `runner-fix/reconciler-launchd.plist` by replacing `__TED_BOARD_ROOT__` with the absolute private mini runtime path. Validate the rendered plist with `plutil -lint`. Ted installs it as `~/Library/LaunchAgents/co.ted.card-reconciler.plist` on the mini only. It is a new dedicated entry, not a second lifecycle invocation from board-live. Do not bootstrap it before the database, backend, legacy drain, and local configuration checks are ready.
@@ -76,7 +80,7 @@ Malformed ledger rows and invalid queue references are quarantined as safe cover
 
 ## Rollback
 
-Ted stops the dedicated reconciler entry first, pauses producers, drains or reviews managed attempts, and preserves receipts, health observations, queues, and new metadata. Disable both opt-in flags, restore the freshly backed-up legacy files, steward release, prior backend, capacity and enable files, and existing plists as a reviewed set, and restart only the services that were paused. Do not overwrite a ledger that has processed newer turns with a stale backup. Dedicated Claude conversations cannot be moved to another account as part of rollback. Database rollback is separately authorized and uses the private reviewed packet after exporting any new metadata that must be retained.
+Ted pauses producers, settles every acknowledged stop request while the dedicated reconciler is still available, drains or reviews managed attempts, and preserves receipts, health observations, queues, and new metadata. Before disabling managed mode, confirm no `stop_requested` row remains and no dead-lettered row carries an automatically executable queue. Preserve newer human requests separately for operator review, rather than allowing legacy dispatch to start them during rollback. Stop the dedicated reconciler entry after that drain. Disable both opt-in flags, restore the freshly backed-up legacy files, steward release, prior backend, capacity and enable files, and existing plists as a reviewed set, and restart only the services that were paused. Do not overwrite a ledger that has processed newer turns with a stale backup. Dedicated Claude conversations cannot be moved to another account as part of rollback. Database rollback is separately authorized and uses the private reviewed packet after exporting any new metadata that must be retained.
 
 The mini remains a single-host failure boundary. No independent paid monitor was created. A stale browser ledger is a warning, not proof of live delivery.
 

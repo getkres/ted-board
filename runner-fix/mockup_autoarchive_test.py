@@ -19,7 +19,6 @@ RECENT = (NOW - timedelta(days=1)).isoformat()
 HERE = Path(__file__).resolve().parent
 TEMP = tempfile.TemporaryDirectory()
 ROOT = Path(os.environ.get('TED_RUNTIME_SOURCE', TEMP.name))
-sys.path.insert(0, str(ROOT))
 if 'TED_RUNTIME_SOURCE' not in os.environ:
     subprocess.run(['patch', '-s', '-p0', '-i', str(HERE / 'mockup-autoarchive.patch')],
                    cwd=ROOT, check=True, capture_output=True)

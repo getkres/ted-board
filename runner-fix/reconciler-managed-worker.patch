@@ -82,22 +82,17 @@
      if event.get('session_id'):sid=event['session_id']
      if event.get('type')=='result':payload=event
     text=payload.get('result','');ok=p.returncode==0 and bool(payload) and not payload.get('is_error',False)
-@@ -52,10 +86,13 @@
-     except ValueError:continue
-     if event.get('type')=='thread.started':sid=event.get('thread_id')
+@@ -54,11 +88,11 @@
     last=Path(str(prefix)+'.last.txt');text=last.read_text() if last.exists() else '';ok=p.returncode==0
--  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer. Reply to retry.',session_id=sid)
-- except subprocess.TimeoutExpired:result=dict(ok=False,text='Worker exceeded the twelve-hour limit.')
-- except Exception as exc:result=dict(ok=False,text='Worker failed: '+type(exc).__name__+'. Reply to retry.')
+   ok=ok and bool(text.strip())
+   result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer.',session_id=sid)
++  if s['engine'] in ('claude','sonnet') or inp.get('review'):result['lane_usage']=lanes.observe(events)
+   if not ok:result['failure_kind']='no_result' if p.returncode==0 and not text.strip() else 'crash'
+  except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the twelve-hour limit.')
+  except Exception:result=dict(ok=False,failure_kind='crash',text='Worker failed before returning a result.')
+  if result['ok']:result['completion']=dict(section='up_next',note='ted review')
 - atomic(str(prefix)+'.result.json',result)
 - claim.close()
-+  ok=ok and bool(text.strip())
-+  result=dict(ok=ok,text=text.strip() or 'Worker returned no final answer.',session_id=sid)
-+  if s['engine'] in ('claude','sonnet') or inp.get('review'):result['lane_usage']=lanes.observe(events)
-+  if not ok:result['failure_kind']='no_result' if p.returncode==0 and not text.strip() else 'crash'
-+ except subprocess.TimeoutExpired:result=dict(ok=False,failure_kind='timeout',text='Worker exceeded the twelve-hour limit.')
-+ except Exception:result=dict(ok=False,failure_kind='crash',text='Worker failed before returning a result.')
-+ if result['ok']:result['completion']=dict(section='up_next',note='ted review')
 + return result
  
  if __name__=='__main__':run(sys.argv[1])

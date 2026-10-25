@@ -20,6 +20,11 @@ def main():
  here=Path(__file__).resolve().parent
  manifest=json.loads((here/'reconciler-manifest.json').read_text())
  if a.output.exists():p.error('output must be a new private directory')
+ dependencies=here/'reconciler-baseline-dependencies.json'
+ if not dependencies.is_file():p.error('baseline dependency manifest is missing')
+ for relative,expected in json.loads(dependencies.read_text()).items():
+  source=a.baseline/relative
+  if source.is_symlink() or not source.is_file() or sha(source)!=expected:p.error('baseline dependency changed for '+relative+', rebase and rerun review')
  sources={}
  baselines={}
  for name,row in manifest.items():
@@ -47,8 +52,9 @@ def main():
  for name in ('board_client.py','sync.py','mockup_client.py','board_reply.py'):
   source=a.baseline/name
   if source.is_file():shutil.copyfile(source,a.output/name);(a.output/name).chmod(0o600)
- for source in (a.baseline/'supabase/functions/ted-board').glob('*.ts'):
-  if source.name!='handler.ts':shutil.copyfile(source,a.output/'backend'/source.name)
+ for source in (a.baseline/'supabase/functions/ted-board').iterdir():
+  if source.is_file() and source.suffix in ('.ts','.json') and source.name!='handler.ts':
+   shutil.copyfile(source,a.output/'backend'/source.name)
  shutil.copyfile(here.parent/'backend-integration/reconciliation.ts',a.output/'backend/reconciliation.ts')
  shutil.copyfile(a.output/'legacy-baseline/handler.ts',a.output/'backend/legacy-handler-baseline.ts')
  print('private candidate reconstructed and checksums verified; nothing installed')

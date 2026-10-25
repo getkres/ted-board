@@ -60,7 +60,7 @@ class LegacyIsolation(unittest.TestCase):
     def test_flag_off_live_section_move_payload_is_byte_identical(self):
         payloads = []
         for path in (BASE / 'live_status.py', ROOT / 'live_status.py'):
-            client = types.SimpleNamespace(call=lambda action, **body: payloads.append(json.dumps([action, body], sort_keys=True).encode()) or dict(ok=True, card=dict(id='fixture')))
+            client = types.SimpleNamespace(BoardGone=LookupError, cards=lambda: [dict(id='fixture', project='Fixture', section='ted_doing')], call=lambda action, **body: payloads.append(json.dumps([action, body], sort_keys=True).encode()) or dict(ok=True, card=dict(id='fixture')))
             module = load(path, 'status_' + str(len(payloads)), {'board_client': client})
             module.update('fixture', 'done', 'finished', section='done')
         self.assertEqual(payloads[0], payloads[1])

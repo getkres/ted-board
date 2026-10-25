@@ -2,10 +2,10 @@
 +++ b/reconciler_handler.ts
 @@ -1,3 +1,4 @@
 +import { createSupabaseReconciliationStore, handleReconciliationAction, readReconciliation } from './reconciliation.ts';
+ import failureTemplates from './runner_failure_templates.json' with {type:'json'};
  import { currentChat, publishChat, validChatURL } from './chat.ts';
  import { syncCards } from './sync.ts';
- import { frontdoor, workerActions, pageActions } from './frontdoor.ts';
-@@ -62,13 +63,15 @@
+@@ -77,13 +78,15 @@
    });
  }
  export function createHandler(db: Database, pageKey: string, workerKey: string, delivery = vetoDelivery()) {
@@ -19,10 +19,10 @@
        if (new URL(req.url).searchParams.get('resource') === 'control') { const {data,error}=await controlState(db); return error?json({error:'Could not load controls'},500):json({...data as Record<string,unknown>,veto_delivery:delivery}); }
 -      if (new URL(req.url).searchParams.get('resource') === 'jobs') { const {data,error}=await db.rpc('ted_board_jobs'); if(error)return json({error:'Could not load jobs'},500); const fresh=await db.rpc('ted_board_fresh_control',{p_action:'state'}); return fresh.error?json({error:'Could not load fresh Ted'},500):json({...data,fresh_ted:fresh.data,ted_chat_url:await currentChat(db)}); }
 +      if (new URL(req.url).searchParams.get('resource') === 'jobs') { const {data,error}=await db.rpc('ted_board_jobs'); if(error)return json({error:'Could not load jobs'},500); const fresh=await db.rpc('ted_board_fresh_control',{p_action:'state'}); return fresh.error?json({error:'Could not load fresh Ted'},500):json({...data,fresh_ted:fresh.data,ted_chat_url:await currentChat(db),...await readReconciliation(reconciliationStore)}); }
-       const {data,error} = await db.from('ted_board_cards').select('*').order('sort').order('id').limit(500);
-       if (error) return json({error:'Could not load cards'},500);
-       try {
-@@ -90,6 +93,8 @@
+       const section = new URL(req.url).searchParams.get('section');
+       if (section !== null && section !== 'needs_you') return json({error:'Invalid card section filter'},400);
+       let cardsQuery = db.from('ted_board_cards').select('*');
+@@ -109,6 +112,8 @@
        const error = await syncCards(db,cards,b.replace === true);
        return error ? json({error:error.code==='22023'?'Matching rule or card state changed. Review the ask and try again.':'Could not sync cards'},error.code==='22023'?409:500) : json({ok:true,count:cards.length});
      }
@@ -31,24 +31,16 @@
      if (b.action === 'pod_pulse') {
        if (!sameKey(String(b.key ?? ''),workerKey)) return json({error:'forbidden'},403);
        const pods = validatePodPulse(b.pods);
-@@ -110,8 +115,14 @@
-       if (typeof b.card_id !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(b.card_id)) return json({error:'Invalid card_id'},400);
-       if (!['running','blocked','waiting_on_you','done'].includes(String(b.state))) return json({error:'Invalid live state'},400);
-       if (typeof b.line !== 'string' || !b.line.trim() || b.line.length > 240 || /[\u0000-\u001f\u007f\u2014]/.test(b.line)) return json({error:'Use one short status line'},400);
--      if (b.section !== undefined && !['done','needs_you','ted_doing'].includes(String(b.section))) return json({error:'Invalid live section'},400);
--      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') return json({error:'Invalid section guard'},400);
-+      if (b.section !== undefined && !['done','needs_you','ted_doing','up_next'].includes(String(b.section))) return json({error:'Invalid live section'},400);
-+      if (b.state === 'waiting_on_you' && b.section !== 'needs_you') return json({error:'A decision requires a Needs you transition'},400);
-+      if (b.expected_section !== undefined && b.expected_section !== 'ted_doing') {
-+        const cleanup=b.expected_section==='needs_you' && typeof b.expected_updated_at==='string'
-+          && ((b.section==='up_next' && b.state==='blocked') || (b.section==='done' && b.state==='done'));
-+        const recovery=b.expected_section==='up_next' && b.section==='ted_doing' && b.state==='running';
-+        if(!cleanup&&!recovery)return json({error:'Invalid section guard'},400);
-+      }
-       if (b.expected_updated_at !== undefined && (typeof b.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(b.expected_updated_at)))) return json({error:'Invalid timestamp guard'},400);
-       if (b.ask_anyway_reason !== undefined && (typeof b.ask_anyway_reason !== 'string' || !b.ask_anyway_reason.trim() || b.ask_anyway_reason.length > 400 || /[\u0000-\u001f\u007f\u2014]/.test(b.ask_anyway_reason))) return json({error:'Invalid rule review reason'},400);
-       if (b.ask_anyway_reason !== undefined && b.section !== 'needs_you') return json({error:'Rule review reason requires a Needs you transition'},400);
-@@ -182,3 +193,11 @@
+@@ -200,7 +205,7 @@
+     if (b.action === 'runner_failure') {
+       if(!sameKey(String(b.key??''),workerKey))return json({error:'forbidden'},403);
+       const kind=b.failure_kind,recovery=b.recovery;
+-      if(typeof b.card_id!=='string'||!/^[A-Za-z0-9._-]{1,64}$/.test(b.card_id)
++      if(typeof kind!=='string'||typeof recovery!=='string'||typeof b.card_id!=='string'||!/^[A-Za-z0-9._-]{1,64}$/.test(b.card_id)
+           ||typeof b.token!=='string'||!/^[A-Za-z0-9._-]{1,150}$/.test(b.token)
+           ||!Object.hasOwn(failureTemplates.failures,kind)||!Object.hasOwn(failureTemplates.recovery,recovery)
+           ||b.text!==undefined||b.runner_failure!==undefined)return json({error:'Invalid runner failure'},400);
+@@ -245,3 +250,11 @@
    }
   };
  }

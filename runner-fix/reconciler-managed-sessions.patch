@@ -1,13 +1,13 @@
 --- a/sessions.py
 +++ b/reconciler_sessions.py
-@@ -11,15 +11,34 @@
+@@ -11,16 +11,34 @@
  import sys
  import time
  import uuid
 +import claude_lanes as lanes
  from board_client import BoardConflict, BoardGone, call
  from live_status import instructions, publish_live
-+from inbox_policy import failure_kind, FAILURE_LINE, approval_line
+ from inbox_policy import failure_kind, failure_message, FAILURE_LINE, approval_line
 +from reconciler import LIFETIME_DISPATCH_LIMIT
 +from runner_admission import admission_state, can_admit, priority_key, stamp, reconciler_enabled
 +
@@ -36,7 +36,7 @@
   "Draft external sends and spending only: write draft-email.json or spend.json with summary, exact text, recipients or amount, and execution instructions, then stop for card approval. "
   "Narrow veto exception: only for a queued veto_cleared proposal, the dedicated veto worker invokes the server to send the exact cleared routine email to the already known recipient. "
   "Timed drafts are sent only through the dedicated veto worker and the server veto_send gate. General model turns cannot execute a timed send. The server checks veto_details, status cleared, the same card revision, confidence at least 80 percent, "
-@@ -61,10 +80,10 @@
+@@ -62,10 +80,10 @@
  
  def engine_command(s,prompt,prefix,review=False):
   if review:
@@ -49,26 +49,39 @@
    if s.get('session_id'):cmd+=['--resume',s['session_id']]
    return cmd+[prompt]
   common=['--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','-m','gpt-6.1-sol','-o',str(prefix)+'.last.txt']
-@@ -110,6 +129,18 @@
+@@ -91,12 +109,6 @@
+ 
+ 
+ def deliver(item):
+- if item.get('runner_failure'):
+-  try:
+-   result=call('runner_failure',card_id=item['card_id'],token=item['token'],**item['runner_failure'])
+-   return isinstance(result,dict) and result.get('ok') is True and isinstance(result.get('card'),dict)
+-  except BoardGone:return True
+-  except (RuntimeError,ValueError):return False
+  import board_reply
+  return board_reply.main([item['card_id'],item['text'],'--token',item['token']])==0
+ 
+@@ -115,6 +127,18 @@
+ 
+ def review_live_line(kind):
   return {'email':'approved, sending now','spend':'approved, executing spend now','db':'approved, applying now'}[kind]
- 
- 
++
++
 +def operational_note(item):
 + token=str(item.get('token',''))
 + text=str(item.get('text','')).strip()
-+ return token.startswith(('worker-failure-','reconciler-dlq-','reconciler-lifetime-','artifact-error-','changed-')) or (text.lower().startswith('worker ') and failure_kind(text) is not None) or text.startswith('REVIEW_BLOCKED')
++ return token.startswith(('worker-failure-','reconciler-dlq-','reconciler-lifetime-','artifact-error-','changed-')) or failure_kind(text) is not None or re.search(r'^worker (?:exceeded|timed out|timeout|stopped|could not start|failed|crashed|returned no final)',text,re.I) is not None or text.startswith('REVIEW_BLOCKED')
 +
 +
 +def retain_ted_note(data,item):
 + note=dict(item,owner='ted')
 + notes=data.setdefault('ted_outbox',[])
 + if not any(x.get('token')==note.get('token') and x.get('card_id')==note.get('card_id') for x in notes):notes.append(note)
-+
-+
+ 
+ 
  class Store:
-  def __init__(self,root=ROOT/'jobs'):
-   self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.path=self.root/'sessions.json'
-@@ -123,7 +154,15 @@
+@@ -130,7 +154,15 @@
     else:atomic(self.path,data)
   def read(self):
    with self.locked() as data:return json.loads(json.dumps(data))
@@ -85,7 +98,7 @@
    if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude','sonnet'):raise ValueError('Invalid card or engine')
    veto_id=str(receipt_id)[5:] if str(receipt_id).startswith('veto-') else None
    if veto_id and (isinstance(card.get('revision'),bool) or not isinstance(card.get('revision'),int) or card['revision']<1):
-@@ -131,39 +170,128 @@
+@@ -138,29 +170,42 @@
    with self.locked() as data:
     if str(receipt_id) in data['receipts']:return False
     cid=card['id'];s=data['sessions'].get(cid)
@@ -106,7 +119,7 @@
 +   if not automatic and not str(receipt_id).startswith('reconciler-retry-'):
 +    s['retry_count']=0;s.pop('retry_at',None)
 +   if automatic:s['automatic_dispatched']=True
-+   s['decision_scope']={k:card.get(k) for k in ('title','body','decision_kind','project')}
+    s['decision_scope']={k:card.get(k) for k in ('title','body','decision_kind','project')}
     if s['status']=='waiting_approval':
      for a in data['approvals'].values():
       if a['card_id']==cid and a['status']=='pending':a.update(status='superseded',sync_status=True)
@@ -118,34 +131,39 @@
 +   if s['status'] not in ('running','waiting_approval') and not (reconciler_enabled() and s['status']=='dead_letter'):s['status']='queued'
     data['receipts'].append(str(receipt_id))
     return True
-  def _out(self,data,s,text,token):
--  data['outbox'].append(dict(card_id=s['card_id'],text=text.replace(chr(8212),'-')[:2000] or 'Worker returned no answer.',token=token))
+- def _out(self,data,s,text,token,**metadata):
+-  data['outbox'].append(dict(card_id=s['card_id'],text=text.replace(chr(8212),'-')[:2000] or 'Worker returned no answer.',token=token,**metadata))
++ def _out(self,data,s,text,token):
 +  item=dict(card_id=s['card_id'],text=text.replace(chr(8212),'-')[:2000] or 'Worker returned no answer.',token=token)
 +  if operational_note(item):retain_ted_note(data,item)
 +  else:data['outbox'].append(item)
   def _fail_artifact(self,data,s):
--  line='approval artifact is unsafe or over 60 kb; fix it, then reply to retry'
-+  line='approval artifact failed safety checks, ted needs to repair the packet'
+   line='approval artifact failed safety checks, ted needs to repair the packet'
    already_reported=s.get('artifact_error')==line
    s.update(status='failed',queue=[],last_line=line,artifact_error=line,last_activity=time.time())
 +  lanes.clear_review(s)
    for approval in data['approvals'].values():
     if approval['card_id']==s['card_id'] and approval['status'] in ('pending','approved','reviewing'):
      approval.update(status='superseded',reason='approval artifact failed safety checks',sync_status=True)
-   if not already_reported:
--   self._out(data,s,'Approval stopped: the artifact is unsafe, unreadable, or over 60 KB. Fix the file, then reply to retry.','artifact-error-'+uuid.uuid4().hex)
-- def tick(self):
-+   self._out(data,s,'Ted review: the approval artifact is unsafe, unreadable, or over 60 KB. Ted will repair the packet.','artifact-error-'+uuid.uuid4().hex)
-+  s['failure_publish_pending']=True
-+ def _worker_failure(self,data,s,kind,retry=False):
-+  active=s.get('active_turn') or {}
-+  group=active.get('recovery_group') or s.get('turn') or uuid.uuid4().hex
-+  s.update(failure_kind=kind,failure_publish_pending=True,last_line=FAILURE_LINE)
-+  if s.get('failure_note_group')!=group:
+@@ -170,36 +215,95 @@
+  def _worker_failure(self,data,s,kind,retry=False):
+   active=s.get('active_turn') or {}
+   group=active.get('recovery_group') or s.get('turn') or uuid.uuid4().hex
+-  s.update(failure_kind=kind,failure_publish_pending=True)
+-  eligible=retry and not active.get('recovery_attempt')
+-  recovery='suppressed' if eligible and s.get('queue') else ('retry' if eligible else 'held')
+-  note=failure_message(kind,recovery)
+-  s.update(failure_message=note,last_line=note)
++  note=failure_message(kind,'held')
++  s.update(failure_kind=kind,failure_message=note,failure_publish_pending=True,last_line=note)
+   if s.get('failure_note_group')!=group:
+-   self._out(data,s,note,'worker-failure-'+group,runner_failure=dict(failure_kind='startup_failure' if kind=='start_failure' else kind,recovery=recovery))
 +   self._out(data,s,'Ted review: a worker failed. Ted owns bounded recovery from the job files.' if reconciler_enabled() else 'Ted review: a worker failed. Ted owns recovery from the job files. Timeout and missing-result work gets one automatic retry, then holds for Ted.','worker-failure-'+group)
-+   s['failure_note_group']=group
+    s['failure_note_group']=group
+-  if eligible and not s.get('queue'):
 +  if retry and not active.get('recovery_attempt') and not s.get('queue'):
-+   s['queue'].insert(0,dict(id=str(uuid.uuid4()),kind='work',message='Resume from your files. Read BRIEF.md and REPORT.md, inspect saved artifacts, and continue the unfinished work. Check prior effects before repeating any action.',recovery_attempt=1,recovery_group=group))
+    s['queue'].insert(0,dict(id=str(uuid.uuid4()),kind='work',message='Resume from your files. Read BRIEF.md and REPORT.md, inspect saved artifacts, and continue the unfinished work. Check prior effects before repeating any action.',recovery_attempt=1,recovery_group=group))
+- def _publish_failure(self,s):
 + def _queue_publication(self,data,s,state,line,kind,**kwargs):
 +  item=dict(card_id=s['card_id'],state=state,line=line,kind=kind,kwargs=kwargs,turn=s.get('turn'),lease_token=s.get('lease_token'),status=s.get('status'))
 +  item['id']=hashlib.sha256(json.dumps(item,sort_keys=True).encode()).hexdigest()
@@ -167,7 +185,17 @@
 +     if not valid:
 +      if current.get('id')==item['id']:data['publications'].pop(cid,None)
 +      continue
-+    try:confirmed=publish_live(cid,item['state'],item['line'],**item['kwargs'])
++    try:confirmed=publish_live(cid,item['state'],item['line'],raise_gone=True,**item['kwargs'])
++    except BoardGone:
++     with self.locked() as data:
++      current=data.get('publications',{}).get(cid,{})
++      s=data['sessions'].get(cid,{})
++      if current.get('id')==item['id']:
++       data['publications'].pop(cid,None)
++       if all(s.get(key)==item.get(key) for key in ('turn','lease_token','status')):
++        s.pop('failure_publish_pending',None);s.pop('recovery_section',None)
++        s.update(status='failed',queue=[],last_line='card deleted, recovery cancelled')
++     continue
 +    except (OSError,RuntimeError):confirmed=False
 +    if not confirmed:continue
 +    with self.locked() as data:
@@ -179,24 +207,35 @@
 +     if item['kind']=='failure':s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
 +     elif item['kind'] in ('start','resume'):s.pop('recovery_section',None)
 + def _publish_failure(self,s,data=None):
-+  if s.get('failure_publish_pending'):
+   if s.get('failure_publish_pending'):
+-   try:confirmed=publish_live(s['card_id'],'blocked',s.get('failure_message',FAILURE_LINE),section='up_next',raise_gone=True)
+-   except BoardGone:
+-    s.pop('failure_publish_pending',None);s.pop('recovery_section',None)
+-    s.update(status='failed',queue=[],last_line='card deleted, recovery cancelled')
+-    return
+-   if confirmed:
 +   if data is not None:
-+    self._queue_publication(data,s,'blocked',FAILURE_LINE,'failure',section='up_next');return
-+   if publish_live(s['card_id'],'blocked',FAILURE_LINE,section='up_next'):
-+    s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
++    self._queue_publication(data,s,'blocked',s.get('failure_message',FAILURE_LINE),'failure',section='up_next');return
++   if publish_live(s['card_id'],'blocked',s.get('failure_message',FAILURE_LINE),section='up_next'):
+     s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
+- def tick(self):
 + def tick(self,reconcile=False):
 +  if not reconciler_enabled():return
 +  managed=True
 +  if not reconcile:return
++  layout=lanes.topology(CLAUDE,str(self.root))
    with self.locked() as data:
     for s in data['sessions'].values():
+-    self._publish_failure(s)
+-    if s.get('recovery_section') and s['status']=='running' and alive(s.get('pid'),s.get('identity')):
+-     if publish_live(s['card_id'],'running','worker is resuming from the saved job files',section='ted_doing',expected_section='up_next'):
 +    if managed and s.get('stop_requested'):continue
 +    self._publish_failure(s,data if managed else None)
 +    if s.get('recovery_section') and s['status']=='running' and (not managed or (lease_matches(s,s.get('turn'),s.get('pid'),s.get('identity'),s.get('lease_token')) and stamp(s.get('lease_expires_at'))>time.time())) and alive(s.get('pid'),s.get('identity')):
 +     if managed:self._queue_publication(data,s,'running','worker is resuming from the saved job files','resume',section='ted_doing',expected_section='up_next')
 +     elif publish_live(s['card_id'],'running','worker is resuming from the saved job files',section='ted_doing',expected_section='up_next'):
-+      s.pop('recovery_section',None)
-+   for s in data['sessions'].values():
+       s.pop('recovery_section',None)
+    for s in data['sessions'].values():
 +    if managed and s.get('stop_requested'):continue
      if s['status']!='running':continue
      prefix=Path(s['cwd'])/s['turn'];result=Path(str(prefix)+'.result.json')
@@ -221,19 +260,23 @@
       activity_path=Path(str(prefix)+'.events')
       if activity_path.exists():
        s['last_activity']=max(s['last_activity'],activity_path.stat().st_mtime)
-@@ -179,75 +307,146 @@
+@@ -215,14 +319,26 @@
         if event.get('type') in ('item.started','item.completed'):
          s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
       s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);continue
--    r=json.loads(result.read_text()) if result.exists() else dict(ok=False,text='Worker stopped without a final result. Reply to retry.')
+-    try:
+-     r=json.loads(result.read_text()) if result.exists() else dict(ok=False,failure_kind='no_result',text='Worker stopped without a final result.')
+-     if not isinstance(r,dict) or not isinstance(r.get('ok'),bool) or not isinstance(r.get('text'),str):raise ValueError('Invalid worker result')
+-    except (OSError,ValueError):r=dict(ok=False,failure_kind='crash',text=failure_message('crash'))
 +    if r is None:
 +     try:
 +      r=json.loads(result.read_text()) if result.exists() else dict(ok=False,failure_kind='no_result',text='Worker stopped without a final result.')
 +      if not isinstance(r,dict) or not isinstance(r.get('ok'),bool) or not isinstance(r.get('text'),str):raise ValueError('Invalid worker result')
 +     except (OSError,ValueError):r=dict(ok=False,failure_kind='crash',text='Worker result was unreadable, ted needs to inspect the job files.')
-+    if r.get('ok') and not r.get('text','').strip():r.update(ok=False,failure_kind='no_result')
+     if r.get('ok') and not r.get('text','').strip():r.update(ok=False,failure_kind='no_result')
+-    if not r.get('failure_kind') and r.get('text','').startswith('Worker returned no final answer.'):
 +    if r.get('text','').startswith('Worker returned no final answer.'):
-+     r.update(ok=False,failure_kind='no_result')
+      r.update(ok=False,failure_kind='no_result')
 +    s.pop('recovery_required',None)
 +    if r.get('session_id') and s.get('reviewing'):s['review_session_id']=r['session_id']
      if r.get('session_id') and not s.get('reviewing'):s['session_id']=r['session_id']
@@ -249,16 +292,15 @@
      veto_revision=s.pop('active_veto_revision',None)
      if veto_revision is not None:
       outcome=r.get('veto_outcome')
-      if outcome not in ('sent','failed','uncertain') or bool(r.get('ok'))!=(outcome=='sent'):outcome='uncertain'
-      s['veto_outcome']=dict(status=outcome,revision=veto_revision)
-     s.update(status='done' if r['ok'] else 'failed',last_activity=time.time(),pid=None,last_line=r.get('text','')[-500:])
--    self._out(data,s,r.get('text',''),s['turn'])
-+    failed=not r['ok'] and not s.get('kill_requested_at')
-+    if failed:
-+     kind=r.get('failure_kind') or failure_kind(r.get('text')) or 'crash'
+@@ -233,69 +349,112 @@
+     failed=not r['ok'] and not s.get('kill_requested_at') and not known_veto_gate
+     if failed:
+      kind=r.get('failure_kind') or failure_kind(r.get('text')) or 'crash'
+-     self._worker_failure(data,s,kind,retry=kind in ('timeout','no_result') and not s.get('reviewing') and veto_revision is None)
+-     self._publish_failure(s)
 +     self._worker_failure(data,s,kind,retry=not managed and kind in ('timeout','no_result') and not s.get('reviewing') and veto_revision is None)
 +     self._publish_failure(s,data if managed else None)
-+    else:self._out(data,s,r.get('text',''),s['turn'])
+     else:self._out(data,s,r.get('text',''),s['turn'])
      if s.get('reviewing'):
       aid=s.pop('reviewing');a=data['approvals'][aid]
       a['status']='done' if r['ok'] and r.get('text','').strip().splitlines()[-1:] == ['APPLY_OK'] else 'failed'
@@ -268,26 +310,25 @@
      if s.get('kill_requested_at'):
       s.update(status='failed',last_line='Stopped on request');s.pop('kill_requested_at',None)
      if s['queue']:s['status']='queued'
+     elif s['status']=='done' and veto_revision is None:
+-     publish_live(s['card_id'],'blocked','ted review',section='up_next')
 -   running=sum(s['status']=='running' for s in data['sessions'].values())
 -   claude_running=sum(s['status']=='running' and s.get('engine')=='claude' for s in data['sessions'].values())
 -   sonnet_running=sum(s['status']=='running' and s.get('engine')=='sonnet' for s in data['sessions'].values())
 -   overloaded=os.getloadavg()[0]>2*(os.cpu_count() or 8)
 -   for s in data['sessions'].values():
 -    if running>=64 or overloaded:break
--    if s['status']=='running' or not s['queue']:continue
--    if s.get('engine')=='claude' and s['queue'][0]['kind']!='review' and claude_running>=2:continue
--    if s.get('engine')=='sonnet' and sonnet_running>=8:continue
-+    elif s['status']=='done' and veto_revision is None:
 +     if managed:self._queue_publication(data,s,'blocked','ted review','complete',section='up_next')
 +     else:publish_live(s['card_id'],'blocked','ted review',section='up_next')
 +   host=admission_state()
-+   layout=lanes.topology(CLAUDE,str(self.root))
 +   data['claude_lane_topology']={key:layout[key] for key in ('enabled','account2_ready','account3_ready')}
 +   pending=sorted(data['sessions'].values(),key=lambda s:(priority_key(s)[1],priority_key(s)[0],priority_key(s)[2])) if managed else data['sessions'].values()
 +   launches=0;retry_launches=0
 +   for s in pending:
 +    if managed and launches>=10:break
-+    if s['status']=='running' or not s['queue'] or s.get('failure_publish_pending'):continue
+     if s['status']=='running' or not s['queue'] or s.get('failure_publish_pending'):continue
+-    if s.get('engine')=='claude' and s['queue'][0]['kind']!='review' and claude_running>=2:continue
+-    if s.get('engine')=='sonnet' and sonnet_running>=8:continue
 +    if managed and (s.get('stop_requested') or s.get('status')=='dead_letter' or stamp(s.get('retry_at'))>time.time()):continue
      turn=s['queue'][0]
 +    retrying=str(turn.get('id','')).startswith('reconciler-retry-')
@@ -323,12 +364,13 @@
 +    if turn['kind']=='review':
       s['reviewing']=a['id'];a.update(status='reviewing',sync_status=True)
       s['review_context']='You are the fresh Ted approval reviewer. Sebastian explicitly approved ONLY the exact artifact below. Re-read the actual files in cwd and confirm they match. For DB changes require a usable backup, rollback, and explicit identity guards in apply.sql. Refuse missing or unsafe safeguards. For email/spend require exact recipient, text, amount, and executable instructions; refuse ambiguity. Execute only the approved action. Never broaden the scope, reveal secrets, or send unrelated messages. End with a line exactly APPLY_OK only after verified success, otherwise REVIEW_BLOCKED with the reason. No em dash.\nApproved snapshot:\n'+a['content']
-     s['queue'].pop(0);s['turn']=turn['id'];s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
+-    s['queue'].pop(0);s['turn']=turn['id'];s['active_turn']=turn;s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
++    s['queue'].pop(0);s['turn']=turn['id'];s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
 +    s['active_turn']=dict(turn);s.setdefault('retry_count',0);s.pop('retry_at',None);s.pop('recovery_required',None)
 +    if managed:
 +     now=time.time();token=uuid.uuid4().hex
 +     s.update(lease_token=token,lease_expires_at=now+LEASE_SECONDS,lease=dict(token=token,turn=turn['id'],pid=None,identity='',renewed_at=now,expires_at=now+LEASE_SECONDS))
-+    s.pop('failure_kind',None)
+     s.pop('failure_kind',None)
      s.pop('veto_outcome',None)
      if turn.get('veto_proposal_id'):s['active_veto_revision']=turn['veto_card_revision']
 -    prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
@@ -350,12 +392,12 @@
 +     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time())
 +     if managed:s['lease'].update(pid=s['pid'],identity=s['identity'])
       line=review_live_line(a['kind']) if turn['kind']=='review' else ('started: '+s['title'].lower().replace(chr(8212),','))[:240]
--     publish_live(s['card_id'],'running',line,section='ted_doing')
+-     if publish_live(s['card_id'],'running',line,section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {})):
 +     if managed:self._queue_publication(data,s,'running',line,'start',section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {}))
 +     elif publish_live(s['card_id'],'running',line,section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {})):
-+      s.pop('recovery_section',None)
+       s.pop('recovery_section',None)
      except OSError:
--     s.update(status='failed',pid=None);self._out(data,s,'Worker could not start. Reply to retry.',s['turn'])
+-     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s)
 +     for key in ('active_claude_lane','active_claude_config_dir','active_claude_managed'):s.pop(key,None)
 +     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s,data if managed else None)
       veto_revision=s.pop('active_veto_revision',None)
@@ -390,23 +432,7 @@
    with self.locked() as data:
     db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
     for s in data['sessions'].values():
--    if s['status'] in ('running','queued'):continue
-+    if s['status'] in ('running','queued','failed') or s.get('failure_kind'):continue
-     for kind in ('db','email','spend'):
-      try:a=artifact(s['cwd'],kind)
-      except (ValueError,OSError):
-@@ -255,6 +454,10 @@
-       db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
-       break
-      if not a or a['digest'] in s['seen_artifacts']:continue
-+     if not approval_line(kind,s.get('decision_scope') or {}):
-+      s['seen_artifacts'].append(a['digest']);s['last_line']='ted review needed for the prepared packet'
-+      self._out(data,s,'Ted review: a prepared packet needs operational review. It is not a Sebastian decision.','ted-packet-'+a['digest'])
-+      continue
-      if kind=='db' and db_busy:s['status']='waiting_approval';s['last_line']='Waiting for the current DB approval to finish';continue
-      aid='approval-'+uuid.uuid4().hex
-      a.update(id=aid,card_id=s['card_id'],summary={'db':'Apply database SQL after a fresh safety review','email':'Send the exact drafted email','spend':'Execute the exact proposed spend'}[kind],status='pending')
-@@ -271,15 +474,12 @@
+@@ -327,15 +486,12 @@
        pid=payload.get('pid');expected=payload.get('identity','')
        if s and (s.get('pid')!=pid or s.get('identity')!=expected):result='Stale kill refused'
        else:
@@ -425,7 +451,7 @@
       elif s and cmd['target'] in data['approvals']:
        a=data['approvals'][cmd['target']]
        if a['status']!='pending' or payload.get('digest')!=a['digest'] or payload.get('card_id')!=s['card_id']:
-@@ -312,4 +512,8 @@
+@@ -368,4 +524,8 @@
    data=self.read();jobs=[]
    for s in data['sessions'].values():
     jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})

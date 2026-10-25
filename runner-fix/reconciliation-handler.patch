@@ -4,10 +4,10 @@
 +// BEGIN RECONCILER SUPPORT
 +import {reconcilerEnabled, createHandler as createReconcilerHandler} from './reconciler_handler.ts';
 +// END RECONCILER SUPPORT
+ import failureTemplates from './runner_failure_templates.json' with {type:'json'};
  import { currentChat, publishChat, validChatURL } from './chat.ts';
  import { syncCards } from './sync.ts';
- import { frontdoor, workerActions, pageActions } from './frontdoor.ts';
-@@ -62,6 +65,9 @@
+@@ -77,6 +80,9 @@
    });
  }
  export function createHandler(db: Database, pageKey: string, workerKey: string, delivery = vetoDelivery()) {

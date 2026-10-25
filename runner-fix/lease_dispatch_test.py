@@ -51,6 +51,26 @@ class LeaseDispatch(unittest.TestCase):
         p = patch.object(sessions, 'publish_live', return_value=True)
         p.start();self.addCleanup(p.stop)
 
+    def test_lane_readiness_is_observed_before_session_lock(self):
+        import contextlib
+        original = self.store.locked
+        held = []
+        @contextlib.contextmanager
+        def locked():
+            with original() as data:
+                held.append(True)
+                try:
+                    yield data
+                finally:
+                    held.pop()
+        def topology(*args):
+            self.assertFalse(held, 'auth observation must not block lease renewal')
+            return dict(enabled=False, account2_ready=False, account3_ready=False)
+        with patch.object(self.store, 'locked', locked), \
+                patch.object(sessions.lanes, 'topology', side_effect=topology), \
+                patch.object(sessions, 'admission_state', return_value=dict(cap=0)):
+            self.store.tick(reconcile=True)
+
     def enqueue(self, cid='x', **fields):
         card = dict(id=cid, title='Synthetic work', **fields)
         self.store.enqueue(card, 'do fixture work', 'receipt-' + cid, engine='codex')

@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,467 @@
+@@ -0,0 +1,470 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -113,6 +113,9 @@
 + remaining=list(session.get('queue') or [])
 + session['queue']=remaining
 + if action['kind']=='stop_worker':
++  from claude_lanes import clear_review
++  clear_review(session)
++  session.pop('active_turn',None);session.pop('active_veto_revision',None)
 +  session.pop('stop_requested',None);session.pop('kill_requested_at',None)
 +  session.update(status='queued' if remaining else 'stopped',last_line='user stop settled, no retry of cancelled attempt')
 +  return True
