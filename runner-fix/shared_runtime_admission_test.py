@@ -61,6 +61,39 @@ class Store:
 '''
 
 
+COMPANY = '''import uuid
+import sys
+from pathlib import Path
+import subprocess
+
+def stop_group(process):
+    pass
+
+def execute(argv, cwd, timeout, stdout, stderr, env=None, on_start=None, heartbeat=None):
+    with open(stdout, 'wb') as out, open(stderr, 'wb') as err:
+            process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                       stdout=out, stderr=err, start_new_session=True)
+
+def run_task(store, task_id, owner, argv, timeout=120, env=None, validator=None, input_messages=None, stream=False):
+    try:
+        code = execute(argv, 'fixture', timeout, 'out', 'err', env,
+                       on_start=lambda pid: store.start(task_id, token, pid),
+                       heartbeat=lambda: store.renew(task_id, token, 30))
+    except Exception as exc:
+        return store.fail(task_id, token, 'failed', 1, str(exc) + '; evidence: ' + str(folder))
+
+def _run_opus(store, task_id, repo, timeout):
+    result = run_task(store, task_id, 'opus', command, timeout, env,
+                      validate_opus, [m['id'] for m in incoming], stream=active)
+    return result
+
+def main():
+        print(json.dumps(result, indent=2))
+        if isinstance(result, dict):
+            return 0
+'''
+
+
 class AdapterTests(unittest.TestCase):
     def test_lane_source_preserves_environment_and_routes_spawn(self):
         result = adapter().adapt(LEGACY, managed=False)
@@ -86,6 +119,17 @@ class AdapterTests(unittest.TestCase):
             "    atomic(str(prefix)", "    prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)")
         result = adapter().adapt(source, managed=False)
         self.assertLess(result.index('    try:'), result.index("     atomic(str(prefix)"))
+
+    def test_company_adapter_gates_inner_group_and_preserves_outer_status(self):
+        result = adapter().adapt_company(COMPANY)
+        ast.parse(result)
+        self.assertIn('launch = model_spawn if model_admission else subprocess.Popen', result)
+        self.assertIn('model_admission=True', result)
+        self.assertIn('return 75', result)
+        self.assertIn("task['pid'] is not None", result)
+        self.assertIn("('running',)", result)
+        with self.assertRaises(ValueError):adapter().adapt_company(result)
+        with self.assertRaises(ValueError):adapter().adapt_company(COMPANY.replace('stream=active)','stream=False)'))
 
     def test_unknown_or_already_adapted_source_is_refused(self):
         with self.assertRaises(ValueError):

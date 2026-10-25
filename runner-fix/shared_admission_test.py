@@ -24,7 +24,7 @@ def main():
             ['git', 'apply', str(HERE / 'shared-admission-tools.patch')],
             *[['patch', '--batch', '--fuzz=0', '-p1', '-i', str(HERE / name)] for name in (
                 'shared-admission-sessions.patch', 'codex-heartbeat-admission.patch',
-                'direct-browser-admission.patch', 'company-launchd-admission.patch')],
+                'direct-browser-admission.patch')],
             ['/bin/bash', '-n', 'run-task.sh'],
             ['/bin/bash', '-n', 'run.sh'],
             ['/bin/bash', '-n', 'codex-browser.sh'],

@@ -81,3 +81,76 @@ def adapt(source, *, managed):
         result = result.replace(' or overloaded:break', ':break')
     ast.parse(result)
     return result
+
+
+COMPANY_HELPERS = '''class CompanyAdmissionDeferred(Exception):
+    """The model did not start; return this exact task to its ready queue."""
+
+
+def shared_admission_module():
+    # Use the same installed file and default state as every other mini caller.
+    # Lazy loading leaves non-model bookkeeping independent of the helper.
+    import importlib.util
+    name = '_ted_shared_admission'
+    if name not in sys.modules:
+        path = Path.home() / 'ted-ops/ted-board/scripts/shared_admission.py'
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules[name] = module
+    return sys.modules[name]
+
+
+def model_spawn(argv, **kwargs):
+    admission = shared_admission_module()
+    try:
+        return admission.Gate().spawn(argv, lane='launchd', **kwargs)
+    except admission.Deferred as exc:
+        raise CompanyAdmissionDeferred(exc.diagnostic) from None
+
+
+def defer_company_task(store, task_id, token, reason):
+    with store.connection(True) as db:
+        task = store._owned(db, task_id, token, ('running',))
+        if task['pid'] is not None:
+            raise ValueError('Started model cannot be deferred')
+        db.execute('DELETE FROM resources WHERE task_id=?', (task_id,))
+        db.execute("UPDATE tasks SET status='ready',owner=NULL,token=NULL,lease_until=NULL,pid=NULL,host=NULL,exit_code=75,error=?,updated=? WHERE id=?",
+                   ('admission deferred: ' + reason, time.time(), task_id))
+        store._event(db, task_id, 'admission_deferred', reason)
+    return dict(store.get(task_id), admission_deferred=True)
+
+
+'''
+
+
+def adapt_company(source):
+    """Gate the actual model group, not the supervising company coordinator."""
+    if 'def model_spawn(' in source:
+        raise ValueError('company admission already present')
+    source = replace_once(source, 'def stop_group(process):', COMPANY_HELPERS + 'def stop_group(process):')
+    source = replace_once(source,
+        'def execute(argv, cwd, timeout, stdout, stderr, env=None, on_start=None, heartbeat=None):',
+        'def execute(argv, cwd, timeout, stdout, stderr, env=None, on_start=None, heartbeat=None, model_admission=False):')
+    source = replace_once(source,
+        '            process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,',
+        '            launch = model_spawn if model_admission else subprocess.Popen\n'
+        '            process = launch(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,')
+    source = replace_once(source,
+        'def run_task(store, task_id, owner, argv, timeout=120, env=None, validator=None, input_messages=None, stream=False):',
+        'def run_task(store, task_id, owner, argv, timeout=120, env=None, validator=None, input_messages=None, stream=False, model_admission=False):')
+    source = replace_once(source,
+        '                       on_start=lambda pid: store.start(task_id, token, pid),\n                       heartbeat=lambda: store.renew(task_id, token, 30))',
+        '                       on_start=lambda pid: store.start(task_id, token, pid),\n                       heartbeat=lambda: store.renew(task_id, token, 30), model_admission=model_admission)')
+    source = replace_once(source,
+        '    except Exception as exc:\n        return store.fail(task_id, token, \'failed\', 1, str(exc) + \'; evidence: \' + str(folder))',
+        '    except CompanyAdmissionDeferred as exc:\n        return defer_company_task(store, task_id, token, str(exc))\n'
+        '    except Exception as exc:\n        return store.fail(task_id, token, \'failed\', 1, str(exc) + \'; evidence: \' + str(folder))')
+    source = replace_once(source,
+        "                      validate_opus, [m['id'] for m in incoming], stream=active)",
+        "                      validate_opus, [m['id'] for m in incoming], stream=active, model_admission=True)")
+    source = replace_once(source,
+        "        print(json.dumps(result, indent=2))\n        if isinstance(result, dict)",
+        "        print(json.dumps(result, indent=2))\n        if isinstance(result, dict) and result.get('admission_deferred') is True:\n            return 75\n        if isinstance(result, dict)")
+    ast.parse(source)
+    return source
