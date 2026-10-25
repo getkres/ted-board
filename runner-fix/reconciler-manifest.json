@@ -91,7 +91,7 @@
   },
   "reconciler.py": {
     "patch": "reconciler-core.patch",
-    "candidate_sha256": "c8cbd5a1000aac01ad0efbec9db62941ffdf6de76bc7f0d6a3b912b69e8a4f37"
+    "candidate_sha256": "9a5b1696c762cec0b0d07587a03eac2524174b90cb2757062dac698b4eeb71a5"
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",

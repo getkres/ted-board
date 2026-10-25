@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler.py
-@@ -0,0 +1,274 @@
+@@ -0,0 +1,284 @@
 +"""Pure, level-triggered planner. No I/O, clocks, credentials, or model calls."""
 +import hashlib
 +import json
@@ -32,6 +32,16 @@
 + kind=card.get('decision_kind')
 + if kind=='approve_design':return bool(card.get('fresh_mockup_batch') or card.get('mockup_batch'))
 + return kind in RESERVED
++
++
++def protected_decision(snapshot,card):
++ cid=card.get('id')
++ if card.get('live_state')=='waiting_on_you':return True
++ if card.get('answer') is None and (card.get('options') or card.get('steps')):return True
++ if card.get('veto_status') not in (None,'stopped','invalidated','sent','failed'):return True
++ for resource,terminal in (('approvals',{'done','failed','rejected','superseded'}),('vetoes',{'stopped','invalidated','sent','failed'})):
++  if any(not isinstance(row,dict) or (row.get('card_id')==cid and row.get('status') not in terminal) for row in snapshot.get(resource,[])):return True
++ return False
 +
 +
 +def priority_key(card):
@@ -165,7 +175,7 @@
 +  row=item('card:'+cid,'card',cid,owner,started,due,stage,priority=priority_key(c)[0],summary='card requires next action',expected=c.get('updated_at'))
 +  if not valid_owner or not stamp(c.get('next_action_due')) or owner!=c.get('owner'):
 +   action('repair_metadata',cid,c.get('updated_at'),dict(card_id=cid,owner=owner,next_action_due=iso(due),action_started_at=iso(started)))
-+  if c.get('section')=='needs_you' and not reserved(c) and not c.get('classification_uncertain') and c.get('decision_kind') in (None,'other') and c.get('live_state')!='waiting_on_you' and type(c.get('revision')) is int and 0<c['revision']<=9007199254740991 and isinstance(c.get('messages'),list) and c.get('veto_status') in (None,'stopped','invalidated','sent','failed') and not any(a.get('card_id')==cid and a.get('status') not in ('done','failed','rejected','superseded') for a in snapshot.get('approvals',[])) and not any(v.get('card_id')==cid and v.get('status') not in ('stopped','invalidated','sent','failed') for v in snapshot.get('vetoes',[])):
++  if c.get('section')=='needs_you' and not reserved(c) and not c.get('classification_uncertain') and c.get('decision_kind') in (None,'other') and not protected_decision(snapshot,c) and type(c.get('revision')) is int and 0<c['revision']<=9007199254740991 and isinstance(c.get('messages'),list):
 +   action('route_ted',cid,c.get('updated_at'),dict(card_id=cid,expected_updated_at=c.get('updated_at'),expected_revision=c['revision'],expected_messages=c['messages']))
 +  age=max(0,now-started)
 +  for hours,kind in ((2,'escalate_2h'),(12,'escalate_12h')):
@@ -180,7 +190,7 @@
 +   if stage=='verified':
 +    v=snapshot['workflows'][cid].get('verification',{})
 +    active=s.get('status') in ('running','queued') or bool(s.get('queue'))
-+    if not active and s.get('status')!='failed' and type(c.get('revision')) is int and 0<c['revision']<=9007199254740991 and v.get('card_revision')==c.get('revision') and snapshot.get('prs',{}).get(snapshot['workflows'][cid].get('pr_url'),{}).get('state')=='MERGED':
++    if not active and s.get('status')!='failed' and c.get('section') not in ('needs_you','killed') and not protected_decision(snapshot,c) and type(c.get('revision')) is int and 0<c['revision']<=9007199254740991 and v.get('card_revision')==c.get('revision') and snapshot.get('prs',{}).get(snapshot['workflows'][cid].get('pr_url'),{}).get('state')=='MERGED':
 +     action('close_verified',cid,v,dict(card_id=cid,expected_updated_at=c.get('updated_at'),expected_revision=c['revision']))
 +    else:
 +     review_ids.append(row)

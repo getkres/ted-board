@@ -39,6 +39,26 @@ class PlannerTests(unittest.TestCase):
   for resource in ('approvals','vetoes'):
    s=snapshot([card(section='needs_you',revision=7,messages=[])]);s[resource]=[dict(id='a',card_id='c-one',status='future_active_state')]
    self.assertNotIn('route_ted',[x['kind'] for x in r.plan(s,now=NOW)['actions']],resource)
+ def test_unanswered_options_and_steps_hold_route_and_verified_close(self):
+  for details in (dict(options=[dict(label='Approve')]),dict(steps=[dict(label='Review')])):
+   for answered in (False,True):
+    c=card(section='needs_you',revision=7,messages=[],answer='yes' if answered else None,**details)
+    routes=[a['kind'] for a in r.plan(snapshot([c]),now=NOW)['actions']]
+    self.assertEqual('route_ted' in routes,answered)
+    c['section']='up_next';s=snapshot([c]);url='https://github.com/example/test/pull/1'
+    s['workflows']={'c-one':dict(pr_url=url,deployment=dict(verified=True,deployed_at=r.iso(NOW-5),revision='sha'),verification=dict(ok=True,verified_at=r.iso(NOW-1),revision='sha',card_revision=7))}
+    s['prs']={url:dict(state='MERGED',merged_at=r.iso(NOW-10),merge_revision='sha')}
+    self.assertEqual('close_verified' in [a['kind'] for a in r.plan(s,now=NOW)['actions']],answered)
+ def test_verified_close_holds_live_decisions_and_nonterminal_controls(self):
+  for case in ('waiting','needs_you','approval','veto','unknown_approval','unknown_veto'):
+   c=card(revision=7);s=snapshot([c]);url='https://github.com/example/test/pull/1'
+   s['workflows']={'c-one':dict(pr_url=url,deployment=dict(verified=True,deployed_at=r.iso(NOW-5),revision='sha'),verification=dict(ok=True,verified_at=r.iso(NOW-1),revision='sha',card_revision=7))}
+   s['prs']={url:dict(state='MERGED',merged_at=r.iso(NOW-10),merge_revision='sha')}
+   if case=='waiting':c['live_state']='waiting_on_you'
+   elif case=='needs_you':c['section']='needs_you'
+   elif 'approval' in case:s['approvals']=[dict(id='a',card_id='c-one',status='future_active' if case.startswith('unknown') else 'pending')]
+   else:s['vetoes']=[dict(id='v',card_id='c-one',status='future_active' if case.startswith('unknown') else 'uncertain')]
+   self.assertNotIn('close_verified',[a['kind'] for a in r.plan(s,now=NOW)['actions']],case)
  def test_missing_owner_and_due_are_visible_and_stable(self):
   s=snapshot();a=r.plan(s,now=NOW);b=r.plan(s,now=NOW+120)
   self.assertEqual(a['items'][0]['owner'],'ted')
