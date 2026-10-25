@@ -1,0 +1,14 @@
+--- a/job_watchdog.py
++++ b/job_watchdog.py
+@@ -490,6 +490,11 @@
+         return 1 if any(not s['available'] for s in snapshots) else 0
+ 
+ 
++# BEGIN RECONCILER ROUTE
++from reconciler_gate import reconciler_enabled
++if reconciler_enabled():
++ from reconciler_services import watchdog_main as main
++# END RECONCILER ROUTE
+ if __name__ == '__main__':
+     try:
+         sys.exit(main())

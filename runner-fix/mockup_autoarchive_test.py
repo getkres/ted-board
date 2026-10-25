@@ -862,7 +862,7 @@ class HeartbeatRate(unittest.TestCase):
 
 @unittest.skipUnless((ROOT / 'jobs_heartbeat.py').exists(), 'private heartbeat candidate required')
 class Heartbeat(unittest.TestCase):
-    def test_archive_failure_does_not_interrupt_existing_heartbeat(self):
+    def test_flag_off_heartbeat_does_not_invoke_staged_archive_helper(self):
         actions = []
         def call(action, **kwargs):
             actions.append(action)
@@ -880,7 +880,7 @@ class Heartbeat(unittest.TestCase):
         with patch.object(heartbeat, 'untracked', return_value=[]), patch.dict(sys.modules, deps), \
                 contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(heartbeat.main(), 0)
-        self.assertIn('Mockup auto-archive failed', err.getvalue())
+        self.assertNotIn('Mockup auto-archive failed', err.getvalue())
         self.assertNotIn('private transport details', err.getvalue())
         self.assertEqual(actions, ['control', 'heartbeat', 'veto_clear_due'])
 

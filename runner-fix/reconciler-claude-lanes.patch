@@ -1,0 +1,331 @@
+--- /dev/null
++++ claude_lanes.py
+@@ -0,0 +1,328 @@
++"""Account-affine Claude lanes. Never read, copy, or exchange credentials."""
++import json
++import math
++import os
++from pathlib import Path
++import re
++import subprocess
++import time
++import uuid
++
++LANES = {'main': (1, '.claude'), 'design': (2, '.claude-acct2'), 'research': (3, '.claude-acct3')}
++DESIGN_TYPES = {'design', 'mockup', 'art', 'design_review'}
++RESEARCH_TYPES = {'research', 'analysis', 'review_gate', 'design_review'}
++JOB_TYPES = DESIGN_TYPES | RESEARCH_TYPES | {'interactive', 'general', 'implementation'}
++COUNTERS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
++_AUTH_CACHE = {}
++_AUTH_TTL = 60
++
++
++class Unavailable(RuntimeError):
++    """A safe, fixed reason for leaving a turn in its durable queue."""
++
++
++def clear_review(session):
++    for key in ('reviewing', 'review_context', 'review_session_id', 'review_claude_lane',
++                'review_claude_config_dir', 'active_claude_lane', 'active_claude_config_dir', 'active_claude_managed'):
++        session.pop(key, None)
++
++
++def config():
++    path = Path(os.environ.get('TED_CLAUDE_LANES_CONFIG', Path.home() / 'ted-ops/claude-lanes/config.json'))
++    try:
++        value = json.loads(path.read_text()) if path.exists() else {'enabled': False}
++        if not isinstance(value, dict) or type(value.get('enabled')) is not bool:
++            raise ValueError()
++        return value
++    except (OSError, ValueError):
++        raise Unavailable('waiting for valid claude lane configuration') from None
++
++
++def enabled():
++    try:
++        return config()['enabled']
++    except Unavailable:
++        return False
++
++
++def dedicated(session):
++    return session.get('active_claude_managed') is True or any(
++        session.get(key) in ('design', 'research')
++        for key in ('claude_lane', 'review_claude_lane', 'active_claude_lane'))
++
++
++def job_type(card, explicit=None):
++    value = explicit or card.get('job_type')
++    if value is not None:
++        if not isinstance(value, str) or value not in JOB_TYPES:
++            raise ValueError('Invalid Claude job type')
++        return value
++    # Existing callers have titles, but do not all have structured job metadata.
++    title = card.get('title', '').lower()
++    if re.search(r'\b(?:review|gate)\b', title):
++        return 'review_gate'
++    if re.search(r'\b(?:design|mockups?|art|visuals?|illustration)\b', title):
++        return 'design'
++    return 'research' if re.search(r'\b(?:research|analysis|analyze)\b', title) else 'general'
++
++
++def worker_environment(source):
++    env = {key: value for key, value in source.items() if not key.startswith('ANTHROPIC_')}
++    env.pop('CLAUDECODE', None)
++    return env
++
++
++def capacity():
++    path = Path(os.environ.get('TED_CLAUDE_CAPACITY_CONFIG', Path(__file__).resolve().with_name('capacity.json')))
++    try:
++        value = json.loads(path.read_text())
++        if path.is_symlink() or type(value['total_workers']) is not int or value['total_workers'] < 1:
++            raise ValueError()
++        if not number(value['load_per_cpu']) or value['load_per_cpu'] <= 0:
++            raise ValueError()
++        if not isinstance(value['engines'], dict) or set(value['engines']) != {'claude', 'sonnet'} or any(type(v) is not int or v < 1 for v in value['engines'].values()):
++            raise ValueError()
++        return value
++    except (OSError, ValueError, KeyError, TypeError):
++        raise Unavailable('waiting for valid worker capacity configuration') from None
++
++
++def environment(session, source):
++    env = worker_environment(source)
++    directory = session.get('active_claude_config_dir')
++    if directory:
++        env['CLAUDE_CONFIG_DIR'] = directory
++    if session.get('active_claude_managed'):
++        for key in list(env):
++            if key.startswith('ANTHROPIC_') or key.startswith('CLAUDE_CODE_USE_') or key in (
++                'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR',
++                'CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR', 'CLAUDE_CODE_CUSTOM_HEADERS_HELPER',
++                'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
++                env.pop(key, None)
++    env.pop('CLAUDECODE', None)
++    return env
++
++
++def validate_directory(lane, directory):
++    if lane != 'main':
++        expected = Path.home() / LANES[lane][1]
++        if Path(directory) != expected or expected.is_symlink() or not expected.is_dir() or expected.resolve() == (Path.home() / '.claude').resolve():
++            raise Unavailable('waiting for separate claude account setup')
++
++
++def verify_account(lane, directory, claude, cwd):
++    if lane == 'main':
++        directory = os.environ.get('CLAUDE_CONFIG_DIR')
++    validate_directory(lane, directory)
++    candidate = dict(active_claude_config_dir=directory, active_claude_managed=True)
++    try:
++        result = subprocess.run([claude, 'auth', 'status', '--json'], env=environment(candidate, os.environ),
++                                cwd=cwd, capture_output=True, text=True, timeout=10)
++        auth = json.loads(result.stdout)
++        if result.returncode or not isinstance(auth, dict) or auth.get('loggedIn') is not True or auth.get('authMethod') != 'claude.ai' or auth.get('subscriptionType') != 'max' or (directory is not None and Path(auth.get('configDirectory', '')).resolve() != Path(directory).resolve()):
++            raise ValueError()
++    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
++        raise Unavailable('waiting for verified claude max login in the ' + lane + ' lane') from None
++
++
++def readiness(lane, directory, claude, cwd):
++    """Cache only readiness and fixed reasons, across short-lived dispatchers."""
++    validate_directory(lane, directory)
++    key = (lane, directory, claude)
++    now = time.time()
++    cached = _AUTH_CACHE.get(key)
++    path = Path.home() / 'ted-ops/claude-lanes' / ('readiness-' + lane + '.json')
++    if cached is None:
++        try:
++            value = json.loads(path.read_text())
++            if isinstance(value, dict) and value.get('key') == list(key):
++                cached = value
++        except (OSError, ValueError):
++            pass
++    reasons = ('', 'waiting for separate claude account setup', 'waiting for verified claude max login in the ' + lane + ' lane')
++    if cached and type(cached.get('ready')) is bool and cached.get('reason') in reasons and number(cached.get('checked_at')) and 0 <= now - cached['checked_at'] < _AUTH_TTL:
++        _AUTH_CACHE[key] = cached
++    else:
++        reason = ''
++        try:
++            verify_account(lane, directory, claude, cwd)
++        except Unavailable as exc:
++            reason = str(exc)
++        cached = dict(key=list(key), ready=not reason, reason=reason, checked_at=time.time())
++        _AUTH_CACHE[key] = cached
++        temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
++        try:
++            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
++            with temporary.open('x') as stream:
++                temporary.chmod(0o600)
++                json.dump(cached, stream)
++            os.replace(temporary, path)
++        except OSError:
++            try: temporary.unlink(missing_ok=True)
++            except OSError: pass
++    if not cached['ready']:
++        raise Unavailable(cached['reason'])
++    return cached['checked_at']
++
++
++def topology(claude, cwd):
++    result = dict(enabled=False, account2_ready=False, account3_ready=False, errors={}, verified_at={})
++    try:
++        result['enabled'] = config()['enabled']
++    except Unavailable as exc:
++        result['error'] = str(exc)
++        return result
++    if result['enabled']:
++        for lane, key in (('design', 'account2_ready'), ('research', 'account3_ready')):
++            if lane == 'research' and not result['account2_ready']:
++                break
++            try:
++                result['verified_at'][lane] = readiness(lane, str(Path.home() / LANES[lane][1]), claude, cwd)
++                result[key] = True
++            except Unavailable as exc:
++                result['errors'][lane] = str(exc)
++    return result
++
++
++def execution_engine(session, turn=None):
++    if (turn and turn.get('veto_proposal_id')) or session.get('active_veto_revision') is not None:
++        return None
++    if (turn and turn['kind'] == 'review') or (turn is None and session.get('reviewing')):
++        return 'claude'
++    return session.get('engine')
++
++
++def selection(session, review, cfg):
++    key = 'review_claude' if review else 'claude'
++    lane = session.get(key + '_lane')
++    directory = session.get(key + '_config_dir')
++    kind = session.get('job_type') or job_type(session)
++    if cfg['enabled'] and lane == 'main' and kind != 'interactive':
++        lane, directory = None, None
++    if lane is None:
++        lane = 'main' if kind == 'interactive' or not cfg['enabled'] else ('research' if cfg['account3_ready'] and (review or kind in RESEARCH_TYPES) else 'design')
++        directory = os.environ.get('CLAUDE_CONFIG_DIR') if lane == 'main' else str(Path.home() / LANES[lane][1])
++    return lane, directory
++
++
++def prepare(session, review, data, claude, layout=None):
++    cfg = layout if layout is not None else topology(claude, session['cwd'])
++    key = 'review_claude' if review else 'claude'
++    lane, directory = selection(session, review, cfg)
++    if lane == 'main':
++        # Main uses Claude Code's existing login. Never invent a config path.
++        directory = os.environ.get('CLAUDE_CONFIG_DIR') if cfg['enabled'] else None
++        session.update({key + '_lane': lane, key + '_config_dir': directory,
++                        'active_claude_lane': lane, 'active_claude_config_dir': directory,
++                        'active_claude_managed': False})
++        return
++    if cfg.get('error'):
++        raise Unavailable(cfg['error'])
++    if lane not in LANES or not isinstance(directory, str) or not Path(directory).is_absolute():
++        raise Unavailable('waiting for valid claude session affinity')
++    if lane != 'main' and (not cfg['enabled'] or not enabled()):
++        raise Unavailable('waiting for claude lanes to be enabled')
++    if lane != 'main':
++        if not cfg['account2_ready'] or (lane == 'research' and not cfg['account3_ready']):
++            raise Unavailable(cfg['errors'].get(lane, 'waiting for separate claude account setup'))
++    state = data.get('claude_lanes', {}).get(lane, {})
++    if number(state.get('resets_at')) and state['resets_at'] > time.time():
++        raise Unavailable('waiting for the ' + lane + ' lane usage limit to reset')
++    candidate = dict(session, active_claude_lane=lane, active_claude_config_dir=directory, active_claude_managed=cfg['enabled'] or lane != 'main')
++    validate_directory(lane, directory)
++    verified = cfg.get('verified_at', {}).get(lane)
++    if not number(verified) or not 0 <= time.time() - verified < _AUTH_TTL:
++        raise Unavailable('waiting for fresh claude lane verification')
++    if not review and session.get('session_id') and session.get('claude_lane') in (None, 'main'):
++        session['legacy_main_session_id'] = session['session_id']
++        session['session_id'] = None
++    session.update({key + '_lane': lane, key + '_config_dir': directory,
++                    'active_claude_lane': lane, 'active_claude_config_dir': directory,
++                    'active_claude_managed': candidate['active_claude_managed']})
++
++
++def number(value):
++    return type(value) in (int, float) and math.isfinite(value) and 0 <= value < 10**12
++
++
++def observe(events):
++    """Extract only numerical usage and typed CLI limit signals, never text."""
++    observed = {}
++    for event in events:
++        if not isinstance(event, dict):
++            continue
++        if event.get('type') == 'result':
++            usage = event.get('usage')
++            if isinstance(usage, dict):
++                for key in COUNTERS:
++                    if type(usage.get(key)) is int and number(usage[key]):
++                        observed[key] = usage[key]
++        if event.get('error') == 'rate_limit':
++            observed['limited'] = True
++            observed['error'] = 'rate_limit'
++        if event.get('type') == 'rate_limit_event':
++            info = event.get('rate_limit_info', event.get('rateLimitInfo', {}))
++            if not isinstance(info, dict):
++                continue
++            status = info.get('status')
++            if status in ('allowed', 'allowed_warning', 'rejected') and observed.get('limit_status') != 'rejected':
++                observed['limit_status'] = status
++            if status == 'rejected':
++                observed['limited'] = True
++                reset = info.get('resetsAt')
++                if number(reset):
++                    observed['resets_at'] = max(observed.get('resets_at', 0), reset)
++    return observed
++
++
++def record(data, session, result):
++    if session.get('active_claude_managed') is not True:
++        return False
++    lane = session.get('active_claude_lane')
++    if lane not in LANES:
++        return False
++    usage = result.get('lane_usage', {})
++    if not isinstance(usage, dict):
++        usage = {}
++    state = data.setdefault('claude_lanes', {}).setdefault(lane, {})
++    for key in COUNTERS:
++        if type(usage.get(key)) is int and number(usage[key]):
++            state[key] = state.get(key, 0) + usage[key]
++    state['observed_at'] = time.time()
++    if usage.get('limit_status') in ('allowed', 'allowed_warning', 'rejected'):
++        state['limit_status'] = usage['limit_status']
++    if usage.get('limit_status') == 'rejected' or usage.get('error') == 'rate_limit':
++        reset = usage.get('resets_at')
++        state['resets_at'] = reset if number(reset) and reset > time.time() else time.time() + 300
++        state['limit_status'] = 'rejected'
++        return True
++    return False
++
++
++def summaries(data):
++    try:
++        enabled = config()['enabled']
++        config_error = False
++    except Unavailable:
++        enabled = False
++        config_error = True
++    jobs = []
++    layout = data.get('claude_lane_topology', {})
++    for lane, (account, _) in LANES.items():
++        state = data.get('claude_lanes', {}).get(lane, {})
++        limited = number(state.get('resets_at')) and state['resets_at'] > time.time()
++        status = 'configuration needed' if config_error else 'disabled' if not enabled else 'limited' if limited else 'reserved for ted and interactive work' if lane == 'main' else 'not yet observed'
++        if enabled and not limited and state.get('observed_at') and lane != 'main':
++            status = 'last observed: ' + state.get('limit_status', 'no limit signal')
++        if enabled and not config_error:
++            if lane == 'design' and not layout.get('account2_ready'):
++                status = 'waiting for account 2 login verification'
++            if lane == 'research' and not layout.get('account3_ready'):
++                status = 'not configured; new research and review use account 2'
++        role = 'all_managed' if lane == 'design' and not layout.get('account3_ready') else 'design_workers' if lane == 'design' else 'research_review' if lane == 'research' else 'interactive'
++        safe_usage = {key: state[key] for key in COUNTERS if number(state.get(key))}
++        safe_usage.update({key: state[key] for key in ('observed_at', 'resets_at') if number(state.get(key))})
++        jobs.append(dict(id='claude-lane-' + lane, card_id=None, title='Claude account ' + str(account) + ': ' + lane,
++                         engine='claude', status='idle', pid=None, identity='', last_line=status,
++                         lane_summary=True, lane_role=role, lane_usage=safe_usage))
++    return jobs

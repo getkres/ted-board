@@ -1,0 +1,22 @@
+--- /dev/null
++++ board_card_snapshot.py
+@@ -0,0 +1,19 @@
++"""Shared fail-closed board GET fetch, extracted from the inbox steward."""
++
++
++def fetch_cards(*, call=None, allow_empty=False, **filters):
++    # cards() discards the envelope and defaults a missing cards key to [].
++    if call is None:
++        from board_client import call
++    response = call(page=True, **filters)
++    if (not isinstance(response, dict) or 'error' in response
++            or response.get('pod_pulse_error') is True
++            or 'cards' not in response or not isinstance(response['cards'], list)
++            or (not response['cards'] and not allow_empty)
++            or len(response['cards']) >= 500
++            or any(not isinstance(c, dict) or not isinstance(c.get('id'), str)
++                   or not c['id'] or not isinstance(c.get('project'), str)
++                   or not isinstance(c.get('section'), str) for c in response['cards'])):
++        raise ValueError('Card snapshot incomplete')
++    return response['cards']
++
