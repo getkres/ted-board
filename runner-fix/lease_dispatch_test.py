@@ -44,6 +44,8 @@ class LeaseDispatch(unittest.TestCase):
         self.store = sessions.Store(self.tmp.name)
         self.env = patch.dict(os.environ, {'TED_RECONCILER_ENABLED': 'true'}, clear=False)
         self.env.start();self.addCleanup(self.env.stop)
+        topology = patch.object(sessions.lanes, 'topology', return_value=dict(enabled=False,account2_ready=False,account3_ready=False))
+        topology.start();self.addCleanup(topology.stop)
         # All process and network boundaries are forbidden unless a test supplies a fake.
         for owner, name in ((sessions.subprocess, 'run'), (sessions.subprocess, 'Popen'), (sessions, 'deliver')):
             p = patch.object(owner, name, side_effect=forbidden)
@@ -83,6 +85,38 @@ class LeaseDispatch(unittest.TestCase):
             self.store.tick(reconcile=True)
         self.assertTrue(self.store.read()['sessions']['x'].get('artifact_error'))
         self.assertEqual(self.store.read()['approvals']['a']['status'],'superseded')
+
+    def test_uncertain_or_stopped_review_is_not_recollected(self):
+        for status,stop in (('dead_letter',False),('stopped',False),('done',True)):
+            with self.subTest(status=status,stop=stop):
+                self.enqueue()
+                with self.store.locked() as data:
+                    data['sessions']['x'].update(status=status,stop_requested=stop,reviewing='a',queue=[dict(id='human',kind='work')])
+                    data['approvals']['a']=dict(id='a',card_id='x',kind='db',status='reviewing')
+                with patch.object(sessions,'artifact',side_effect=AssertionError('uncertain review was re-read')):
+                    self.store.collect_approvals(reconcile=True)
+                data=self.store.read();self.assertEqual(data['sessions']['x']['status'],status)
+                self.assertEqual(data['sessions']['x']['queue'],[dict(id='human',kind='work')])
+                self.assertEqual(data['approvals']['a']['status'],'reviewing')
+
+    def test_unsafe_artifact_retains_human_requests(self):
+        self.enqueue()
+        with self.store.locked() as data:
+            s=data['sessions']['x'];s['queue']=[dict(id='human'),dict(id='auto',automatic=True),dict(id='reconciler-retry-old')]
+            self.store._fail_artifact(data,s)
+        self.assertEqual(self.store.read()['sessions']['x']['queue'],[dict(id='human')])
+
+    def test_first_spawn_holds_external_queued_and_waiting_approval_jobs(self):
+        self.store.enqueue(dict(id='x',title='Fixture',project='Fixture',section='up_next'),'work','reconciler-dispatch-first',engine='codex')
+        Path(self.tmp.name,'reconciler-config.json').write_text(json.dumps(dict(enabled=True,dispatch=dict(allow_card_ids=['x'],hold_card_ids=[]))))
+        for status in ('running','untracked','queued','waiting_approval'):
+            def call(**kw):
+                return dict(jobs=[dict(id='outside',card_id='x',status=status)]) if kw.get('resource') else dict(cards=[dict(id='x',project='Fixture',section='up_next',live_state='blocked')])
+            with self.subTest(status=status),patch.object(sessions,'call',side_effect=call):
+                self.assertEqual(self.store._initial_dispatch_permissions(),set())
+        def own(**kw):
+            return dict(jobs=[dict(id='card-x',card_id='x',status='queued')]) if kw.get('resource') else dict(cards=[dict(id='x',project='Fixture',section='up_next',live_state='blocked')])
+        with patch.object(sessions,'call',side_effect=own):self.assertEqual(self.store._initial_dispatch_permissions(),{'x'})
 
     def test_default_managed_enqueue_preserves_claude_engine(self):
         self.store.enqueue(dict(id='default',title='Fixture'),'work','default')

@@ -1,8 +1,8 @@
 --- a/session_worker.py
 +++ b/session_worker.py
-@@ -61,4 +61,9 @@
-  atomic(str(prefix)+'.result.json',result)
-  claim.close()
+@@ -123,4 +123,9 @@
+  if inp['session'].get('active_claude_managed') is not True:return _legacy_run(prefix)
+  return _managed_run(prefix)
  
 +# BEGIN RECONCILER ROUTE
 +from reconciler_gate import reconciler_enabled

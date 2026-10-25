@@ -60,14 +60,40 @@ test('adapter uses single RPC publish and one consistent read rather than per-ca
  assert.deepEqual(await store.read(),packet());await store.publish(packet() as any);
  assert.deepEqual(calls,[['ted_board_reconciliation_read',undefined],['ted_board_reconcile_publish',{p_generated_at:packet().generated_at,p_items:packet().items,p_banner:false,p_ted_queue:packet().ted_queue,p_coverage_defects:[]}]]);
 });
-test('only workers can route an existing Needs you card to Ted with a timestamp guard',async()=>{
+test('only workers can route an existing Needs you card with timestamp, revision, and messages guards',async()=>{
  let routed:unknown;
  const store={read:async()=>null,publish:async()=>({ok:true}),routeTed:async(value:unknown)=>{routed=value;return {ok:true}}};
- const body={action:'reconcile_route_ted',card_id:'c-example',expected_section:'needs_you',expected_updated_at:'2026-10-23T19:00:00Z',line:'awaiting ted review'};
+ const body={action:'reconcile_route_ted',card_id:'c-example',expected_section:'needs_you',expected_updated_at:'2026-10-23T19:00:00Z',expected_revision:7,expected_messages:[],line:'awaiting ted review'};
  assert.equal((await handleReconciliationAction({method:'POST',principal:'page',body},store,now))?.status,403);
  assert.equal((await handleReconciliationAction({method:'POST',principal:'worker',body:{...body,expected_section:'done'}},store,now))?.status,400);
  assert.equal((await handleReconciliationAction({method:'POST',principal:'worker',body},store,now))?.status,200);
- assert.deepEqual(routed,{card_id:'c-example',expected_section:'needs_you',expected_updated_at:'2026-10-23T19:00:00Z',line:'awaiting ted review'});
+ assert.deepEqual(routed,{card_id:'c-example',expected_section:'needs_you',expected_updated_at:'2026-10-23T19:00:00Z',expected_revision:7,expected_messages:[],line:'awaiting ted review'});
+});
+test('routing rejects missing or malformed observation guards before the store is called',async()=>{
+ let writes=0;
+ const store={read:async()=>null,publish:async()=>({ok:true}),routeTed:async()=>{writes++;return {ok:true}}};
+ const body={action:'reconcile_route_ted',card_id:'c-example',expected_section:'needs_you',expected_updated_at:item.expected_updated_at,expected_revision:1,expected_messages:[]};
+ const changes=[...[undefined,null,0,-1,1.5,'1',Number.MAX_SAFE_INTEGER+1,Infinity].map(expected_revision=>({expected_revision})),...[undefined,null,{},'[]'].map(expected_messages=>({expected_messages}))];
+ for(const change of changes){
+  const response=await handleReconciliationAction({method:'POST',principal:'worker',body:{...body,...change}},store,now);
+  assert.equal(response?.status,400,JSON.stringify(change));
+ }
+ assert.equal(writes,0);
+});
+test('route adapter forwards the complete observed revision and messages to the exact RPC',async()=>{
+ const expected_messages=[{who:'ted',text:'Review the PR\nKeep the C:\\fixture path and 東京 text.',at:item.expected_updated_at}];
+ const value={card_id:'c-example',expected_section:'needs_you' as const,expected_updated_at:item.expected_updated_at!,expected_revision:12,expected_messages,line:'review queued'};
+ const calls:unknown[]=[];
+ const store=createSupabaseReconciliationStore({rpc:async(name,args)=>{calls.push([name,args]);return {data:{ok:true},error:null}}});
+ await store.routeTed!(value);
+ assert.deepEqual(calls,[['ted_board_reconcile_route_ted',{p_card_id:value.card_id,p_expected_updated_at:value.expected_updated_at,p_expected_section:'needs_you',p_line:'review queued',p_expected_revision:12,p_expected_messages:expected_messages}]]);
+});
+test('route conflicts remain 409 without dropping the observation guards',async()=>{
+ let seen:unknown;
+ const body={action:'reconcile_route_ted',card_id:'c-example',expected_section:'needs_you',expected_updated_at:item.expected_updated_at,expected_revision:2,expected_messages:[]};
+ const store={read:async()=>null,publish:async()=>({ok:true}),routeTed:async(value:unknown)=>{seen=value;throw {code:'40001',message:'private row detail'}}};
+ const response=await handleReconciliationAction({method:'POST',principal:'worker',body},store,now);
+ assert.equal(response?.status,409);assert.equal((seen as {expected_revision:number}).expected_revision,2);assert.equal(JSON.stringify(response).includes('private row detail'),false);
 });
 // The actual private handler is intentionally absent from the public repository.
 // Set RECONCILIATION_HANDLER_SOURCE to the reconstructed candidate to exercise integration.
@@ -92,7 +118,7 @@ test('private handler preserves Jobs controls and restricts reconciliation write
  assert.equal(denied.status,403);assert.equal(rpcCalls.length,count);
  const written=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({...packet(),action:'reconcile_publish',key:'worker-test'})}));
  assert.equal(written.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_publish'));
- const route=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_route_ted',key:'worker-test',card_id:'c-example',expected_section:'needs_you',expected_updated_at:item.expected_updated_at,line:'review queued'})}));
+ const route=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_route_ted',key:'worker-test',card_id:'c-example',expected_section:'needs_you',expected_updated_at:item.expected_updated_at,expected_revision:1,expected_messages:[],line:'review queued'})}));
  assert.equal(route.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_route_ted'));
  const closed=await handler(new Request('https://example.invalid/',{method:'POST',body:JSON.stringify({action:'reconcile_close_verified',key:'worker-test',card_id:'c-example',expected_updated_at:item.expected_updated_at})}));
  assert.equal(closed.status,200);assert.ok(rpcCalls.includes('ted_board_reconcile_close_verified'));

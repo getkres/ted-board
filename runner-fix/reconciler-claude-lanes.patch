@@ -1,6 +1,6 @@
 --- /dev/null
 +++ claude_lanes.py
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,328 @@
 +"""Account-affine Claude lanes. Never read, copy, or exchange credentials."""
 +import json
 +import math
@@ -57,7 +57,7 @@
 +def job_type(card, explicit=None):
 +    value = explicit or card.get('job_type')
 +    if value is not None:
-+        if value not in JOB_TYPES:
++        if not isinstance(value, str) or value not in JOB_TYPES:
 +            raise ValueError('Invalid Claude job type')
 +        return value
 +    # Existing callers have titles, but do not all have structured job metadata.
@@ -69,8 +69,29 @@
 +    return 'research' if re.search(r'\b(?:research|analysis|analyze)\b', title) else 'general'
 +
 +
++def worker_environment(source):
++    env = {key: value for key, value in source.items() if not key.startswith('ANTHROPIC_')}
++    env.pop('CLAUDECODE', None)
++    return env
++
++
++def capacity():
++    path = Path(os.environ.get('TED_CLAUDE_CAPACITY_CONFIG', Path(__file__).resolve().with_name('capacity.json')))
++    try:
++        value = json.loads(path.read_text())
++        if path.is_symlink() or type(value['total_workers']) is not int or value['total_workers'] < 1:
++            raise ValueError()
++        if not number(value['load_per_cpu']) or value['load_per_cpu'] <= 0:
++            raise ValueError()
++        if not isinstance(value['engines'], dict) or set(value['engines']) != {'claude', 'sonnet'} or any(type(v) is not int or v < 1 for v in value['engines'].values()):
++            raise ValueError()
++        return value
++    except (OSError, ValueError, KeyError, TypeError):
++        raise Unavailable('waiting for valid worker capacity configuration') from None
++
++
 +def environment(session, source):
-+    env = dict(source)
++    env = worker_environment(source)
 +    directory = session.get('active_claude_config_dir')
 +    if directory:
 +        env['CLAUDE_CONFIG_DIR'] = directory
@@ -178,10 +199,11 @@
 +    key = 'review_claude' if review else 'claude'
 +    lane = session.get(key + '_lane')
 +    directory = session.get(key + '_config_dir')
++    kind = session.get('job_type') or job_type(session)
++    if cfg['enabled'] and lane == 'main' and kind != 'interactive':
++        lane, directory = None, None
 +    if lane is None:
-+        legacy = session.get('session_id') and not review
-+        kind = session.get('job_type') or job_type(session)
-+        lane = 'main' if legacy or kind == 'interactive' or not cfg['enabled'] else ('research' if cfg['account3_ready'] and (review or kind in RESEARCH_TYPES) else 'design')
++        lane = 'main' if kind == 'interactive' or not cfg['enabled'] else ('research' if cfg['account3_ready'] and (review or kind in RESEARCH_TYPES) else 'design')
 +        directory = os.environ.get('CLAUDE_CONFIG_DIR') if lane == 'main' else str(Path.home() / LANES[lane][1])
 +    return lane, directory
 +
@@ -201,7 +223,7 @@
 +        raise Unavailable(cfg['error'])
 +    if lane not in LANES or not isinstance(directory, str) or not Path(directory).is_absolute():
 +        raise Unavailable('waiting for valid claude session affinity')
-+    if lane != 'main' and not cfg['enabled']:
++    if lane != 'main' and (not cfg['enabled'] or not enabled()):
 +        raise Unavailable('waiting for claude lanes to be enabled')
 +    if lane != 'main':
 +        if not cfg['account2_ready'] or (lane == 'research' and not cfg['account3_ready']):
@@ -214,6 +236,9 @@
 +    verified = cfg.get('verified_at', {}).get(lane)
 +    if not number(verified) or not 0 <= time.time() - verified < _AUTH_TTL:
 +        raise Unavailable('waiting for fresh claude lane verification')
++    if not review and session.get('session_id') and session.get('claude_lane') in (None, 'main'):
++        session['legacy_main_session_id'] = session['session_id']
++        session['session_id'] = None
 +    session.update({key + '_lane': lane, key + '_config_dir': directory,
 +                    'active_claude_lane': lane, 'active_claude_config_dir': directory,
 +                    'active_claude_managed': candidate['active_claude_managed']})

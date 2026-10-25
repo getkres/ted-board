@@ -25,6 +25,10 @@ def load(path, name, deps):
 
 
 class LegacyIsolation(unittest.TestCase):
+    def setUp(self):
+        lanes=patch.dict(os.environ,{'TED_CLAUDE_LANES_CONFIG':str(ROOT/'offline-unconfigured-lanes.json')})
+        lanes.start();self.addCleanup(lanes.stop)
+
     def test_removing_one_guard_restores_every_legacy_source_byte(self):
         names = ('sessions.py', 'session_worker.py', 'live_status.py', 'board_live.py',
                  'jobs_heartbeat.py', 'job_watchdog.py', 'card.py', 'inbox_steward.py', 'handler.ts')

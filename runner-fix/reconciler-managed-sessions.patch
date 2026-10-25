@@ -1,10 +1,12 @@
 --- a/sessions.py
 +++ b/reconciler_sessions.py
-@@ -11,16 +11,35 @@
- import sys
+@@ -12,19 +12,34 @@
  import time
  import uuid
-+import claude_lanes as lanes
+ import claude_lanes as lanes
+-# LEGACY DISPATCH PAUSE IMPORT
+-from dispatch_pause import paused as dispatch_paused
+-# END LEGACY DISPATCH PAUSE IMPORT
  from board_client import BoardConflict, BoardGone, call
  from live_status import instructions, publish_live
  from inbox_policy import failure_kind, failure_message, FAILURE_LINE, approval_line
@@ -37,20 +39,31 @@
   "Draft external sends and spending only: write draft-email.json or spend.json with summary, exact text, recipients or amount, and execution instructions, then stop for card approval. "
   "Narrow veto exception: only for a queued veto_cleared proposal, the dedicated veto worker invokes the server to send the exact cleared routine email to the already known recipient. "
   "Timed drafts are sent only through the dedicated veto worker and the server veto_send gate. General model turns cannot execute a timed send. The server checks veto_details, status cleared, the same card revision, confidence at least 80 percent, "
-@@ -62,10 +81,10 @@
+@@ -64,23 +79,7 @@
+  except (ProcessLookupError,PermissionError):return False
  
- def engine_command(s,prompt,prefix,review=False):
-  if review:
+ 
+-def _engine_command_legacy(s,prompt,prefix,review=False):
+- if review:
 -  return [CLAUDE,'-p','--model','opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',s['review_context'],prompt]
-+  return [CLAUDE,'-p','--model','opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',s['review_context']]+(['--resume',s['review_session_id']] if s.get('review_session_id') else [])+[prompt]
-  context=RULES+'\n'+instructions(s['card_id'])+'\nCard brief:\n'+s['brief']
-  if s['engine'] in ('claude','sonnet'):
+- context=RULES+'\n'+instructions(s['card_id'])+'\nCard brief:\n'+s['brief']
+- if s['engine'] in ('claude','sonnet'):
 -  cmd=[CLAUDE,'-p']+(['--model','sonnet'] if s['engine']=='sonnet' else [])+['--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',context]
-+  cmd=[CLAUDE,'-p','--model','sonnet' if s['engine']=='sonnet' else 'opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',context]
-   if s.get('session_id'):cmd+=['--resume',s['session_id']]
-   return cmd+[prompt]
-  common=['--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','-m','gpt-6.1-sol','-o',str(prefix)+'.last.txt']
-@@ -91,12 +110,6 @@
+-  if s.get('session_id'):cmd+=['--resume',s['session_id']]
+-  return cmd+[prompt]
+- common=['--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','-m','gpt-6.1-sol','-o',str(prefix)+'.last.txt']
+- if s.get('session_id'):return [CODEX,'exec','resume',*common,s['session_id'],context+'\n'+prompt]
+- report=Path(s['cwd'])/'REPORT.md'
+- seed='\nPrior report:\n'+report.read_text()[-10000:] if report.exists() else ''
+- return [CODEX,'exec',*common,context+'\nThread:\n'+s.get('thread','')+seed+'\n'+prompt]
+-
+-
+ def engine_command(s,prompt,prefix,review=False):
+- if s.get('active_claude_managed') is not True:return _engine_command_legacy(s,prompt,prefix,review)
+  if review:
+   return [CLAUDE,'-p','--model','opus','--output-format','stream-json','--verbose','--permission-mode','bypassPermissions','--append-system-prompt',s['review_context']]+(['--resume',s['review_session_id']] if s.get('review_session_id') else [])+[prompt]
+  context=RULES+'\n'+instructions(s['card_id'])+'\nCard brief:\n'+s['brief']
+@@ -111,12 +110,6 @@
  
  
  def deliver(item):
@@ -63,7 +76,7 @@
   import board_reply
   return board_reply.main([item['card_id'],item['text'],'--token',item['token']])==0
  
-@@ -115,6 +128,18 @@
+@@ -135,6 +128,18 @@
  
  def review_live_line(kind):
   return {'email':'approved, sending now','spend':'approved, executing spend now','db':'approved, applying now'}[kind]
@@ -82,11 +95,10 @@
  
  
  class Store:
-@@ -130,7 +155,15 @@
+@@ -150,6 +155,14 @@
     else:atomic(self.path,data)
   def read(self):
    with self.locked() as data:return json.loads(json.dumps(data))
-- def enqueue(self,card,message,receipt_id,engine='claude',brief=''):
 + def renew_lease(self,card_id,turn,pid,expected,token):
 +  with self.locked() as data:
 +   s=data['sessions'].get(card_id,{})
@@ -95,11 +107,10 @@
 +   s['lease'].update(renewed_at=now,expires_at=now+LEASE_SECONDS)
 +   s.update(lease_expires_at=now+LEASE_SECONDS)
 +   return True
-+ def enqueue(self,card,message,receipt_id,engine='claude',brief='',job_type=None):
+  def enqueue(self,card,message,receipt_id,engine='claude',brief='',job_type=None):
    if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',card['id']) or engine not in ('codex','claude','sonnet'):raise ValueError('Invalid card or engine')
    veto_id=str(receipt_id)[5:] if str(receipt_id).startswith('veto-') else None
-   if veto_id and (isinstance(card.get('revision'),bool) or not isinstance(card.get('revision'),int) or card['revision']<1):
-@@ -138,29 +171,42 @@
+@@ -158,31 +171,42 @@
    with self.locked() as data:
     if str(receipt_id) in data['receipts']:return False
     cid=card['id'];s=data['sessions'].get(cid)
@@ -110,6 +121,7 @@
      brief='Card: '+card['title']+'\nProject: '+card.get('project','Ted ops')+'\n'+card.get('body','')+'\nTask: '+brief
      (d/'BRIEF.md').write_text(RULES+'\n'+instructions(cid)+'\n'+brief);(d/'BRIEF.md').chmod(0o600)
      s=dict(id='card-'+cid,card_id=cid,engine=engine,session_id=None,cwd=str(d.resolve()),status='idle',last_line='Queued',started_at=None,last_activity=time.time(),pid=None,identity='',queue=[],title=card['title'],brief=brief or card.get('body',''),thread='',seen_artifacts=[])
+-    if lanes.enabled():s['job_type']=lanes.job_type(card,job_type)
 +    s['job_type']=lanes.job_type(card,job_type)
      data['sessions'][cid]=s
     s.update(title=card['title'],thread='\n'.join(m.get('who','')+': '+m.get('text','') for m in card.get('messages',[]))[-30000:])
@@ -141,12 +153,14 @@
   def _fail_artifact(self,data,s):
    line='approval artifact failed safety checks, ted needs to repair the packet'
    already_reported=s.get('artifact_error')==line
-   s.update(status='failed',queue=[],last_line=line,artifact_error=line,last_activity=time.time())
+-  s.update(status='failed',queue=[],last_line=line,artifact_error=line,last_activity=time.time())
+-  if lanes.dedicated(s):lanes.clear_review(s)
++  s.update(status='failed',queue=[q for q in s.get('queue',[]) if q.get('automatic') is not True and not str(q.get('id','')).startswith('reconciler-retry-')],last_line=line,artifact_error=line,last_activity=time.time())
 +  lanes.clear_review(s)
    for approval in data['approvals'].values():
     if approval['card_id']==s['card_id'] and approval['status'] in ('pending','approved','reviewing'):
      approval.update(status='superseded',reason='approval artifact failed safety checks',sync_status=True)
-@@ -170,36 +216,114 @@
+@@ -192,47 +216,114 @@
   def _worker_failure(self,data,s,kind,retry=False):
    active=s.get('active_turn') or {}
    group=active.get('recovery_group') or s.get('turn') or uuid.uuid4().hex
@@ -220,6 +234,7 @@
 +   if publish_live(s['card_id'],'blocked',s.get('failure_message',FAILURE_LINE),section='up_next'):
      s.pop('failure_publish_pending',None);s['recovery_section']='up_next'
 - def tick(self):
+-  # Auth probes run outside the ledger lock and use the shared 60-second cache.
 + def _initial_dispatch_permissions(self):
 +  with self.locked() as data:
 +   sessions=json.loads(json.dumps(data['sessions']))
@@ -233,14 +248,22 @@
 +   remote=call(page=True,resource='jobs')
 +   if not isinstance(remote,dict) or not isinstance(remote.get('jobs'),list):return set()
 +  except (OSError,RuntimeError,ValueError):return set()
-+  snapshot=dict(sessions=sessions,dispatch_policy=policy,external_jobs=[j for j in remote['jobs'] if isinstance(j,dict) and j.get('card_id') in pending and j.get('status') in ('running','untracked')])
++  snapshot=dict(sessions=sessions,dispatch_policy=policy,external_jobs=[j for j in remote['jobs'] if isinstance(j,dict) and j.get('card_id') in pending and j.get('status') in ('running','untracked','queued','waiting_approval') and j.get('id')!=sessions.get(j.get('card_id'),{}).get('id')])
 +  return {card['id'] for card in cards if card['id'] in pending and card.get('section') in ('up_next','ted_doing') and initial_dispatch_allowed(snapshot,card)}
 +
 + def tick(self,reconcile=False):
 +  if not reconciler_enabled():return
 +  managed=True
 +  if not reconcile:return
-+  layout=lanes.topology(CLAUDE,str(self.root))
+   layout=lanes.topology(CLAUDE,str(self.root))
+-  if not layout['enabled']:return self._tick_legacy()
+-  try:layout['capacity']=lanes.capacity()
+-  except lanes.Unavailable as exc:
+-   layout['error']=str(exc)
+-   layout['capacity']=dict(total_workers=64,load_per_cpu=3,engines=dict(claude=0,sonnet=0))
+-  return self._tick_lanes(layout)
+-
+- def _tick_legacy(self):
 +  host=admission_state()
 +  first_permissions=self._initial_dispatch_permissions()
 +  dispatch_policy=read_dispatch_policy(self.root/'reconciler-config.json')
@@ -258,6 +281,7 @@
     for s in data['sessions'].values():
 +    if managed and s.get('stop_requested'):continue
      if s['status']!='running':continue
+-    if s.get('active_claude_managed') is True:self._settle_turn(data,s);continue
      prefix=Path(s['cwd'])/s['turn'];result=Path(str(prefix)+'.result.json')
 -    if alive(s.get('pid'),s.get('identity')):
 +    r=None
@@ -280,7 +304,7 @@
       activity_path=Path(str(prefix)+'.events')
       if activity_path.exists():
        s['last_activity']=max(s['last_activity'],activity_path.stat().st_mtime)
-@@ -215,14 +339,26 @@
+@@ -248,14 +339,26 @@
         if event.get('type') in ('item.started','item.completed'):
          s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
       s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);continue
@@ -312,7 +336,7 @@
      veto_revision=s.pop('active_veto_revision',None)
      if veto_revision is not None:
       outcome=r.get('veto_outcome')
-@@ -233,69 +369,115 @@
+@@ -266,156 +369,43 @@
      failed=not r['ok'] and not s.get('kill_requested_at') and not known_veto_gate
      if failed:
       kind=r.get('failure_kind') or failure_kind(r.get('text')) or 'crash'
@@ -332,6 +356,9 @@
      if s['queue']:s['status']='queued'
      elif s['status']=='done' and veto_revision is None:
 -     publish_live(s['card_id'],'blocked','ted review',section='up_next')
+-   # LEGACY DISPATCH PAUSE GUARD
+-   if dispatch_paused():return
+-   # END LEGACY DISPATCH PAUSE GUARD
 -   running=sum(s['status']=='running' for s in data['sessions'].values())
 -   claude_running=sum(s['status']=='running' and s.get('engine')=='claude' for s in data['sessions'].values())
 -   sonnet_running=sum(s['status']=='running' and s.get('engine')=='sonnet' for s in data['sessions'].values())
@@ -346,10 +373,134 @@
 +   for s in pending:
 +    if managed and launches>=10:break
      if s['status']=='running' or not s['queue'] or s.get('failure_publish_pending'):continue
+-    if lanes.dedicated(s):
+-     s.update(status='queued',last_line='waiting for valid claude lane configuration');continue
 -    if s.get('engine')=='claude' and s['queue'][0]['kind']!='review' and claude_running>=2:continue
 -    if s.get('engine')=='sonnet' and sonnet_running>=8:continue
 +    if managed and (s.get('stop_requested') or s.get('status')=='dead_letter' or stamp(s.get('retry_at'))>time.time()):continue
      turn=s['queue'][0]
+-    if s['status']=='waiting_approval' and turn['kind']!='review':continue
+-    if turn['kind']=='review':
+-     a=data['approvals'][turn['approval_id']]
+-     if a['status']!='approved':
+-      s['queue'].pop(0);continue
+-     if a['kind']=='db' and any(other['id']!=a['id'] and other['kind']=='db' and other['status']=='reviewing' for other in data['approvals'].values()):continue
+-     try:current=artifact(s['cwd'],a['kind'])
+-     except (ValueError,OSError):
+-      self._fail_artifact(data,s);continue
+-     if not current or current['digest']!=a['digest']:
+-      a.update(status='superseded',reason='approved artifact changed, prepare a fresh approval',sync_status=True);s['queue'].pop(0);s['status']='failed';self._out(data,s,'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.','changed-'+a['id']);continue
+-     s['reviewing']=a['id'];a.update(status='reviewing',sync_status=True)
+-     s['review_context']='You are the fresh Ted approval reviewer. Sebastian explicitly approved ONLY the exact artifact below. Re-read the actual files in cwd and confirm they match. For DB changes require a usable backup, rollback, and explicit identity guards in apply.sql. Refuse missing or unsafe safeguards. For email/spend require exact recipient, text, amount, and executable instructions; refuse ambiguity. Execute only the approved action. Never broaden the scope, reveal secrets, or send unrelated messages. End with a line exactly APPLY_OK only after verified success, otherwise REVIEW_BLOCKED with the reason. No em dash.\nApproved snapshot:\n'+a['content']
+-    s['queue'].pop(0);s['turn']=turn['id'];s['active_turn']=turn;s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
+-    s.pop('failure_kind',None)
+-    s.pop('veto_outcome',None)
+-    if turn.get('veto_proposal_id'):s['active_veto_revision']=turn['veto_card_revision']
+-    prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
+-    env=dict(os.environ,PATH=str(Path.home()/'.local/bin')+':'+str(Path.home()/'.local/node/bin')+':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',DEVELOPER_DIR='/Library/Developer/CommandLineTools')
+-    env=lanes.worker_environment(env)
+-    try:
+-     with open(str(prefix)+'.log','a') as log:
+-      os.chmod(log.name,0o600)
+-      p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
+-     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=s.get('engine')=='claude';sonnet_running+=s.get('engine')=='sonnet'
+-     line=review_live_line(a['kind']) if turn['kind']=='review' else ('started: '+s['title'].lower().replace(chr(8212),','))[:240]
+-     if publish_live(s['card_id'],'running',line,section='ted_doing',**({'expected_section':s['recovery_section']} if s.get('recovery_section') else {})):
+-      s.pop('recovery_section',None)
+-    except OSError:
+-     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s)
+-     veto_revision=s.pop('active_veto_revision',None)
+-     if veto_revision is not None:s['veto_outcome']=dict(status='failed',revision=veto_revision)
+-     if turn['kind']=='review':a.update(status='failed',reason='reviewer could not start',sync_status=True);s.pop('reviewing',None)
+-
+- def _settle_turn(self,data,s):
+-  prefix=Path(s['cwd'])/s['turn'];result=Path(str(prefix)+'.result.json')
+-  if alive(s.get('pid'),s.get('identity')):
+-   activity_path=Path(str(prefix)+'.events')
+-   if activity_path.exists():
+-    s['last_activity']=max(s['last_activity'],activity_path.stat().st_mtime)
+-    with activity_path.open('rb') as activity_file:
+-     activity_file.seek(max(0,activity_path.stat().st_size-64000));lines=activity_file.read().decode(errors='replace').splitlines()
+-    for line in reversed(lines):
+-     try:event=json.loads(line)
+-     except ValueError:continue
+-     if event.get('type')=='assistant':
+-      blocks=event.get('message',{}).get('content',[])
+-      tools=[b.get('name','tool') for b in blocks if b.get('type')=='tool_use']
+-      s['last_line']='Using '+', '.join(tools) if tools else 'Claude is composing a response';break
+-     if event.get('type') in ('item.started','item.completed'):
+-      s['last_line']='Codex activity: '+event.get('item',{}).get('type','working');break
+-   s['last_activity']=max(s['last_activity'],Path(str(prefix)+'.log').stat().st_mtime if Path(str(prefix)+'.log').exists() else s['last_activity']);return
+-  try:
+-   r=json.loads(result.read_text()) if result.exists() else dict(ok=False,failure_kind='no_result',text='Worker stopped without a final result.')
+-   if not isinstance(r,dict) or not isinstance(r.get('ok'),bool) or not isinstance(r.get('text'),str):raise ValueError('Invalid worker result')
+-  except (OSError,ValueError):r=dict(ok=False,failure_kind='crash',text=failure_message('crash'))
+-  if r.get('ok') and not r.get('text','').strip():r.update(ok=False,failure_kind='no_result')
+-  if not r.get('failure_kind') and r.get('text','').startswith('Worker returned no final answer.'):
+-   r.update(ok=False,failure_kind='no_result')
+-  if r.get('session_id') and not s.get('reviewing'):s['session_id']=r['session_id']
+-  if s.get('active_claude_managed') is True and r.get('session_id') and s.get('reviewing'):s['review_session_id']=r['session_id']
+-  limited=lanes.record(data,s,r)
+-  if limited and not r['ok'] and s.get('reviewing') and not s.get('review_session_id'):
+-   r['text']='REVIEW_BLOCKED: Claude usage limit stopped the reviewer without a resume identity. Verify the action outcome before preparing a fresh approval.'
+-  elif limited and not r['ok'] and s.get('active_turn') and not s.get('kill_requested_at'):
+-   s['queue'].insert(0,s.pop('active_turn'))
+-   s.update(status='queued',pid=None,last_activity=time.time(),last_line='waiting for claude lane usage limit to reset')
+-   return
+-  veto_revision=s.pop('active_veto_revision',None)
+-  if veto_revision is not None:
+-   outcome=r.get('veto_outcome')
+-   if outcome not in ('sent','failed','uncertain') or bool(r.get('ok'))!=(outcome=='sent'):outcome='uncertain'
+-   s['veto_outcome']=dict(status=outcome,revision=veto_revision)
+-  s.update(status='done' if r['ok'] else 'failed',last_activity=time.time(),pid=None,last_line=r.get('text','')[-500:])
+-  known_veto_gate=veto_revision is not None and r.get('veto_outcome') in ('failed','uncertain')
+-  failed=not r['ok'] and not s.get('kill_requested_at') and not known_veto_gate
+-  if failed:
+-   kind=r.get('failure_kind') or failure_kind(r.get('text')) or 'crash'
+-   self._worker_failure(data,s,kind,retry=kind in ('timeout','no_result') and not s.get('reviewing') and veto_revision is None)
+-   self._publish_failure(s)
+-  else:self._out(data,s,r.get('text',''),s['turn'])
+-  if s.get('reviewing'):
+-   aid=s.pop('reviewing');a=data['approvals'][aid]
+-   a['status']='done' if r['ok'] and r.get('text','').strip().splitlines()[-1:] == ['APPLY_OK'] else 'failed'
+-   a['reason']='' if a['status']=='done' else review_reason(r.get('text',''))
+-   a['sync_status']=True
+-   if lanes.dedicated(s):lanes.clear_review(s)
+-  if s.get('kill_requested_at'):
+-   s.update(status='failed',last_line='Stopped on request');s.pop('kill_requested_at',None)
+-  s.pop('active_turn',None)
+-  for key in ('active_claude_lane','active_claude_config_dir','active_claude_managed'):s.pop(key,None)
+-  if s['queue']:s['status']='queued'
+-  elif s['status']=='done' and veto_revision is None:
+-   publish_live(s['card_id'],'blocked','ted review',section='up_next')
+-
+- def _tick_lanes(self,layout):
+-  with self.locked() as data:
+-   for s in data['sessions'].values():
+-    self._publish_failure(s)
+-    if s.get('recovery_section') and s['status']=='running' and alive(s.get('pid'),s.get('identity')):
+-     if publish_live(s['card_id'],'running','worker is resuming from the saved job files',section='ted_doing',expected_section='up_next'):
+-      s.pop('recovery_section',None)
+-   for s in data['sessions'].values():
+-    if s['status']=='running':self._settle_turn(data,s)
+-   # LEGACY DISPATCH PAUSE GUARD
+-   if dispatch_paused():return
+-   # END LEGACY DISPATCH PAUSE GUARD
+-   running=sum(s['status']=='running' for s in data['sessions'].values())
+-   claude_running=sum(s['status']=='running' and lanes.execution_engine(s)=='claude' for s in data['sessions'].values())
+-   sonnet_running=sum(s['status']=='running' and lanes.execution_engine(s)=='sonnet' for s in data['sessions'].values())
+-   main_running={engine:sum(s['status']=='running' and lanes.execution_engine(s)==engine and s.get('active_claude_lane','main')=='main' for s in data['sessions'].values()) for engine in ('claude','sonnet')}
+-   capacity=layout['capacity']
+-   overloaded=os.getloadavg()[0]>capacity['load_per_cpu']*(os.cpu_count() or 8)
+-   data['claude_lane_topology']={key:layout[key] for key in ('enabled','account2_ready','account3_ready')}
+-   opus_cap,sonnet_cap=(capacity['engines']['claude'],capacity['engines']['sonnet']) if layout['account2_ready'] else (2,8)
+-   for s in data['sessions'].values():
+-    if running>=capacity['total_workers'] or overloaded:break
+-    if s['status']=='running' or not s['queue'] or s.get('failure_publish_pending'):continue
+-    turn=s['queue'][0]
+-    execution_engine=lanes.execution_engine(s,turn)
+-    if execution_engine=='claude' and claude_running>=opus_cap:continue
+-    if execution_engine=='sonnet' and sonnet_running>=sonnet_cap:continue
 +    retrying=str(turn.get('id','')).startswith('reconciler-retry-')
 +    automatic=turn.get('automatic') is True or retrying
 +    if automatic and automatic_hold(dict(sessions=data['sessions'],dispatch_policy=dispatch_policy),dict(s,id=s['card_id'])):
@@ -367,27 +518,24 @@
      if s['status']=='waiting_approval' and turn['kind']!='review':continue
      if turn['kind']=='review':
       a=data['approvals'][turn['approval_id']]
--     if a['status']!='approved':
--      s['queue'].pop(0);continue
-+     if a['status']!='approved' and not (a['status']=='reviewing' and s.get('reviewing')==a['id']):
-+      s['queue'].pop(0);lanes.clear_review(s);continue
-      if a['kind']=='db' and any(other['id']!=a['id'] and other['kind']=='db' and other['status']=='reviewing' for other in data['approvals'].values()):continue
-      try:current=artifact(s['cwd'],a['kind'])
+@@ -426,17 +416,21 @@
       except (ValueError,OSError):
        self._fail_artifact(data,s);continue
       if not current or current['digest']!=a['digest']:
--      a.update(status='superseded',reason='approved artifact changed, prepare a fresh approval',sync_status=True);s['queue'].pop(0);s['status']='failed';self._out(data,s,'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.','changed-'+a['id']);continue
+-      a.update(status='superseded',reason='approved artifact changed, prepare a fresh approval',sync_status=True);s['queue'].pop(0);s['status']='failed';lanes.clear_review(s);self._out(data,s,'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.','changed-'+a['id']);continue
 +      a.update(status='superseded',reason='approved artifact changed, prepare a fresh approval',sync_status=True);s['queue'].pop(0);s['status']='failed';s['artifact_error']='approved artifact changed, fresh approval required';lanes.clear_review(s);self._out(data,s,'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.','changed-'+a['id']);continue
-+    if not turn.get('veto_proposal_id') and (s['engine'] in ('claude','sonnet') or turn['kind']=='review'):
-+     try:lanes.prepare(s,turn['kind']=='review',data,CLAUDE,layout)
-+     except lanes.Unavailable as exc:
-+      s.update(status='queued',last_line=str(exc));continue
+     if not turn.get('veto_proposal_id') and (s['engine'] in ('claude','sonnet') or turn['kind']=='review'):
+-     target,_=lanes.selection(s,turn['kind']=='review',layout)
+-     if target=='main' and main_running[execution_engine]>=(2 if execution_engine=='claude' else 8):continue
+      try:lanes.prepare(s,turn['kind']=='review',data,CLAUDE,layout)
+      except lanes.Unavailable as exc:
+       s.update(status='queued',last_line=str(exc));continue
 +     main=[other for other in running if other.get('active_claude_lane','main')=='main']
 +     if s['active_claude_lane']=='main' and not can_admit(s,turn,main,host['cap'],host.get('capacity'),reserve=False):continue
-+    if turn['kind']=='review':
+     if turn['kind']=='review':
       s['reviewing']=a['id'];a.update(status='reviewing',sync_status=True)
       s['review_context']='You are the fresh Ted approval reviewer. Sebastian explicitly approved ONLY the exact artifact below. Re-read the actual files in cwd and confirm they match. For DB changes require a usable backup, rollback, and explicit identity guards in apply.sql. Refuse missing or unsafe safeguards. For email/spend require exact recipient, text, amount, and executable instructions; refuse ambiguity. Execute only the approved action. Never broaden the scope, reveal secrets, or send unrelated messages. End with a line exactly APPLY_OK only after verified success, otherwise REVIEW_BLOCKED with the reason. No em dash.\nApproved snapshot:\n'+a['content']
--    s['queue'].pop(0);s['turn']=turn['id'];s['active_turn']=turn;s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
+-    s['active_turn']=s['queue'].pop(0);s['turn']=turn['id'];s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
 +    s['queue'].pop(0);s['turn']=turn['id'];s['last_line']='Fresh Opus review starting' if turn['kind']=='review' else 'Starting '+s['engine']+' turn'
 +    s['active_turn']=dict(turn);s.setdefault('retry_count',0);s.pop('retry_at',None);s.pop('recovery_required',None)
 +    if managed:
@@ -396,21 +544,21 @@
      s.pop('failure_kind',None)
      s.pop('veto_outcome',None)
      if turn.get('veto_proposal_id'):s['active_veto_revision']=turn['veto_card_revision']
--    prefix=Path(s['cwd'])/s['turn'];atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
-+    prefix=Path(s['cwd'])/s['turn']
-+    # A limited turn retries with its original ID. Never reuse its old result.
-+    Path(str(prefix)+'.result.json').unlink(missing_ok=True)
-+    atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
+@@ -445,35 +439,49 @@
+     Path(str(prefix)+'.result.json').unlink(missing_ok=True)
+     atomic(str(prefix)+'.input.json',dict(session=s,prompt=turn['message'],review=turn['kind']=='review',veto_proposal_id=turn.get('veto_proposal_id')))
      env=dict(os.environ,PATH=str(Path.home()/'.local/bin')+':'+str(Path.home()/'.local/node/bin')+':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',DEVELOPER_DIR='/Library/Developer/CommandLineTools')
-     env.pop('CLAUDECODE',None)
-+    if not turn.get('veto_proposal_id') and (s['engine'] in ('claude','sonnet') or turn['kind']=='review'):env=lanes.environment(s,env)
+-    env=lanes.worker_environment(env)
++    env.pop('CLAUDECODE',None)
+     if not turn.get('veto_proposal_id') and (s['engine'] in ('claude','sonnet') or turn['kind']=='review'):env=lanes.environment(s,env)
 +    launches+=1;retry_launches+=retrying
 +    if automatic:s['automatic_dispatch_count']=int(s.get('automatic_dispatch_count') or 0)+1
      try:
       with open(str(prefix)+'.log','a') as log:
        os.chmod(log.name,0o600)
 -      p=subprocess.Popen([PYTHON,str(ROOT/'session_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
--     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=s.get('engine')=='claude';sonnet_running+=s.get('engine')=='sonnet'
+-     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time());running+=1;claude_running+=execution_engine=='claude';sonnet_running+=execution_engine=='sonnet'
+-     if s.get('active_claude_lane')=='main' and execution_engine in main_running:main_running[execution_engine]+=1
 +      p=subprocess.Popen([PYTHON,str(ROOT/'reconciler_worker.py'),str(prefix)],cwd=s['cwd'],env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
 +     s.update(pid=p.pid,identity=identity(p.pid),status='running',started_at=time.time(),last_activity=time.time())
 +     if managed:s['lease'].update(pid=s['pid'],identity=s['identity'])
@@ -421,12 +569,12 @@
        s.pop('recovery_section',None)
      except OSError:
 -     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s)
-+     for key in ('active_claude_lane','active_claude_config_dir','active_claude_managed'):s.pop(key,None)
+-     s.pop('active_turn',None)
+      for key in ('active_claude_lane','active_claude_config_dir','active_claude_managed'):s.pop(key,None)
 +     s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s,data if managed else None)
       veto_revision=s.pop('active_veto_revision',None)
       if veto_revision is not None:s['veto_outcome']=dict(status='failed',revision=veto_revision)
--     if turn['kind']=='review':a.update(status='failed',reason='reviewer could not start',sync_status=True);s.pop('reviewing',None)
-+     if turn['kind']=='review':a.update(status='failed',reason='reviewer could not start',sync_status=True);lanes.clear_review(s)
+      if turn['kind']=='review':a.update(status='failed',reason='reviewer could not start',sync_status=True);lanes.clear_review(s)
 +  if managed:self._flush_publications()
   def flush(self):
 -  with self.locked() as data:
@@ -455,7 +603,12 @@
    with self.locked() as data:
     db_busy=any(a['kind']=='db' and a['status'] in ('pending','approved','reviewing') for a in data['approvals'].values())
     for s in data['sessions'].values():
-@@ -327,15 +509,12 @@
+-    if s['status'] in ('running','queued','failed') or s.get('failure_kind'):continue
++    if s['status'] in ('running','queued','failed','dead_letter','stopped') or s.get('stop_requested') or s.get('failure_kind'):continue
+     for kind in ('db','email','spend'):
+      try:a=artifact(s['cwd'],kind)
+      except (ValueError,OSError):
+@@ -501,17 +509,12 @@
        pid=payload.get('pid');expected=payload.get('identity','')
        if s and (s.get('pid')!=pid or s.get('identity')!=expected):result='Stale kill refused'
        else:
@@ -463,7 +616,9 @@
         if s:
 -        # Do not free a slot while a refusing process is still alive.
 -        if killed:s.update(kill_requested_at=time.time(),last_line='Stopping on request',queue=[])
--        elif not alive(pid,expected):s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
+-        elif not alive(pid,expected):
+-         s.update(status='failed',pid=None,queue=[],last_line='Stopped on request')
+-         if lanes.dedicated(s):lanes.clear_review(s);s.pop('active_turn',None)
 +        s.update(stop_requested=True,kill_requested_at=time.time(),last_line='Stopping on request')
          for a in data['approvals'].values():
           if a['card_id']==s['card_id'] and a['status'] in ('pending','approved','reviewing'):a.update(status='failed',reason='job stopped on request',sync_status=True)
@@ -474,12 +629,19 @@
       elif s and cmd['target'] in data['approvals']:
        a=data['approvals'][cmd['target']]
        if a['status']!='pending' or payload.get('digest')!=a['digest'] or payload.get('card_id')!=s['card_id']:
-@@ -368,4 +547,8 @@
+@@ -540,15 +543,7 @@
+     with self.locked() as data:
+      current=data['approvals'][a['id']]
+      if current['status']==a['status'] and current.get('reason','')==a.get('reason',''):current['sync_status']=False
+- def _snapshot_legacy(self):
+-  data=self.read();jobs=[]
+-  for s in data['sessions'].values():
+-   jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})
+-  return jobs,[{k:a[k] for k in ('id','card_id','kind','summary','content','digest')} for a in data['approvals'].values() if a['status']=='pending']
+-
+-
+  def snapshot(self):
+-  if not lanes.enabled():return self._snapshot_legacy()
    data=self.read();jobs=[]
    for s in data['sessions'].values():
     jobs.append({k:s.get(k) for k in ('id','card_id','title','engine','session_id','cwd','status','started_at','last_activity','pid','identity','last_line')}|{'queued_turns':len(s['queue']),'last_line':s.get('last_line') or 'Queued'})
-+   if s['engine']=='sonnet' or s.get('reviewing'):
-+    jobs[-1]['engine']='claude'
-+    if lanes.execution_engine(s)=='sonnet':jobs[-1]['worker_engine']='sonnet'
-+  jobs+=lanes.summaries(data)
-   return jobs,[{k:a[k] for k in ('id','card_id','kind','summary','content','digest')} for a in data['approvals'].values() if a['status']=='pending']

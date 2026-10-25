@@ -10,6 +10,19 @@ from unittest.mock import patch
 import reconciler_runtime as d
 
 class RuntimeTests(unittest.TestCase):
+ def test_busy_pass_lock_reports_operator_commands_as_unperformed(self):
+  for args in (['--redrive','c','--reason','repaired'],['--settle-review','c','--approval-id','a','--review-outcome','failed','--reason','verified']):
+   with tempfile.TemporaryDirectory() as temp,patch.dict(d.os.environ,{'TED_RECONCILER_ENABLED':'true'}),patch.object(d.socket,'gethostname',return_value='test-mini'),patch.object(d.fcntl,'flock',side_effect=BlockingIOError),patch.object(d.importlib,'import_module',side_effect=AssertionError('busy command must not mutate')):
+    Path(temp,'jobs').mkdir()
+    self.assertEqual(d.main(['--apply','--root',temp]+args),1)
+ def test_route_forwards_observed_revision_and_messages(self):
+  from unittest.mock import Mock
+  messages=[dict(who='Ted',text='operational work')]
+  board=types.SimpleNamespace(call=Mock(return_value=dict(ok=True)))
+  action=dict(kind='route_ted',payload=dict(card_id='c',expected_updated_at='2026-10-23T20:00:00Z',expected_revision=7,expected_messages=messages))
+  self.assertTrue(d.execute(action,None,{},board))
+  self.assertEqual(board.call.call_args.kwargs['expected_revision'],7)
+  self.assertEqual(board.call.call_args.kwargs['expected_messages'],messages)
  def test_dry_run_never_constructs_effect_store_or_executes_actions(self):
   s={'cards':[],'sessions':{},'approvals':[],'mockups':[],'coverage':{}}
   with tempfile.TemporaryDirectory() as tmp,patch.object(d,'execute',side_effect=AssertionError('effect called')):

@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,509 @@
+@@ -0,0 +1,513 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -385,7 +385,7 @@
 +  card.create(p['project'],('build approved: '+p['batch'])[:200],('Build approved mockups. Preserve the approved, build, PR, merged, deployed, and verified chain. Batch: '+p['batch']+'\nMockup IDs: '+', '.join(p['mockup_ids']))[:2000],card_id=cid)
 +  return True
 + if kind=='route_ted':
-+  result=board.call('reconcile_route_ted',card_id=cid,expected_updated_at=p.get('expected_updated_at'),expected_section='needs_you',line='operational work belongs to ted, review queued')
++  result=board.call('reconcile_route_ted',card_id=cid,expected_updated_at=p.get('expected_updated_at'),expected_revision=p.get('expected_revision'),expected_messages=p.get('expected_messages'),expected_section='needs_you',line='operational work belongs to ted, review queued')
 +  return result.get('ok') is True
 + if kind in ('escalate_2h','escalate_12h','review_sla'):return True  # one ranked queue and banner avoid a note flood
 + if kind=='repair_metadata':return True  # atomic reconcile_publish already persisted this metadata
@@ -465,7 +465,11 @@
 + if apply:
 +  lock=(root/'jobs/.reconciler.lock').open('a');os.chmod(lock.name,0o600)
 +  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-+  except BlockingIOError:return 0
++  except BlockingIOError:
++   lock.close()
++   if a.settle_review or a.redrive:
++    print('Reconciler pass is busy; operator command was not performed.',file=sys.stderr);return 1
++   return 0
 + try:
 +  store=importlib.import_module('reconciler_sessions').Store(root/'jobs') if apply else None
 +  if a.settle_review:

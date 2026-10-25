@@ -6,7 +6,7 @@ export type ReconciliationItem = {
 };
 export type Reconciliation = {generated_at:string;items:ReconciliationItem[];banner:boolean;ted_queue:string[];coverage_defects?:string[]};
 export type CloseVerified = {card_id:string;expected_updated_at:string};
-export type RouteTed = {card_id:string;expected_section:'needs_you';expected_updated_at:string;line:string};
+export type RouteTed = {card_id:string;expected_section:'needs_you';expected_updated_at:string;expected_revision:number;expected_messages:unknown[];line:string};
 export type ReconciliationStore = {read():Promise<Reconciliation|null>;publish(value:Reconciliation):Promise<Record<string,unknown>>;routeTed?(value:RouteTed):Promise<Record<string,unknown>>;closeVerified?(value:CloseVerified):Promise<Record<string,unknown>>};
 type Request = {method:string;principal:'page'|'worker'|null;body?:unknown};
 type Result = {status:number;body:Record<string,unknown>};
@@ -101,8 +101,8 @@ export async function handleReconciliationAction(request:Request,store:Reconcili
    value={card_id,expected_updated_at};
   }else if(route){
    const card_id=text(body.card_id,64),expected_updated_at=timestamp(body.expected_updated_at),line=text(body.line??'awaiting ted review',240);
-   if(!cardPattern.test(card_id)||body.expected_section!=='needs_you')throw Error('Invalid route');
-   value={card_id,expected_section:'needs_you',expected_updated_at,line};
+   if(!cardPattern.test(card_id)||body.expected_section!=='needs_you'||!Number.isSafeInteger(body.expected_revision)||Number(body.expected_revision)<=0||!Array.isArray(body.expected_messages))throw Error('Invalid route');
+   value={card_id,expected_section:'needs_you',expected_updated_at,expected_revision:body.expected_revision as number,expected_messages:body.expected_messages,line};
   }else value=validateReconciliationPublish(body,now);
  }catch{return {status:400,body:{error:'Invalid reconciliation payload'}}}
  if(close&&!store.closeVerified)return {status:503,body:{error:'Verified closure is unavailable'}};
@@ -125,7 +125,7 @@ export function createSupabaseReconciliationStore(client:SupabaseReconciliationC
    return data as Record<string,unknown>;
   },
   async routeTed(value){
-   const {data,error}=await client.rpc('ted_board_reconcile_route_ted',{p_card_id:value.card_id,p_expected_updated_at:value.expected_updated_at,p_expected_section:value.expected_section,p_line:value.line});
+   const {data,error}=await client.rpc('ted_board_reconcile_route_ted',{p_card_id:value.card_id,p_expected_updated_at:value.expected_updated_at,p_expected_section:value.expected_section,p_line:value.line,p_expected_revision:value.expected_revision,p_expected_messages:value.expected_messages});
    if(error)throw error;
    if(!data||typeof data!=='object'||Array.isArray(data)||(data as Record<string,unknown>).ok!==true)throw Error('Invalid route acknowledgement');
    return data as Record<string,unknown>;

@@ -34,7 +34,8 @@ class Packaging(unittest.TestCase):
             (backend / 'runner_failure_templates.json').write_text('{"version":1}\n')
             shutil.copyfile(HERE / 'reconstruct_reconciler.py', bundle / 'reconstruct_reconciler.py')
             (root / 'source/policy.py').write_text('policy before\n')
-            (bundle / 'reconciler-baseline-dependencies.json').write_text(json.dumps({'policy.py': hashlib.sha256(b'policy before\n').hexdigest()}))
+            (root / 'source/dispatch_pause.py').write_text('pause fixture\n')
+            (bundle / 'reconciler-baseline-dependencies.json').write_text(json.dumps({'policy.py': hashlib.sha256(b'policy before\n').hexdigest(),'dispatch_pause.py':hashlib.sha256(b'pause fixture\n').hexdigest()}))
             manifest = {}
             for name in ('sessions.py', 'handler.ts', 'hourly-SKILL.md', 'inbox_steward.py'):
                 source = backend / name if name == 'handler.ts' else root / 'source' / name
@@ -50,6 +51,7 @@ class Packaging(unittest.TestCase):
             run = subprocess.run(command, cwd=root, capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual((root / 'candidate/sessions.py').read_text(), 'after\n')
+            self.assertEqual((root / 'candidate/dispatch_pause.py').read_text(),'pause fixture\n')
             self.assertTrue((root / 'candidate/backend/runner_failure_templates.json').is_file())
             self.assertEqual((root / 'candidate/backend/runner_failure_templates.json').read_text(), '{"version":1}\n')
             (root / 'source/sessions.py').write_text('changed\n')

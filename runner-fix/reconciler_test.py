@@ -15,6 +15,18 @@ def snapshot(cards=None,**kw):
  return dict(cards=[card()] if cards is None else cards,sessions={},approvals=[],mockups=[],prs={},workflows={},coverage={},**kw)
 
 class PlannerTests(unittest.TestCase):
+ def test_operational_route_is_guarded_by_observed_revision_and_messages(self):
+  c=card(section='needs_you',revision=7,messages=[dict(who='Ted',text='operational work')])
+  route=next(x for x in r.plan(snapshot([c]),now=NOW)['actions'] if x['kind']=='route_ted')
+  self.assertEqual(route['payload']['expected_revision'],7);self.assertEqual(route['payload']['expected_messages'],c['messages'])
+ def test_operational_route_holds_protected_or_unfenced_cards(self):
+  cases=[dict(decision_kind='spend_money'),dict(live_state='waiting_on_you'),dict(revision=None),dict(revision=True),dict(messages=None),dict(veto_status='pending')]
+  for changes in cases:
+   c=card(**dict(dict(section='needs_you',revision=7,messages=[]),**changes))
+   self.assertNotIn('route_ted',[x['kind'] for x in r.plan(snapshot([c]),now=NOW)['actions']],changes)
+  for status in ('pending','approved','reviewing'):
+   s=snapshot([card(section='needs_you',revision=7,messages=[])]);s['approvals']=[dict(id='a',card_id='c-one',status=status,kind='db')]
+   self.assertNotIn('route_ted',[x['kind'] for x in r.plan(s,now=NOW)['actions']],status)
  def test_missing_owner_and_due_are_visible_and_stable(self):
   s=snapshot();a=r.plan(s,now=NOW);b=r.plan(s,now=NOW+120)
   self.assertEqual(a['items'][0]['owner'],'ted')
@@ -129,9 +141,11 @@ class PlannerTests(unittest.TestCase):
   s=snapshot(cards=[]);s['mockups']=[dict(id='m',project='test',batch='round',verdict='approved',created_at=r.iso(NOW))]
   self.assertEqual(next(x for x in r.plan(s,now=NOW)['actions'] if x['kind']=='create_build')['payload']['card_id'],expected)
  def test_shared_policy_preserves_real_decision_and_rejects_failure(self):
-  c=card(inbox_decision='pricing',decision_kind='other',section='needs_you')
+  c=card(inbox_decision='pricing',decision_kind='other',section='needs_you',revision=7,messages=[])
   self.assertNotIn('route_ted',[x['kind'] for x in r.plan(snapshot([c]),now=NOW)['actions']])
   c['inbox_decision']=None;c['decision_kind']='spend_money'
+  self.assertNotIn('route_ted',[x['kind'] for x in r.plan(snapshot([c]),now=NOW)['actions']])
+  c['decision_kind']='other'
   self.assertIn('route_ted',[x['kind'] for x in r.plan(snapshot([c]),now=NOW)['actions']])
  def test_completed_jobs_are_not_open_work_items(self):
   s=snapshot();s['sessions']={'c-one':dict(status='done',turn='t')}
