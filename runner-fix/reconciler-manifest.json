@@ -25,7 +25,7 @@
   },
   "jobs_heartbeat.py": {
     "patch": "reconciler-jobs_heartbeat.patch",
-    "candidate_sha256": "ee71d2ceebaa26484a59cc15cef38f48207904a7792b8f506236e3e2b67f4779",
+    "candidate_sha256": "16a34569a83e331188c499b9879594d8e5c72bc44ffaf8a32013773be503bf3d",
     "source": "jobs_heartbeat.py",
     "baseline_sha256": "38600a30fb6db483d798191f265bd6195b041f7117f6b729d63a20a7accd0c6d"
   },
@@ -79,7 +79,7 @@
   },
   "reconciler_heartbeat.py": {
     "patch": "reconciler-managed-heartbeat.patch",
-    "candidate_sha256": "599b13e5014fa64397bad1286186512cb00f941f266c0466fc2291994a7a4c69",
+    "candidate_sha256": "1b6b483adece2de0d8873c49f4ed6e3ce2d1b641e00e7e32d40c95b80c616215",
     "source": "jobs_heartbeat.py",
     "baseline_sha256": "38600a30fb6db483d798191f265bd6195b041f7117f6b729d63a20a7accd0c6d"
   },
@@ -91,7 +91,7 @@
   },
   "reconciler.py": {
     "patch": "reconciler-core.patch",
-    "candidate_sha256": "bc73debb3ed09a65f2a0b6aa6662396597e6d845a55597b4da421aa1590f2fdd"
+    "candidate_sha256": "0ba7cc82960bd0ce7187a5434dfe51508078af80d048d97a197672de2f72b2d8"
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
@@ -132,5 +132,10 @@
   "reconciler-capacity.json": {
     "patch": "reconciler-capacity.patch",
     "candidate_sha256": "1c1b235d7bea1175c71759ac7a7d82c80ede58c949ea53114bfedb49e6506aa6"
+  },
+  "heartbeat_wire.py": {
+    "patch": "reconciler-heartbeat-wire.patch",
+    "candidate_sha256": "ac2a7e983021f2f474312ed8f346de9b9806d3acb15d21d15cd16d11bc577f42",
+    "source": "heartbeat_wire.py"
   }
 }
