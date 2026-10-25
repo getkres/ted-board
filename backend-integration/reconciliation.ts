@@ -109,7 +109,7 @@ export async function handleReconciliationAction(request:Request,store:Reconcili
  if(route&&!store.routeTed)return {status:503,body:{error:'Reconciliation routing is unavailable'}};
  try{return {status:200,body:close?await store.closeVerified!(value as CloseVerified):route?await store.routeTed!(value as RouteTed):await store.publish(value as Reconciliation)}}
  catch(error){
-  if(['40001','22023'].includes(String((error as {code?:string})?.code)))return {status:409,body:{error:'Reconciliation or card state changed. Refresh before publishing.'}};
+  if(['PT409','40001','22023'].includes(String((error as {code?:string})?.code)))return {status:409,body:{error:'Reconciliation or card state changed. Refresh before publishing.'}};
   return {status:503,body:{error:missingSchema(error)?'Reconciliation schema is unavailable':'Reconciliation service is unavailable'}};
  }
 }
