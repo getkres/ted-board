@@ -64,7 +64,7 @@ A corrupt or incompatible lease file fails closed. It is not a reason to delete 
 
 The wrappers use dedicated process groups. Stopping a wrapper does not by itself establish that its group is gone. Calendar launchd deferral still returns 75 and does not create catch-up scheduling. The actual compatibility launcher in the private Fictora checkout delegates to its company coordinator; the mini staging shim delegates to that same launcher. Install the reviewed inner `company.py` candidate after its fixed helper path exists, and preserve the outer launcher byte for byte. The generic adapter refuses unrecognized source surfaces. Verify the generated diff and before and after hashes against the actual checkout before installation. No new routine is part of this packet.
 
-The separate company admission harness uses a disposable actual coordinator and temporary SQLite ledgers. It verifies refusal without model execution or a failed-task notification, exact task readiness and claim fencing, actual model PID reservation with literal arguments, timeout descendant cleanup, stale and started claim refusal, and non-model checks outside the model budget. Run it with:
+The separate company admission harness uses a disposable actual coordinator and temporary SQLite ledgers. Its six checks verify refusal without model execution or a failed-task notification, exact task readiness and claim fencing, actual model PID reservation with literal arguments, timeout descendant cleanup, stale and started claim refusal, and non-model checks outside the model budget. Run it with:
 
 ```sh
 python3 runner-fix/company_admission_runtime_test.py --company-source /absolute/disposable/company.py --helper-root /absolute/disposable/adapted-runtime
