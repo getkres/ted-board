@@ -18,7 +18,7 @@ live = types.SimpleNamespace(instructions=lambda _: '', publish_live=Mock(), cal
 with patch.dict(sys.modules, {'board_client': client, 'live_status': live}):
     import sessions
     import session_worker as worker
-import claude_lanes
+claude_lanes = sessions.lanes
 
 
 class LaneTests(unittest.TestCase):
@@ -31,6 +31,8 @@ class LaneTests(unittest.TestCase):
             (self.home / name).mkdir(parents=True)
         self.config = self.root / 'config.json'
         self.config.write_text('{"enabled": true}')
+        self.capacity = self.root / 'capacity.json'
+        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=3, engines=dict(claude=4, sonnet=16))))
         self.store = sessions.Store(self.root / 'jobs')
         self.card = dict(id='x', title='Design mockups', body='Synthetic brief')
         self.spawns = []
@@ -39,7 +41,7 @@ class LaneTests(unittest.TestCase):
         if hasattr(claude_lanes, '_AUTH_CACHE'): claude_lanes._AUTH_CACHE.clear()
         self.addCleanup(patch.stopall)
         patch.object(Path, 'home', return_value=self.home).start()
-        patch.dict(os.environ, {'TED_CLAUDE_LANES_CONFIG': str(self.config)}, clear=True).start()
+        patch.dict(os.environ, {'TED_CLAUDE_LANES_CONFIG': str(self.config), 'TED_CLAUDE_CAPACITY_CONFIG': str(self.capacity)}, clear=True).start()
         patch.object(sessions, 'publish_live').start()
         patch.object(sessions, 'identity', return_value='fixture').start()
         patch.object(sessions, 'alive', return_value=True).start()
@@ -96,18 +98,18 @@ class LaneTests(unittest.TestCase):
         self.config.write_text('{"enabled": false}')
         with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(self.home / '.claude'), 'ANTHROPIC_API_KEY': 'fixture'}):
             self.enqueue(); self.store.tick()
-        self.assertEqual(self.spawns[0][1].get('ANTHROPIC_API_KEY'), 'fixture')
+        self.assertNotIn('ANTHROPIC_API_KEY', self.spawns[0][1])
         self.assertEqual(self.spawns[0][1].get('CLAUDE_CONFIG_DIR'), str(self.home / '.claude'))
 
-    def test_legacy_resume_stays_on_main_when_flag_is_enabled(self):
-        self.enqueue()
+    def test_interactive_resume_stays_on_main_when_flag_is_enabled(self):
+        self.enqueue(job_type='interactive')
         with self.store.locked() as data:
             data['sessions']['x']['session_id'] = 'legacy-session'
         self.store.tick()
         self.assertNotIn('CLAUDE_CONFIG_DIR', self.spawns[0][1])
 
-    def test_enabled_legacy_session_preserves_an_inherited_directory(self):
-        self.enqueue()
+    def test_enabled_interactive_session_preserves_an_inherited_directory(self):
+        self.enqueue(job_type='interactive')
         with self.store.locked() as data:
             data['sessions']['x']['session_id'] = 'legacy-session'
         with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(self.home / '.claude-acct3')}):
@@ -232,7 +234,7 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(self.spawns, [])
 
     def test_unknown_cli_values_stay_unknown_and_no_raw_data_is_published(self):
-        import claude_lanes
+        claude_lanes = sessions.lanes
         info = claude_lanes.observe([None, [], dict(type='result', usage=dict(input_tokens=True, output_tokens=-1), result='private fixture', is_error=False), dict(type='rate_limit_event', rate_limit_info=dict(status='rejected', resetsAt=9999999999, secret='fixture'))])
         self.assertEqual(info, dict(limited=True, limit_status='rejected', resets_at=9999999999))
 
@@ -279,7 +281,8 @@ class LaneTests(unittest.TestCase):
             self.store.tick()
             with patch.object(sessions, 'alive', return_value=False):
                 self.store.tick()
-        self.assertEqual(self.state()['status'], 'failed')
+        self.assertEqual(self.state()['status'], 'running')
+        self.assertEqual(self.state()['active_turn']['recovery_attempt'], 1)
         self.assertEqual(self.state()['queue'], [])
 
     def test_success_after_transient_limit_is_never_replayed(self):
@@ -330,6 +333,7 @@ class LaneTests(unittest.TestCase):
             self.enqueue(engine=engine, id=cid, title='Worker task')
             if legacy:
                 with self.store.locked() as data:
+                    data['sessions'][cid]['job_type'] = 'interactive'
                     data['sessions'][cid]['session_id'] = 'existing-' + cid
 
     def test_two_accounts_route_all_claude_and_sonnet_workers_to_account_two(self):
@@ -427,7 +431,7 @@ class LaneTests(unittest.TestCase):
 
     def test_load_guard_prevents_new_jobs_even_with_account_two_active(self):
         self.fill('codex', 1); self.fill('claude', 1); self.fill('sonnet', 1)
-        with patch.object(sessions.os, 'getloadavg', return_value=(17, 0, 0)):
+        with patch.object(sessions.os, 'getloadavg', return_value=(25, 0, 0)):
             self.store.tick()
         self.assertEqual(self.spawns, [])
 
@@ -512,7 +516,7 @@ class LaneTests(unittest.TestCase):
     def test_old_main_affinity_cannot_invent_an_uninherited_config_directory(self):
         self.enqueue()
         s = self.state()
-        s.update(claude_lane='main', claude_config_dir=str(self.home / '.claude'))
+        s.update(job_type='interactive', claude_lane='main', claude_config_dir=str(self.home / '.claude'))
         claude_lanes.prepare(s, False, self.store.read(), sessions.CLAUDE)
         self.assertIsNone(s['active_claude_config_dir'])
         self.assertNotIn('CLAUDE_CONFIG_DIR', claude_lanes.environment(s, os.environ))
@@ -577,7 +581,7 @@ class LaneTests(unittest.TestCase):
         with self.store.locked() as data:
             data['sessions']['x']['pid'] = os.getpid()
         def cli(command, **kwargs):
-            self.assertNotIn('env', kwargs)
+            self.assertFalse(any(key.startswith('ANTHROPIC_') for key in kwargs['env']))
             self.assertNotIn('--model', command)
             self.assertEqual(kwargs['timeout'], 12 * 3600)
             kwargs['stdout'].write(json.dumps(dict(type='result', result='done')) + '\n')
@@ -610,6 +614,68 @@ class LaneTests(unittest.TestCase):
             dict(type='rate_limit_event', rate_limit_info=dict(status='allowed'))])
         data = {}; session = dict(active_claude_managed=True, active_claude_lane='design')
         self.assertTrue(claude_lanes.record(data, session, dict(ok=False, lane_usage=usage)))
+
+    def test_every_worker_strips_all_anthropic_environment_keys(self):
+        self.config.write_text('{"enabled": false}')
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'fixture', 'ANTHROPIC_BASE_URL': 'fixture', 'ANTHROPIC_CUSTOM': 'fixture'}):
+            self.enqueue(engine='codex'); self.store.tick()
+        self.assertFalse(any(key.startswith('ANTHROPIC_') for key in self.spawns[0][1]))
+
+    def test_active_cap_comes_from_capacity_json(self):
+        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=3, engines=dict(claude=1, sonnet=2))))
+        self.fill('claude', 3); self.fill('sonnet', 4); self.store.tick()
+        self.assertEqual(sum(inp['session']['engine'] == 'claude' for inp, _ in self.spawns), 1)
+        self.assertEqual(sum(inp['session']['engine'] == 'sonnet' for inp, _ in self.spawns), 2)
+
+    def test_malformed_capacity_holds_managed_work_without_main_fallback(self):
+        self.capacity.write_text('{')
+        self.enqueue()
+        try: self.store.tick()
+        except claude_lanes.Unavailable: self.fail('invalid capacity must hold managed work without crashing the tick')
+        self.assertEqual(self.spawns, [])
+        self.assertEqual(self.state()['status'], 'queued')
+
+    def test_capacity_engine_array_is_held_without_crashing(self):
+        self.capacity.write_text(json.dumps(dict(total_workers=64, load_per_cpu=3, engines=['claude', 'sonnet'])))
+        self.enqueue()
+        try: self.store.tick()
+        except Exception: self.fail('malformed engine capacities must hold launches without crashing')
+        self.assertEqual(self.spawns, [])
+
+    def test_unhashable_job_type_is_a_validation_error(self):
+        with self.assertRaises(ValueError): self.enqueue(job_type={'unexpected': True})
+
+    def test_managed_failure_retains_current_failure_routing(self):
+        self.enqueue(); self.store.tick()
+        self.finish(dict(ok=False, text='Worker failed before returning a result.', failure_kind='crash'))
+        s = self.state()
+        self.assertEqual(s.get('failure_kind'), 'crash')
+        self.assertEqual(s['status'], 'failed')
+        self.assertTrue(self.store.read()['outbox'][-1].get('runner_failure'))
+
+    def test_empty_success_is_failed_in_managed_mode(self):
+        self.enqueue(); self.store.tick()
+        self.finish(dict(ok=True, text=''))
+        self.assertEqual(self.state()['status'], 'running')
+        self.assertEqual(self.state()['active_turn']['recovery_attempt'], 1)
+        self.assertEqual(self.store.read()['outbox'][-1]['runner_failure']['failure_kind'], 'no_result')
+
+    def test_existing_worker_starts_a_fresh_dedicated_conversation(self):
+        self.enqueue()
+        with self.store.locked() as data: data['sessions']['x']['session_id'] = 'main-only-session'
+        self.store.tick()
+        inp, env = self.spawns[0]
+        self.assertEqual(env.get('CLAUDE_CONFIG_DIR'), str(self.home / '.claude-acct2'))
+        self.assertIsNone(inp['session'].get('session_id'))
+        self.assertNotIn('--resume', sessions.engine_command(inp['session'], 'fixture', Path('fixture')))
+        self.assertEqual(inp['session'].get('legacy_main_session_id'), 'main-only-session')
+
+    def test_stale_enabled_layout_cannot_launch_after_flag_disable(self):
+        self.enqueue()
+        layout = claude_lanes.topology(sessions.CLAUDE, str(self.store.root))
+        self.config.write_text('{"enabled": false}')
+        with self.assertRaises(claude_lanes.Unavailable):
+            claude_lanes.prepare(self.state(), False, self.store.read(), sessions.CLAUDE, layout)
 
     def test_main_cap_rejection_does_not_leave_active_lane_metadata(self):
         self.fill('claude', 3, legacy=True); self.store.tick()

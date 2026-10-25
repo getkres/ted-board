@@ -29,3 +29,5 @@ jobs:
           deno-version: v2.x
       - run: deno test --no-check --allow-read --allow-env backend-integration/reconciliation.test.ts backend-integration/snapshots.test.ts
       - run: deno check backend-integration/reconciliation.ts backend-integration/snapshots.ts
+      - run: python3 runner-fix/legacy_dispatch_pause_test.py
+      - run: python3 runner-fix/legacy_pause_control_test.py
