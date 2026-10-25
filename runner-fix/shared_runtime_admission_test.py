@@ -60,6 +60,23 @@ class Store:
      s.update(status='failed',pid=None);self._worker_failure(data,s,'start_failure');self._publish_failure(s,data if managed else None)
 '''
 
+MANAGED += """
+ def _flush_publications(self):
+  with self.locked() as lock:
+   for cid,item in pending.items():
+    with self.locked() as data:
+     if valid and item['state']=='running':
+      valid=True
+     if not valid:
+      if current.get('id')==item['id']:data['publications'].pop(cid,None)
+    if not confirmed:continue
+    with self.locked() as data:
+     if current.get('id')!=item['id']:continue
+     data['publications'].pop(cid,None)
+ def _publish_failure(self,s,data=None):
+  pass
+"""
+
 
 COMPANY = '''import uuid
 import sys
@@ -113,6 +130,15 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("self._queue_publication(data,s,'blocked'", result)
         self.assertIn("'admission',section='up_next'", result)
         self.assertLess(result.index('    try:'), result.index("    atomic(str(prefix)"))
+
+    def test_completion_fallback_is_managed_only_and_refuses_changed_surfaces(self):
+        result=adapter().adapt(MANAGED,managed=True)
+        self.assertIn('def _completion_target_exists(',result)
+        self.assertIn('completion_snapshot',result)
+        self.assertIn("current!=item",result)
+        self.assertNotIn('def _completion_target_exists(',adapter().adapt(LEGACY,managed=False))
+        with self.assertRaises(ValueError):
+            adapter().adapt(MANAGED.replace('    if not confirmed:continue','    if not confirmed:break'),managed=True)
 
     def test_combined_legacy_prefix_input_line_is_also_protected(self):
         source = LEGACY.replace("    prefix=Path(s['cwd'])/s['turn']\n", "").replace(
