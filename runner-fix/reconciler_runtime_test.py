@@ -30,6 +30,22 @@ class RuntimeTests(unittest.TestCase):
   self.assertTrue(d.execute(action,None,dict(cards=[dict(id='c',revision=8)]),board))
   self.assertEqual(board.call.call_args.kwargs['expected_revision'],7)
   self.assertEqual(board.call.call_args.kwargs['expected_updated_at'],'2026-10-23T20:00:00Z')
+ def test_consumed_legacy_result_does_not_block_failed_session_dead_letter(self):
+  from unittest.mock import Mock
+  with tempfile.TemporaryDirectory() as temp:
+   session=dict(status='failed',turn='t',cwd=temp,pid=None,identity='',queue=[])
+   Path(temp,'t.result.json').write_text(json.dumps(dict(ok=False,text='legacy failure')))
+   data=dict(sessions={'c':session})
+   @contextlib.contextmanager
+   def locked():yield data
+   store=types.SimpleNamespace(locked=locked,_out=Mock())
+   action=dict(id='dlq',kind='dead_letter',payload=dict(card_id='c',expected_turn='t',expected_lease_token=None))
+   legacy=types.SimpleNamespace(matching_result=lambda s,result:isinstance(result,dict) and result.get('ok') is False)
+   with patch.dict(sys.modules,{'sessions':legacy}),patch.object(d,'confirmed_stop',return_value=True) as stopped,d.Journal(Path(temp,'journal.db')) as journal:
+    self.assertTrue(d.execute_recorded(action,journal,lambda a:d.execute(a,store,{},None)))
+    self.assertEqual(session['status'],'dead_letter');self.assertEqual(journal.completed(),{'dlq'})
+    self.assertTrue(d.execute_recorded(action,journal,lambda a: (_ for _ in ()).throw(AssertionError('duplicate recovery'))))
+   stopped.assert_called_once();store._out.assert_called_once()
  def test_dry_run_never_constructs_effect_store_or_executes_actions(self):
   s={'cards':[],'sessions':{},'approvals':[],'mockups':[],'coverage':{}}
   with tempfile.TemporaryDirectory() as tmp,patch.object(d,'execute',side_effect=AssertionError('effect called')):

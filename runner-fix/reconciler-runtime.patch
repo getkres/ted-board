@@ -337,7 +337,7 @@
 +   if not current:return False
 +   if current.get('recovery_action')==action['id']:return True
 +   if current.get('status')=='running' and not current.get('lease_token'):return False
-+   if kind!='stop_worker' and result_ready(current):return False
++   if kind!='stop_worker' and current.get('status')=='running' and result_ready(current):return False
 +   observed=json.loads(json.dumps(current));observed_activity=activity_stamp(current)
 +  # All probes, signals, and waits occur outside the session lock.
 +  stopped=confirmed_stop(observed,allow_kill=kind=='stop_worker')
@@ -348,7 +348,7 @@
 +   if current.get('recovery_action')==action['id']:return True
 +   if any(current.get(k)!=observed.get(k) for k in ('turn','lease_token','lease_expires_at','status','stop_requested')):return False
 +   if kind!='stop_worker':
-+    if result_ready(current) or activity_stamp(current)!=observed_activity:return False
++    if (current.get('status')=='running' and result_ready(current)) or activity_stamp(current)!=observed_activity:return False
 +    if current.get('status')=='running' and (current.get('pid_dead') is not True or current.get('activity_quiet') is not True or int(current.get('missed_renewals') or 0)<MISSED_RENEWALS):return False
 +   ok=recover_session(current,action,lambda _:True)
 +   if ok and kind=='dead_letter':store._out(data,current,'retries exhausted or unsafe to repeat, ted owns this recovery','reconciler-dlq-'+action['id'])

@@ -95,7 +95,7 @@
   },
   "reconciler_runtime.py": {
     "patch": "reconciler-runtime.patch",
-    "candidate_sha256": "041972b2828f1dbe0a5ea0fbca0854899f5689f706f106a949a049b40375a776"
+    "candidate_sha256": "637126d46a8a17ae23bf22c346a973cae46972a01075a3c7ed737c039cb04929"
   },
   "runner_admission.py": {
     "patch": "reconciler-admission.patch",
