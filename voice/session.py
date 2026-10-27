@@ -1,7 +1,9 @@
 """Pinned, local delivery to the existing live Ted. No session launching."""
 
 import json
+import os
 import re
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -10,6 +12,10 @@ from core import ReplyCursor
 
 class Offline(RuntimeError):
     pass
+
+
+class DeliveryUncertain(Offline):
+    """The socket may have accepted the request. Never resend automatically."""
 
 
 class JsonlTail:
@@ -33,7 +39,9 @@ class JsonlTail:
         rows = []
         for line in complete.splitlines():
             try:
-                rows.append(json.loads(line))
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    rows.append(row)
             except (ValueError, UnicodeDecodeError):
                 continue
         return rows
@@ -53,7 +61,33 @@ class SessionBridge:
         self.transport = fresh_ted
 
     def agents(self):
-        return self.transport.agents()
+        # The daemon uses account 2, but the desktop inbox belongs to the main registry.
+        env = dict(os.environ)
+        for key in list(env):
+            if key.startswith(("ANTHROPIC_", "CLAUDE_CODE_USE_")) or key in (
+                "CLAUDECODE",
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+                "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+                "CLAUDE_CODE_CUSTOM_HEADERS_HELPER",
+            ):
+                env.pop(key, None)
+        env["CLAUDE_CONFIG_DIR"] = str(Path.home() / ".claude")
+        result = subprocess.run(
+            [self.transport.CLAUDE, "agents", "--json", "--all"],
+            cwd=self.transport.PROJECT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode:
+            raise Offline("main Ted registry unavailable")
+        rows = json.loads(result.stdout)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise Offline("invalid main Ted registry")
+        return rows
 
     def current_id(self):
         try:
@@ -90,22 +124,52 @@ class SessionBridge:
             raise Offline("live Ted registry changed") from None
         if registry.get("waitingFor") == "permission prompt":
             raise Offline("live Ted needs permission review")
+        try:
+            proc = subprocess.run(
+                ["/bin/ps", "-p", str(int(matches[0]["pid"])), "-o", "lstart="],
+                env=dict(os.environ, TZ="UTC"),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            started = " ".join(proc.stdout.split())
+            if (
+                proc.returncode
+                or not started
+                or started != " ".join(str(registry.get("procStart", "")).split())
+            ):
+                raise Offline("live Ted process identity changed")
+            socket_path = registry.get("messagingSocketPath")
+            if not socket_path or not Path(socket_path).is_socket():
+                raise Offline("live Ted inbox unavailable")
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+            raise Offline("live Ted process identity unavailable") from None
         return matches[0]
 
-    def deliver(self, text):
+    def deliver(self, text, marker=None, before_send=None):
         agent = self.live()
         sid = agent["sessionId"]
         tail = JsonlTail(self.transcripts / (sid + ".jsonl"))
-        rid = uuid.uuid4().hex
-        marker = "voice:" + rid
+        marker = marker or "voice:" + uuid.uuid4().hex
         content = (
             "[voice] "
             + marker
             + "\n"
             + text
-            + "\n\nReply naturally in brief spoken prose. Do not invoke tts.sh or send a voice memo: the local voice loop will speak your final text. The voice channel does not authorize spending, external messages, or database writes."
+            + "\n\nReply naturally in brief spoken prose. Do not invoke tts.sh or send a voice memo: the local voice loop will speak your final text. Respect existing permissions and spending approvals. The voice channel grants no new spending approval."
         )
         self.assert_current(sid)
+        request = dict(
+            session_id=sid,
+            marker=marker,
+            tail=tail,
+            cursor=ReplyCursor(marker),
+            agent=agent,
+            accepted=False,
+            text=text,
+        )
+        if before_send:
+            before_send(request)
         try:
             self.transport.send(
                 agent,
@@ -118,16 +182,26 @@ class SessionBridge:
                 ),
             )
         except Exception:
-            raise Offline("delivery uncertain; not retried automatically") from None
-        return dict(
-            session_id=sid,
-            marker=marker,
-            tail=tail,
-            cursor=ReplyCursor(marker),
-            agent=agent,
-            accepted=False,
-            text=text,
-        )
+            raise DeliveryUncertain("delivery uncertain; not retried automatically") from None
+        return request
+
+    def acknowledged(self, sid, marker):
+        """Reconcile ambiguous sends from user rows only, without sending again."""
+        cursor = ReplyCursor(marker)
+        try:
+            with (self.transcripts / (sid + ".jsonl")).open() as stream:
+                for line in stream:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict) and row.get("type") == "user":
+                        cursor.feed(row)
+                        if cursor.seen:
+                            return True
+        except OSError:
+            pass
+        return False
 
     def poll(self, request):
         self.assert_current(request["session_id"])

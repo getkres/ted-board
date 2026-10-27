@@ -47,6 +47,42 @@ class SessionTests(unittest.TestCase):
             with self.assertRaises(Offline):
                 b.live()
 
+    def test_reused_pid_is_rejected_before_inbox_delivery(self):
+        import socket
+        from unittest.mock import Mock
+
+        with tempfile.TemporaryDirectory() as d:
+            socket_path = str(Path(d) / "inbox.sock")
+            with socket.socket(socket.AF_UNIX) as inbox:
+                inbox.bind(socket_path)
+                bridge = SessionBridge.__new__(SessionBridge)
+                bridge.transport = Mock()
+                bridge.transport.registry.return_value = {
+                    "procStart": "old process",
+                    "messagingSocketPath": socket_path,
+                }
+                with (
+                    patch.object(bridge, "current_id", return_value="a"),
+                    patch.object(
+                        bridge,
+                        "agents",
+                        return_value=[
+                            {
+                                "sessionId": "a",
+                                "pid": 123,
+                                "cwd": str(Path.home() / "Claude Code - Fictora"),
+                            }
+                        ],
+                    ),
+                    patch(
+                        "session.subprocess.run",
+                        return_value=Mock(returncode=0, stdout="new process\n"),
+                    ),
+                ):
+                    with self.assertRaisesRegex(Offline, "process identity"):
+                        bridge.live()
+                bridge.transport.send.assert_not_called()
+
     def test_rotated_transcript_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "t"
@@ -62,6 +98,33 @@ class SessionTests(unittest.TestCase):
         with patch.object(b, "current_id", return_value="b"):
             with self.assertRaises(Offline):
                 b.assert_current("a")
+
+    def test_cursor_speaks_only_final_message_and_ignores_meta_hook_context(self):
+        from core import ReplyCursor
+
+        cursor = ReplyCursor("voice:abc")
+        cursor.feed(dict(type="user", message=dict(content="[voice] voice:abc hello")))
+        cursor.feed(dict(type="user", isMeta=True, message=dict(content="injected voice card")))
+        cursor.feed(dict(type="assistant", message=dict(id="progress", content="I will check.")))
+        final = dict(
+            type="assistant",
+            message=dict(id="final", content="All checks pass.", stop_reason="end_turn"),
+        )
+        self.assertEqual(cursor.feed(final), "All checks pass.")
+        self.assertIsNone(cursor.feed(final))
+
+    def test_cursor_requires_exact_marker_token(self):
+        from core import ReplyCursor
+
+        cursor = ReplyCursor("voice:abc")
+        cursor.feed(dict(type="user", message=dict(content="[voice] voice:abcdef hello")))
+        self.assertFalse(cursor.seen)
+
+    def test_corrupt_json_rows_are_ignored(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "t"
+            p.write_text("[]\nnull\n{}\n")
+            self.assertEqual(JsonlTail(p, 0).read(), [{}])
 
 
 if __name__ == "__main__":

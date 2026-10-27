@@ -6,6 +6,47 @@ from runtime import PendingQueue, Whisper
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_wake_vocabulary_prompt_is_scoped_to_confirmation_not_request_transcription(self):
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "source.wav"
+            path.touch()
+            whisper = Whisper(path, path)
+            with patch("runtime.subprocess.run", return_value=Mock(returncode=0, stdout="Ted, stop.")) as run:
+                whisper.confirm_wake(path)
+                prompted = run.call_args.args[0]
+                whisper.transcribe(path)
+                plain = run.call_args.args[0]
+            self.assertIn("--prompt", prompted)
+            self.assertIn("Ted, stop.", prompted[prompted.index("--prompt") + 1])
+            self.assertNotIn("--prompt", plain)
+
+    def test_source_segment_physically_crops_audio_before_whisper_can_read_future_words(self):
+        import struct
+        import wave
+        from unittest.mock import Mock, patch
+
+        from runtime import write_pcm
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "source.wav"
+            write_pcm(path, struct.pack("<h", 100) * 32000 + struct.pack("<h", 200) * 32000
+                      + struct.pack("<h", 300) * 32000)
+            whisper = Whisper(path, path)
+            observed = []
+
+            def recognize(args, **kwargs):
+                with wave.open(args[args.index("-f") + 1], "rb") as cropped:
+                    frames = cropped.readframes(cropped.getnframes())
+                    observed.append((cropped.getnframes(), struct.unpack("<h", frames[:2])[0],
+                                     struct.unpack("<h", frames[-2:])[0]))
+                return Mock(returncode=0, stdout="current words")
+
+            with patch("runtime.subprocess.run", side_effect=recognize):
+                self.assertEqual(whisper.transcribe_segment(path, 2.3, 2.7), "current words")
+            self.assertEqual(observed, [(43200, 200, 300)])
+
     def test_offline_queue_is_private_bounded_and_unique(self):
         with tempfile.TemporaryDirectory() as d:
             q = PendingQueue(Path(d))
@@ -149,6 +190,80 @@ class ApprovalTests(unittest.TestCase):
 
 
 class AudioDiagnosticsTests(unittest.TestCase):
+    def test_native_cursor_is_correlated_and_preserved_across_pause_and_resume(self):
+        import json
+        from unittest.mock import Mock, patch
+
+        from runtime import Audio
+
+        audio = Audio.__new__(Audio)
+        audio.emit = Mock()
+        audio.process = Mock()
+        audio.process.poll.return_value = None
+        audio.buffer = audio.events = b""
+        audio.play_path = None
+        audio.playing = True
+        audio.play_id = "current"
+        rows = [dict(event="playback_started", play_id="current", position_seconds=0, duration_seconds=40),
+                dict(event="playback_stopped", play_id="current", stop_id="wake", position_seconds=5, duration_seconds=40),
+                dict(event="playback_resumed", play_id="current", position_seconds=5, duration_seconds=40),
+                dict(event="playback_progress", play_id="old", position_seconds=30, duration_seconds=40)]
+        for row in rows:
+            with patch("select.select", return_value=([audio.process.stderr], [], [])), patch("os.read", return_value=(json.dumps(row) + "\n").encode()):
+                audio.pump()
+        self.assertEqual(audio.playback_position_seconds, 5)
+        self.assertEqual(audio.playback_duration_seconds, 40)
+        self.assertEqual(audio.last_stop["stop_id"], "wake")
+
+    def test_pause_emits_correlated_stop_request_without_destroying_render(self):
+        import io
+        import json
+        from unittest.mock import Mock, patch
+
+        from runtime import Audio
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "speech-test.wav"
+            path.touch()
+            audio = Audio.__new__(Audio)
+            audio.process = Mock()
+            audio.process.poll.return_value = None
+            audio.process.stdin = io.BytesIO()
+            audio.emit = Mock()
+            audio.playing = True
+            audio.paused = False
+            audio.play_path = path
+            audio.play_id = "play-1"
+            with patch("runtime.time.monotonic", return_value=12.3), patch("runtime.time.time", return_value=34.5):
+                audio.pause("wake-1", 12.0, 34.2)
+            row = json.loads(audio.process.stdin.getvalue())
+            self.assertEqual(row["op"], "pause")
+            self.assertEqual(row["stop_id"], "wake-1")
+            self.assertEqual(row["trigger_monotonic"], 12.0)
+            self.assertEqual(row["requested_monotonic"], 12.3)
+            self.assertTrue(path.exists())
+            self.assertFalse(audio.playing)
+            self.assertTrue(audio.paused)
+
+    def test_native_old_completion_cannot_clear_current_playback(self):
+        import json
+        from unittest.mock import Mock, patch
+
+        from runtime import Audio
+
+        audio = Audio.__new__(Audio)
+        audio.emit = Mock()
+        audio.process = Mock()
+        audio.process.poll.return_value = None
+        audio.buffer = audio.events = b""
+        audio.play_path = None
+        audio.playing = True
+        audio.play_id = "new-play"
+        row = dict(event="playback_done", play_id="old-play")
+        with patch("select.select", return_value=([audio.process.stderr], [], [])), patch("os.read", return_value=(json.dumps(row) + "\n").encode()):
+            audio.pump()
+        self.assertTrue(audio.playing)
+
     def test_native_device_and_error_fields_reach_event_log(self):
         import json
         from unittest.mock import Mock, patch

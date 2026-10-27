@@ -7,7 +7,13 @@ import os
 import plistlib
 import shutil
 import subprocess
+import time
 from pathlib import Path
+
+RUNTIME_FILES = (
+    "core.py", "session.py", "account2.py", "routing.py", "runtime.py",
+    "loop.py", "daemon.py", "README.md", "requirements.txt",
+)
 
 
 def launchd_config(home, python):
@@ -26,7 +32,8 @@ def launchd_config(home, python):
         ThrottleInterval=30,
         ProcessType="Background",
         WorkingDirectory=str(home),
-        EnvironmentVariables=dict(PATH="/opt/homebrew/bin:/usr/bin:/bin", PYTHONUNBUFFERED="1"),
+        EnvironmentVariables=dict(PATH="/opt/homebrew/bin:/usr/bin:/bin", PYTHONUNBUFFERED="1",
+                                  CLAUDE_CONFIG_DIR=str(Path.home() / ".claude-acct2")),
         StandardOutPath=str(home / "logs/launchd.out.log"),
         StandardErrorPath=str(home / "logs/launchd.err.log"),
     )
@@ -105,6 +112,20 @@ def install_native(source, home):
     )
 
 
+def restart_service(domain, plist, attempts=20):
+    """launchd can briefly reject bootstrap while an unloaded job exits."""
+    subprocess.run(["/bin/launchctl", "bootout", domain + "/co.ted.voice"], capture_output=True)
+    for attempt in range(attempts):
+        result = subprocess.run(["/bin/launchctl", "bootstrap", domain, str(plist)],
+                                capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        if result.returncode != 5 or attempt == attempts - 1:
+            raise subprocess.CalledProcessError(result.returncode, result.args,
+                                                result.stdout, result.stderr)
+        time.sleep(0.5)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--home", type=Path, default=Path.home() / "ted-ops/voice")
@@ -122,15 +143,7 @@ def main():
     source = Path(__file__).resolve().parent
     for folder in ["app", "models", "logs", "tmp", "tones", "pending"]:
         (home / folder).mkdir(parents=True, exist_ok=True, mode=0o700)
-    for name in [
-        "core.py",
-        "session.py",
-        "runtime.py",
-        "loop.py",
-        "daemon.py",
-        "README.md",
-        "requirements.txt",
-    ]:
+    for name in RUNTIME_FILES:
         if (source / name).exists():
             shutil.copy2(source / name, home / "app" / name)
     if (source / "README.md").exists():
@@ -158,8 +171,7 @@ def main():
     subprocess.run(["/usr/bin/plutil", "-lint", str(plist)], check=True)
     if a.load:
         domain = "gui/" + str(os.getuid())
-        subprocess.run(["/bin/launchctl", "bootout", domain + "/co.ted.voice"], capture_output=True)
-        subprocess.run(["/bin/launchctl", "bootstrap", domain, str(plist)], check=True)
+        restart_service(domain, plist)
     print("voice installation staged on the mini")
 
 

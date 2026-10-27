@@ -78,6 +78,51 @@ class Whisper:
         self.fallback = fallback
 
     def transcribe(self, path):
+        return self._transcribe(path)
+
+    def confirm_wake(self, path):
+        # A proper-name vocabulary retry, used only behind the strong playback
+        # model gate. It does not constrain Whisper to emit a wake phrase.
+        return self._transcribe(path, ["--prompt", "The wake phrases are Hey Ted, and Ted, stop."])
+
+    def transcribe_segment(self, path, start, seconds):
+        if not math.isfinite(start) or not math.isfinite(seconds) or start < 0 or seconds <= 0:
+            raise ValueError("invalid source audio range")
+        path = Path(path)
+        import tempfile
+
+        # CLI duration flags do not reliably constrain decoder context. Give
+        # Whisper a physically cropped file so it cannot see future speech.
+        with tempfile.TemporaryDirectory(prefix="echo-slice-", dir=path.parent) as directory:
+            converted = Path(directory) / "source.wav"
+            cropped = Path(directory) / "slice.wav"
+            try:
+                with wave.open(str(path), "rb") as source:
+                    direct = (source.getnchannels(), source.getsampwidth(), source.getframerate()) == (1, 2, 16000)
+            except (OSError, EOFError, wave.Error):
+                direct = False
+            if not direct:
+                try:
+                    result = subprocess.run(
+                        ["/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", str(path), str(converted)],
+                        capture_output=True, timeout=10,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    raise RuntimeError("source audio conversion failed") from None
+                if result.returncode:
+                    raise RuntimeError("source audio conversion failed")
+            try:
+                with wave.open(str(path if direct else converted), "rb") as source:
+                    source.setpos(min(source.getnframes(), round(start * 16000)))
+                    pcm = source.readframes(max(1, round(seconds * 16000)))
+                if not pcm:
+                    return ""
+                write_pcm(cropped, pcm)
+            except (OSError, EOFError, wave.Error):
+                raise RuntimeError("source audio crop failed") from None
+            return self._transcribe(cropped)
+
+    def _transcribe(self, path, options=()):
         if not self.binary.exists():
             raise RuntimeError("whisper unavailable")
         model = self.model if self.model.exists() else self.fallback
@@ -96,7 +141,7 @@ class Whisper:
                     "-t",
                     "6",
                     "--no-prints",
-                ],
+                ] + list(options),
                 capture_output=True,
                 text=True,
                 timeout=45,
@@ -281,6 +326,7 @@ class Audio:
     def __init__(self, helper, emit, output_only=False, debug=False):
         self.emit = emit
         self.playing = False
+        self.paused = False
         self.echo_clean = False
         self.last_done = 0
         self.process = subprocess.Popen(
@@ -295,6 +341,10 @@ class Audio:
         self.buffer = b""
         self.events = b""
         self.play_path = None
+        self.play_id = None
+        self.playback_position_seconds = None
+        self.playback_duration_seconds = None
+        self.last_stop = None
 
     def command(self, row):
         if self.process.poll() is not None:
@@ -303,12 +353,44 @@ class Audio:
 
     def play(self, path):
         self.play_path = Path(path)
+        self.play_id = uuid.uuid4().hex
+        self.playback_position_seconds = None
+        self.playback_duration_seconds = None
+        self.last_stop = None
         self.playing = True
-        self.command(dict(op="play", path=str(path)))
+        self.paused = False
+        self.command(dict(op="play", path=str(path), play_id=self.play_id))
 
-    def stop(self):
-        self.command(dict(op="stop"))
+    def pause(self, stop_id, trigger_monotonic, trigger_at):
+        fields = dict(
+            stop_id=stop_id, play_id=self.play_id,
+            trigger_monotonic=trigger_monotonic, trigger_at=trigger_at,
+            requested_monotonic=time.monotonic(), requested_at=time.time(),
+            provisional=True,
+        )
+        self.command(dict(op="pause", **fields))
+        self.emit("playback_stop_requested", **fields)
         self.playing = False
+        self.paused = True
+
+    def resume(self, stop_id=None):
+        if not self.paused:
+            return
+        self.command(dict(op="resume", play_id=self.play_id, stop_id=stop_id))
+        self.playing = True
+        self.paused = False
+
+    def stop(self, stop_id=None, trigger_monotonic=None, trigger_at=None):
+        fields = dict(
+            stop_id=stop_id, play_id=self.play_id,
+            trigger_monotonic=trigger_monotonic, trigger_at=trigger_at,
+            requested_monotonic=time.monotonic(), requested_at=time.time(),
+            provisional=False,
+        )
+        self.command(dict(op="stop", **fields))
+        self.emit("playback_stop_requested", **fields)
+        self.playing = False
+        self.paused = False
         self.last_done = time.monotonic()
         if self.play_path and self.play_path.name.startswith("speech-"):
             self.play_path.unlink(missing_ok=True)
@@ -333,8 +415,18 @@ class Audio:
                     name = row.get("event", "audio_event")
                     if name == "audio_ready":
                         self.echo_clean = bool(row.get("echo_cancelled"))
-                    if name in ("playback_done", "playback_failed"):
+                    current = not row.get("play_id") or row["play_id"] == getattr(self, "play_id", None)
+                    if current and name in ("playback_started", "playback_progress", "playback_stopped", "playback_resumed"):
+                        for field, attribute in (("position_seconds", "playback_position_seconds"),
+                                                 ("duration_seconds", "playback_duration_seconds")):
+                            value = row.get(field)
+                            if type(value) in (float, int) and math.isfinite(value) and value >= 0:
+                                setattr(self, attribute, value)
+                        if name == "playback_stopped":
+                            self.last_stop = row
+                    if name in ("playback_done", "playback_failed") and current:
                         self.playing = False
+                        self.paused = False
                         self.last_done = time.monotonic()
                         if self.play_path and self.play_path.name.startswith("speech-"):
                             self.play_path.unlink(missing_ok=True)

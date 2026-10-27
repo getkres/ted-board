@@ -1,0 +1,53 @@
+{
+  "prepared_at": "2026-10-27T19:33:30.524145+00:00",
+  "patch": "/Users/vahallo/ted-ops/voice/FULL-1027/main-inbox-policy-proposal.patch",
+  "target": "/Users/vahallo/ted-ops/ted-board/fresh_ted.py",
+  "target_sha256": "a351936052a835daf8d91995d2e020b00b7b2b239ebd2205cb709a0f128478fd",
+  "applied": false,
+  "settings_changed": false,
+  "main_restarted": false,
+  "scope": "Only normal main Ted processes launched through the existing fresh_ted.Driver.start lifecycle. The setting is an inline process flag, not a global or project settings file.",
+  "receiver_policy": {
+    "crossSessionInbound": "accept"
+  },
+  "scope_limit": "Accepts all authenticated local peer messages into that one main process. It is not a voice-sender allowlist. Isolated test launches receive no override.",
+  "activation": "Requires the next normal Fresh Ted lifecycle after explicit approval. The patch does not update or restart the currently running main process.",
+  "rollback": "Remove only the added conditional --settings argument pair from Driver.start. A receiver already started with the override retains it until its normal lifecycle ends.",
+  "approval_reason": "BRIEF.md explicitly says not to change Claude settings. This proposal is prepared for explicit approval of that exception.",
+  "argument_boundary_validation": [
+    {
+      "isolated_test": false,
+      "resume": false,
+      "receiver_override_present": true,
+      "preserved_other_arguments": true
+    },
+    {
+      "isolated_test": false,
+      "resume": true,
+      "receiver_override_present": true,
+      "preserved_other_arguments": true
+    },
+    {
+      "isolated_test": true,
+      "resume": false,
+      "receiver_override_present": false,
+      "preserved_other_arguments": true
+    },
+    {
+      "isolated_test": true,
+      "resume": true,
+      "receiver_override_present": false,
+      "preserved_other_arguments": true
+    }
+  ],
+  "validation_method": "Compile the original and proposed Driver methods in memory, capture their local cli boundary before any launch, and compare all four main/test and start/resume combinations.",
+  "git_apply_check": {
+    "command": "git apply --check /Users/vahallo/ted-ops/voice/FULL-1027/main-inbox-policy-proposal.patch",
+    "cwd": "/Users/vahallo/ted-ops/ted-board",
+    "exit_code": 0,
+    "passed": true
+  },
+  "final_target_sha256": "a351936052a835daf8d91995d2e020b00b7b2b239ebd2205cb709a0f128478fd",
+  "target_unchanged_since_proposal": true,
+  "final_checked_at": "2026-10-27T20:28:42.825769+00:00"
+}

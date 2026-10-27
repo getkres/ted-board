@@ -43,13 +43,14 @@ func preferred(_ list: [[String: Any]], _ kind: String, _ selector: AudioObjectP
     if let item = list.first(where: { ($0["name"] as? String ?? "").lowercased().contains("jabra") && $0[kind] as? Bool == true }) { return item["id"] as! AudioDeviceID }
     return property(AudioObjectID(kAudioObjectSystemObject), selector)
 }
-func selectDefault(_ selector: AudioObjectPropertySelector, _ device: AudioDeviceID) throws {
-    let system = AudioObjectID(kAudioObjectSystemObject)
-    if device == 0 || property(system, selector) == device { return }
-    var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-    var value = device
-    let status = AudioObjectSetPropertyData(system, &address, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &value)
-    if status != noErr { throw NSError(domain: "default-device-route", code: Int(status)) }
+func deviceUID(_ device: AudioDeviceID) throws -> CFString {
+    var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var uid: Unmanaged<CFString>?
+    var size = UInt32(MemoryLayout<CFString>.size)
+    let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid)
+    if status != noErr { throw NSError(domain: "device-uid", code: Int(status)) }
+    guard let uid = uid else { throw NSError(domain: "device-uid", code: 75) }
+    return uid.takeUnretainedValue()
 }
 func currentDevice(_ node: AVAudioIONode) -> UInt32 {
     guard let unit = node.audioUnit else { return 0 }
@@ -61,22 +62,29 @@ func formatFields(_ format: AVAudioFormat) -> [String: Any] {
     return ["sample_rate": format.sampleRate, "channels": format.channelCount,
             "common_format": format.commonFormat.rawValue, "interleaved": format.isInterleaved]
 }
+func streamFields(_ format: AudioStreamBasicDescription) -> [String: Any] {
+    return ["sample_rate": format.mSampleRate, "channels": format.mChannelsPerFrame,
+            "format_id": format.mFormatID, "format_flags": format.mFormatFlags,
+            "bits_per_channel": format.mBitsPerChannel, "bytes_per_frame": format.mBytesPerFrame]
+}
 func routeFields(_ engine: AVAudioEngine, _ inputID: AudioDeviceID, _ outputID: AudioDeviceID, _ capture: Bool) -> [String: Any] {
-    var fields: [String: Any] = ["input_id": inputID, "output_id": outputID,
-        "input_name": devices().first(where: { $0["id"] as? UInt32 == inputID })?["name"] ?? "none",
-        "output_name": devices().first(where: { $0["id"] as? UInt32 == outputID })?["name"] ?? "none",
+    let selected = devices()
+    let inputName = selected.first(where: { $0["id"] as? UInt32 == inputID })?["name"] as? String ?? "none"
+    let outputName = selected.first(where: { $0["id"] as? UInt32 == outputID })?["name"] as? String ?? "none"
+    let hardwareAEC = capture && inputName.lowercased().contains("jabra") && inputName == outputName
+        && property(inputID, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeUSB
+        && property(outputID, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeUSB
+    return ["input_id": inputID, "output_id": outputID,
+        "input_name": inputName, "output_name": outputName,
         "default_input_id": property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice),
         "default_output_id": property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice),
         "output_au_device": currentDevice(engine.outputNode),
         "output_input_format": formatFields(engine.outputNode.inputFormat(forBus: 0)),
-        "output_hardware_format": formatFields(engine.outputNode.outputFormat(forBus: 0))]
-    if capture {
-        fields["input_au_device"] = currentDevice(engine.inputNode)
-        fields["input_hardware_format"] = formatFields(engine.inputNode.inputFormat(forBus: 0))
-        fields["input_output_format"] = formatFields(engine.inputNode.outputFormat(forBus: 0))
-        fields["shared_io_unit"] = engine.inputNode.audioUnit == engine.outputNode.audioUnit
-    }
-    return fields
+        "output_hardware_format": formatFields(engine.outputNode.outputFormat(forBus: 0)),
+        "capture": capture, "echo_cancelled": hardwareAEC,
+        "echo_cancellation": hardwareAEC ? "jabra_usb_hardware" : "unavailable",
+        "capture_method": capture ? "audio_queue" : "none",
+        "microphone_permission": AVCaptureDevice.authorizationStatus(for: .audio).rawValue]
 }
 func eventError(_ name: String, _ error: Error, _ fields: [String: Any] = [:]) {
     let error = error as NSError
@@ -107,15 +115,6 @@ let list = devices()
 let capture = !args.contains("--play") && !args.contains("--output-only")
 let inputID = capture ? preferred(list, "input", kAudioHardwarePropertyDefaultInputDevice) : 0
 let outputID = preferred(list, "output", kAudioHardwarePropertyDefaultOutputDevice)
-// VoiceProcessingIO shares one AudioUnit between both nodes. Let CoreAudio build
-// its duplex device from the default pair; assigning each node overwrites the
-// same CurrentDevice property and disconnects one side of a split USB device.
-do {
-    if capture { try selectDefault(kAudioHardwarePropertyDefaultInputDevice, inputID) }
-    try selectDefault(kAudioHardwarePropertyDefaultOutputDevice, outputID)
-} catch { eventError("device_selection_failed", error); exit(75) }
-let engine = AVAudioEngine()
-let player = AVAudioPlayerNode()
 if capture {
     guard inputID != 0 else { event("no_input"); exit(75) }
     let status = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -126,109 +125,167 @@ if capture {
         exit(77)
     }
     guard status == .authorized else { event("microphone_permission_required"); exit(77) }
-    do {
-        try engine.inputNode.setVoiceProcessingEnabled(true)
-    } catch { eventError("input_setup_failed", error); exit(75) }
 }
+// A direct input queue avoids the unintelligible VoiceProcessingIO duplex
+// route on this split USB device. The duplex USB Jabra route uses the
+// speakerphone's hardware AEC. Other routes keep playback wake detection gated.
+// Playback uses a separate, explicitly selected output unit. Neither side
+// changes the system defaults or follows an AirPods default-device switch.
+let engine = AVAudioEngine()
+let player = AVAudioPlayerNode()
+do {
+    guard outputID != 0, let unit = engine.outputNode.audioUnit else { throw NSError(domain: "no-output", code: 75) }
+    var selectedOutput = outputID
+    let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &selectedOutput, UInt32(MemoryLayout<AudioDeviceID>.size))
+    if status != noErr { throw NSError(domain: "output-device-route", code: Int(status)) }
+    guard currentDevice(engine.outputNode) == outputID else { throw NSError(domain: "output-device-mismatch", code: 75) }
+} catch { eventError("device_selection_failed", error); exit(75) }
 engine.attach(player)
 engine.connect(player, to: engine.mainMixerNode, format: nil)
-// Voice processing requires identical formats on the input and output sides.
-let outputFormat = capture ? engine.inputNode.outputFormat(forBus: 0) : engine.outputNode.inputFormat(forBus: 0)
+let outputFormat = engine.outputNode.inputFormat(forBus: 0)
 engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)
+var inputQueue: AudioQueueRef?
+var inputUID: CFString = "" as CFString
+var captureFormat = AudioStreamBasicDescription(mSampleRate: 16000, mFormatID: kAudioFormatLinearPCM,
+    mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+    mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+    mBitsPerChannel: 16, mReserved: 0)
+var debugStarted = ProcessInfo.processInfo.systemUptime
+var debugBuffers = 0, debugFrames = 0
+var debugPower = 0.0
+func checkQueue(_ status: OSStatus, _ operation: String) throws {
+    if status != noErr { throw NSError(domain: operation, code: Int(status)) }
+}
 if capture {
-    let node = engine.inputNode
-    let source = node.outputFormat(forBus: 0)
-    guard source.sampleRate > 0, source.channelCount > 0,
-          let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
-          let converter = AVAudioConverter(from: source, to: target) else { event("invalid_input_format"); exit(75) }
-    // The VPIO channel layout has no usable automatic mono downmix on this USB
-    // route. Copy its processed microphone channel explicitly instead.
-    converter.channelMap = [0]
-    var debugStarted = ProcessInfo.processInfo.systemUptime
-    var debugBuffers = 0, debugFrames = 0, debugConverted = 0
-    var debugPower = [Double](repeating: 0, count: Int(source.channelCount))
-    var debugErrors = 0
-    node.installTap(onBus: 0, bufferSize: 2048, format: source) { buffer, _ in
-        if debugAudio {
-            debugBuffers += 1; debugFrames += Int(buffer.frameLength)
-            if let channels = buffer.floatChannelData {
-                for channel in 0..<Int(source.channelCount) {
-                    for frame in 0..<Int(buffer.frameLength) {
-                        let sample = Double(source.isInterleaved ? channels[0][frame * Int(source.channelCount) + channel] : channels[channel][frame])
-                        debugPower[channel] += sample * sample
-                    }
+    do {
+        inputUID = try deviceUID(inputID)
+        try checkQueue(AudioQueueNewInput(&captureFormat, { _, queue, buffer, _, _, _ in
+            let byteCount = Int(buffer.pointee.mAudioDataByteSize)
+            FileHandle.standardOutput.write(Data(bytes: buffer.pointee.mAudioData, count: byteCount))
+            if debugAudio {
+                let samples = buffer.pointee.mAudioData.assumingMemoryBound(to: Int16.self)
+                let frames = byteCount / 2
+                debugBuffers += 1; debugFrames += frames
+                for frame in 0..<frames {
+                    let value = Double(samples[frame]) / 32768
+                    debugPower += value * value
+                }
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - debugStarted >= 5 {
+                    event("native_audio_debug", ["capture_method": "audio_queue", "input_frames": debugFrames,
+                        "converted_frames": debugFrames, "tap_buffers": debugBuffers,
+                        "source_channel_rms": [sqrt(debugPower / Double(max(debugFrames, 1)))]])
+                    debugStarted = now; debugBuffers = 0; debugFrames = 0; debugPower = 0
                 }
             }
+            let status = AudioQueueEnqueueBuffer(queue, buffer, 0, nil)
+            if status != noErr { event("capture_enqueue_failed", ["error_code": status]); exit(75) }
+        }, nil, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue, 0, &inputQueue), "capture-create")
+        guard let queue = inputQueue else { throw NSError(domain: "capture-create", code: 75) }
+        var uidReference = Unmanaged.passUnretained(inputUID)
+        try checkQueue(AudioQueueSetProperty(queue, kAudioQueueProperty_CurrentDevice, &uidReference, UInt32(MemoryLayout<CFString>.size)), "capture-device-route")
+        for _ in 0..<3 {
+            var buffer: AudioQueueBufferRef?
+            // Forty milliseconds bounds native capture delivery for interruption.
+            try checkQueue(AudioQueueAllocateBuffer(queue, 1280, &buffer), "capture-allocate")
+            guard let buffer = buffer else { throw NSError(domain: "capture-allocate", code: 75) }
+            try checkQueue(AudioQueueEnqueueBuffer(queue, buffer, 0, nil), "capture-enqueue")
         }
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 16000 / source.sampleRate + 16)
-        guard let pcm = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
-        var provided = false; var error: NSError?
-        let converted = converter.convert(to: pcm, error: &error) { _, status in
-            if provided { status.pointee = .noDataNow; return nil }
-            provided = true; status.pointee = .haveData; return buffer
-        }
-        if error == nil, let ptr = pcm.int16ChannelData?[0], pcm.frameLength > 0 {
-            FileHandle.standardOutput.write(Data(bytes: ptr, count: Int(pcm.frameLength) * 2))
-        }
-        if debugAudio {
-            debugConverted += Int(pcm.frameLength)
-            if error != nil { debugErrors += 1 }
-            let now = ProcessInfo.processInfo.systemUptime
-            if now - debugStarted >= 5 {
-                var fields: [String: Any] = ["tap_buffers": debugBuffers, "input_frames": debugFrames,
-                    "converted_frames": debugConverted, "conversion_errors": debugErrors,
-                    "conversion_status": converted.rawValue,
-                    "source_channel_rms": debugPower.map { sqrt($0 / Double(max(debugFrames, 1))) }]
-                if let error = error { fields["error_domain"] = error.domain; fields["error_code"] = error.code }
-                event("native_audio_debug", fields)
-                debugStarted = now; debugBuffers = 0; debugFrames = 0; debugConverted = 0; debugErrors = 0
-                debugPower = [Double](repeating: 0, count: Int(source.channelCount))
-            }
-        }
-    }
+    } catch { eventError("input_setup_failed", error); exit(75) }
 }
 event("engine_configured", routeFields(engine, inputID, outputID, capture))
 do { try engine.start() } catch { eventError("engine_start_failed", error, routeFields(engine, inputID, outputID, capture)); exit(75) }
-var readyFields = routeFields(engine, inputID, outputID, capture)
-readyFields["capture"] = capture
-readyFields["echo_cancelled"] = capture && engine.inputNode.isVoiceProcessingEnabled && !engine.inputNode.isVoiceProcessingBypassed
-if capture {
-    readyFields["capture_channel"] = 0
-    readyFields["voice_processing_bypassed"] = engine.inputNode.isVoiceProcessingBypassed
-    readyFields["voice_processing_input_muted"] = engine.inputNode.isVoiceProcessingInputMuted
+if let queue = inputQueue {
+    do {
+        try checkQueue(AudioQueueStart(queue, nil), "capture-start")
+        var actualUIDReference: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<CFString>.size)
+        try checkQueue(AudioQueueGetProperty(queue, kAudioQueueProperty_CurrentDevice, &actualUIDReference, &size), "capture-read-route")
+        guard let actualUID = actualUIDReference?.takeUnretainedValue() else { throw NSError(domain: "capture-read-route", code: 75) }
+        guard actualUID as String == inputUID as String else { throw NSError(domain: "capture-device-mismatch", code: 75) }
+        size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try checkQueue(AudioQueueGetProperty(queue, kAudioQueueProperty_StreamDescription, &captureFormat, &size), "capture-read-format")
+        event("capture_audio_ready", ["input_id": inputID, "input_device_uid": actualUID as String,
+            "input_name": list.first(where: { $0["id"] as? UInt32 == inputID })?["name"] ?? "none",
+            "microphone_permission": AVCaptureDevice.authorizationStatus(for: .audio).rawValue,
+            "capture_method": "audio_queue", "capture_format": streamFields(captureFormat)])
+    } catch { eventError("capture_start_failed", error); exit(75) }
 }
-event("audio_ready", readyFields)
+event("audio_ready", routeFields(engine, inputID, outputID, capture))
 var playbackGeneration = 0
-func play(_ path: String) {
+var playbackID = ""
+var playbackDuration = 0.0
+func playbackPosition() -> Double {
+    guard let rendered = player.lastRenderTime,
+          let position = player.playerTime(forNodeTime: rendered), position.sampleRate > 0 else { return 0 }
+    return min(playbackDuration, max(0, Double(position.sampleTime) / position.sampleRate))
+}
+func playbackFields() -> [String: Any] {
+    return ["play_id": playbackID, "native_at": Date().timeIntervalSince1970,
+            "native_monotonic": ProcessInfo.processInfo.systemUptime,
+            "position_seconds": playbackPosition(), "duration_seconds": playbackDuration]
+}
+func play(_ path: String, _ playID: String = UUID().uuidString) {
     do {
         let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
         playbackGeneration += 1; let generation = playbackGeneration
+        playbackID = playID
+        playbackDuration = Double(file.length) / file.processingFormat.sampleRate
         player.stop()
         engine.disconnectNodeOutput(player)
         engine.connect(player, to: engine.mainMixerNode, format: file.processingFormat)
         player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { _ in
-            DispatchQueue.main.async { if generation == playbackGeneration { event("playback_done"); if args.contains("--play") { exit(0) } } }
+            DispatchQueue.main.async { if generation == playbackGeneration { event("playback_done", playbackFields()); if args.contains("--play") { exit(0) } } }
         }
-        player.play(); event("playback_started")
-    } catch { event("playback_failed") }
+        player.play(); event("playback_started", playbackFields())
+    } catch { event("playback_failed", ["play_id": playID]) }
 }
 if let i = args.firstIndex(of: "--play"), args.count > i+1 { play(args[i+1]) }
 else {
     DispatchQueue.global().async {
         while let line = readLine() {
-            guard let data = line.data(using: .utf8), let row = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { continue }
+            guard let data = line.data(using: .utf8), let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             DispatchQueue.main.async {
-                if row["op"] == "stop" { playbackGeneration += 1; player.stop(); event("playback_done") }
-                if row["op"] == "play", let path = row["path"] { play(path) }
+                let op = row["op"] as? String
+                if op == "pause" || op == "stop" {
+                    // stop() resets the sample timeline, so capture it first.
+                    let position = playbackPosition()
+                    if op == "pause" { player.pause() }
+                    else { playbackGeneration += 1; player.stop() }
+                    var fields = row
+                    fields.removeValue(forKey: "op")
+                    fields["stopped_at"] = Date().timeIntervalSince1970
+                    fields["stopped_monotonic"] = ProcessInfo.processInfo.systemUptime
+                    fields["stop_method"] = op == "pause" ? "player_pause" : "player_stop"
+                    fields["position_seconds"] = position
+                    fields["duration_seconds"] = playbackDuration
+                    event("playback_stopped", fields)
+                }
+                if op == "resume", row["play_id"] as? String == playbackID {
+                    player.play()
+                    var fields = playbackFields(); fields["stop_id"] = row["stop_id"]
+                    event("playback_resumed", fields)
+                }
+                if op == "play", let path = row["path"] as? String { play(path, row["play_id"] as? String ?? UUID().uuidString) }
             }
         }
         exit(0)
     }
 }
-for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyDefaultOutputDevice] {
-    var a = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-    AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, DispatchQueue.main) { _, _ in
-        event("devices_changed"); exit(75)
+let playbackProgress = DispatchSource.makeTimerSource(queue: .main)
+playbackProgress.schedule(deadline: .now() + .milliseconds(200), repeating: .milliseconds(200))
+playbackProgress.setEventHandler {
+    if player.isPlaying { event("playback_progress", playbackFields()) }
+}
+playbackProgress.resume()
+var deviceListAddress = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, DispatchQueue.main) { _, _ in
+    let available = devices()
+    let inputPresent = !capture || available.contains(where: { $0["id"] as? UInt32 == inputID && $0["input"] as? Bool == true })
+    let outputPresent = available.contains(where: { $0["id"] as? UInt32 == outputID && $0["output"] as? Bool == true })
+    if !inputPresent || !outputPresent {
+        event("selected_device_removed", ["input_id": inputID, "output_id": outputID,
+            "input_present": inputPresent, "output_present": outputPresent]); exit(75)
     }
 }
 RunLoop.main.run()

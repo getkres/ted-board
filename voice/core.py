@@ -41,7 +41,7 @@ def speech_text(text: str) -> str:
         prefix = " ".join(words[:54])
         sentences = re.split(r"(?<=[.!?])\s+", prefix)
         prefix = " ".join(sentences[:-1]) if len(sentences) > 1 else prefix.rstrip(",:;") + "."
-        text = prefix + " Details are on your phone."
+        text = prefix + " Rest is on screen."
     return text
 
 
@@ -49,8 +49,35 @@ def wake_command(text: str):
     text = text.strip()
     if re.fullmatch(r"(?:hey\s+)?ted[, .!]*\s*stop listening[.! ]*", text, re.I):
         return "__pause__"
+    stop = re.match(r"^(?:hey[ ,.!]*)?ted\b[ ,.!:]*stop\b[ ,.!:]*", text, re.I)
+    if stop:
+        return text[stop.end():].strip() or "__interrupt__"
     m = re.match(r"^hey[ ,.!]*ted\b[ ,.!:]*", text, re.I)
     return text[m.end() :].strip() if m else None
+
+
+def spoken_echo(transcript: str, spoken: str) -> bool:
+    """Compare a Whisper candidate to the exact text sent to speech rendering."""
+    from difflib import SequenceMatcher
+
+    def words(text):
+        return re.sub(r"\bhey\s+(?=ted\b)", "", " ".join(re.findall(r"[a-z0-9]+", text.lower())))
+
+    heard, source = words(transcript), words(spoken)
+    if not source or len(re.findall(r"[a-z0-9]+", transcript.lower())) < 2:
+        return False
+    return (" " + heard + " ") in (" " + source + " ") or (
+        len(heard.split()) >= 4 and SequenceMatcher(None, heard, source, autojunk=False).ratio() >= 0.85
+    )
+
+
+def wake_retry_plausible(text: str) -> bool:
+    """Observed decoder ambiguities may be retried, never accepted as commands."""
+    if any(mark in text for mark in "()[]"):
+        return False
+    return tuple(re.findall(r"[a-z]+", text.lower())) in {
+        ("third", "storm"), ("ted", "storm"), ("ted", "stone"), ("fed", "stop"),
+    }
 
 
 class ReplyCursor:
@@ -58,39 +85,53 @@ class ReplyCursor:
         self.marker = marker
         self.seen = False
         self.cancelled = False
+        self.finished = False
+        self.message_id = None
         self.text = []
 
     def feed(self, row):
-        if self.cancelled or row.get("isSidechain"):
+        if not isinstance(row, dict) or self.cancelled or self.finished or row.get("isSidechain"):
             return None
         msg = row.get("message", {})
+        if not isinstance(msg, dict):
+            return None
         content = msg.get("content", [])
-        if isinstance(content, str):
-            text = content
-            parts = []
-        else:
-            parts = content
-            text = "\n".join(p.get("text", "") for p in parts if p.get("type") == "text")
+        parts = content if isinstance(content, list) else []
+        text = content if isinstance(content, str) else "\n".join(
+            p.get("text", "") for p in parts
+            if isinstance(p, dict) and p.get("type") == "text" and isinstance(p.get("text"), str)
+        )
         if row.get("type") == "user":
-            if self.marker in text:
+            if re.search(r"(?<![\w:])" + re.escape(self.marker) + r"(?![\w:-])", text):
                 self.seen = True
                 return None
-            if self.seen and text.strip():
+            if self.seen and text.strip() and not row.get("isMeta"):
                 self.cancelled = True
             return None
         if row.get("type") != "assistant" or not self.seen:
             return None
-        if msg.get("stop_reason") == "tool_use" or any(p.get("type") == "tool_use" for p in parts):
+        if msg.get("stop_reason") == "tool_use" or any(
+            isinstance(p, dict) and p.get("type") == "tool_use" for p in parts
+        ):
             self.text = []
+            self.message_id = None
             return None
+        # Transcript rows split a single assistant message by content block. Keep
+        # its final text blocks, but discard progress from an earlier message.
+        message_id = msg.get("id")
+        if message_id != self.message_id:
+            self.text = []
+            self.message_id = message_id
         if text.strip():
             self.text.append(text)
         if msg.get("stop_reason") == "end_turn" and self.text:
+            self.finished = True
             return "\n".join(self.text)
         return None
 
     def finish_idle(self):
-        return "\n".join(self.text) if self.seen and not self.cancelled and self.text else None
+        # Idle does not prove that a tool chain or assistant turn is complete.
+        return None
 
 
 class PlaybackGate:

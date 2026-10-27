@@ -1,0 +1,70 @@
+{
+  "captured_utc": "2026-10-27T20:45:56.176036+00:00",
+  "runtime_source_matches": true,
+  "models_match": true,
+  "files": {
+    "core.py": {
+      "source": "54e05c83f57d0fea81dad4770d7c10ee37b4fe08f0a5a92f04f01baa97f31ec3",
+      "runtime": "54e05c83f57d0fea81dad4770d7c10ee37b4fe08f0a5a92f04f01baa97f31ec3",
+      "equal": true
+    },
+    "session.py": {
+      "source": "7a6e16f0429cea29dd5af4526f754b9ee9a046c675a10ea54ad02206237f87b6",
+      "runtime": "7a6e16f0429cea29dd5af4526f754b9ee9a046c675a10ea54ad02206237f87b6",
+      "equal": true
+    },
+    "account2.py": {
+      "source": "d3441aa92c780650a9b7be95a3e843d313fa894ba75e8f32ab3bcfaf9b6d1fd6",
+      "runtime": "d3441aa92c780650a9b7be95a3e843d313fa894ba75e8f32ab3bcfaf9b6d1fd6",
+      "equal": true
+    },
+    "routing.py": {
+      "source": "c281cc3c5b1bf3529acc40ed4502cb1a0a8a2e642ecb52dd7393118766cc4e1f",
+      "runtime": "c281cc3c5b1bf3529acc40ed4502cb1a0a8a2e642ecb52dd7393118766cc4e1f",
+      "equal": true
+    },
+    "runtime.py": {
+      "source": "69ad51a97fba990ce4f2875c04874541ae439e6aac078585cdc6400b1907c973",
+      "runtime": "69ad51a97fba990ce4f2875c04874541ae439e6aac078585cdc6400b1907c973",
+      "equal": true
+    },
+    "loop.py": {
+      "source": "e00390d721a8fbfe39749a4f10684eb644139bd535088e84a51c915ecc89db72",
+      "runtime": "e00390d721a8fbfe39749a4f10684eb644139bd535088e84a51c915ecc89db72",
+      "equal": true
+    },
+    "daemon.py": {
+      "source": "15cd3a6891b73ff843247145eef7230a92209e59602344ba0208cedb5aaee040",
+      "runtime": "15cd3a6891b73ff843247145eef7230a92209e59602344ba0208cedb5aaee040",
+      "equal": true
+    },
+    "README.md": {
+      "source": "f8f73edea81a351988582fb9f9323c588336a7c6bdbd5620df7bb76d971622c4",
+      "runtime": "f8f73edea81a351988582fb9f9323c588336a7c6bdbd5620df7bb76d971622c4",
+      "equal": true
+    },
+    "requirements.txt": {
+      "source": "707479b8120989c82d0e6be934399c9c384ededd704378690f96637d90dab516",
+      "runtime": "707479b8120989c82d0e6be934399c9c384ededd704378690f96637d90dab516",
+      "equal": true
+    }
+  },
+  "models": {
+    "hey_ted.onnx": {
+      "source": "68f66ae5eec9e304eb00d41c726e6778289cbb2fb2f9c0369b9e471ef17760f1",
+      "runtime": "68f66ae5eec9e304eb00d41c726e6778289cbb2fb2f9c0369b9e471ef17760f1",
+      "equal": true
+    },
+    "training.json": {
+      "source": "cb63d045acdc49579911f4631da259b306c47d17e055bbccb3c4b4ad73106a30",
+      "runtime": "cb63d045acdc49579911f4631da259b306c47d17e055bbccb3c4b4ad73106a30",
+      "equal": true
+    }
+  },
+  "runtime_readme_matches": true,
+  "native_source_sha256": "07473817c94872eaeb3ca6c07f96ca9bd5eb40ff81158d78b419487e6853fa8c",
+  "native_binary_sha256": "b2c0c03908605ad2474323a3b9de9fe56cb4f2f0a43bdcbef831980c4fe9ebb7",
+  "native_build_log": "install-final.log",
+  "approval_sha256": "9bf8aca36099da346a0bf0606bf7a0e30d52f5243983ca7d8dea7454cb9a044c",
+  "approval_unchanged": true
+}

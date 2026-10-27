@@ -1,0 +1,796 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-27T20:46:24.334334+00:00",
+  "ok": false,
+  "status": "incomplete",
+  "source_branch": "feat/hey-ted-voice-1022",
+  "checks": {
+    "e2e": {
+      "ok": true,
+      "main_route_verified": false,
+      "account2_fallback_verified": true,
+      "main_route_available": false,
+      "account2_max": true,
+      "plan_only": true,
+      "elevenlabs": true,
+      "jabra_verified": true,
+      "missing_events": [],
+      "stimulus": {
+        "kind": "end-to-end",
+        "text": "Hey Ted. Reply exactly, the Jabra voice loop is working.",
+        "speaker": "88",
+        "dispatched_at": 1793133341.935501,
+        "dispatched_monotonic": 158365.888676583,
+        "timing_basis": "say process dispatch and exit; physical acoustic onset is not instrumented",
+        "finished_at": 1793133347.2023308,
+        "finished_monotonic": 158371.155476083,
+        "returncode": 0,
+        "stderr": ""
+      },
+      "failures": []
+    },
+    "barge_in": {
+      "ok": false,
+      "fixture_started": {
+        "at": 1793133379.1366248,
+        "event": "diagnostic_fixture_started",
+        "trial_id": "barge-in-6eb3fc090225410a826057b7aca637fe",
+        "path": "/Users/vahallo/ted-ops/voice/tmp/barge-in-6eb3fc090225410a826057b7aca637fe.wav",
+        "started_at": 1793133379.136624,
+        "started_monotonic": 158403.08958425
+      },
+      "candidate": {
+        "at": 1793133384.264291,
+        "event": "wake_candidate",
+        "score": 0.99938,
+        "barge_in": true,
+        "trigger_id": "ee48abee9ff64c629f709c7fe82286c0",
+        "trigger_monotonic": 158408.217050375,
+        "trigger_at": 1793133384.264173,
+        "source": "wake_model"
+      },
+      "native_stop": {
+        "at": 1793133384.264766,
+        "event": "playback_stopped",
+        "requested_at": 1793133384.264412,
+        "provisional": true,
+        "trigger_monotonic": 158408.217050375,
+        "trigger_at": 1793133384.264173,
+        "stopped_monotonic": 158408.21755220834,
+        "requested_monotonic": 158408.217338666,
+        "duration_seconds": 35.6445625,
+        "play_id": "99c3dc9cb241472ea04909bf5ce342ce",
+        "stop_id": "ee48abee9ff64c629f709c7fe82286c0",
+        "stopped_at": 1793133384.264618,
+        "position_seconds": 5.088,
+        "stop_method": "player_pause"
+      },
+      "confirmation": null,
+      "fixture_interrupted": null,
+      "trigger_to_native_stop_ms": 0.502,
+      "stop_latency_timing_basis": "monotonic clocks",
+      "stimulus_start_to_trigger_ms": 1347.98,
+      "stimulus_start_to_native_stop_ms": 1348.425,
+      "followup_handled": false,
+      "followup_chain": [],
+      "followup_reply_route": null,
+      "followup_reply_event": null,
+      "followup_local_notice_events": [],
+      "failures": [],
+      "fixture": {
+        "trial_id": "barge-in-6eb3fc090225410a826057b7aca637fe",
+        "path": "/Users/vahallo/ted-ops/voice/tmp/barge-in-6eb3fc090225410a826057b7aca637fe.wav",
+        "text": "This is a local long reply for the Jabra acceptance measurement. The microphone keeps listening while this reply plays through the Jabra speaker. The quoted words Hey Ted and Ted stop are part of this reply. There is no external request in this recording. The room should remain quiet until the full reply finishes. This is a local long reply for the Jabra acceptance measurement. The microphone keeps listening while this reply plays through the Jabra speaker. The quoted words Hey Ted and Ted stop are part of this reply. There is no external request in this recording. The room should remain quiet until the full reply finishes. ",
+        "word_count": 108,
+        "duration_seconds": 35.6445625,
+        "queued_at": 1793133379.112142,
+        "started": {
+          "at": 1793133379.1366248,
+          "event": "diagnostic_fixture_started",
+          "trial_id": "barge-in-6eb3fc090225410a826057b7aca637fe",
+          "path": "/Users/vahallo/ted-ops/voice/tmp/barge-in-6eb3fc090225410a826057b7aca637fe.wav",
+          "started_at": 1793133379.136624,
+          "started_monotonic": 158403.08958425
+        }
+      },
+      "stimulus": {
+        "kind": "barge-in-stop",
+        "text": "Hey Ted, stop.",
+        "speaker": "88",
+        "dispatched_at": 1793133382.916193,
+        "dispatched_monotonic": 158406.869133208,
+        "timing_basis": "say process dispatch and exit; physical acoustic onset is not instrumented",
+        "finished_at": 1793133385.076304,
+        "finished_monotonic": 158409.029230958,
+        "returncode": 0,
+        "stderr": ""
+      },
+      "followup": {
+        "kind": "barge-in-followup",
+        "text": "Reply exactly, the follow up was handled.",
+        "speaker": "88",
+        "dispatched_at": 1793133385.076322,
+        "dispatched_monotonic": 158409.029248875,
+        "timing_basis": "say process dispatch and exit; physical acoustic onset is not instrumented",
+        "finished_at": 1793133388.904246,
+        "finished_monotonic": 158412.857150916,
+        "returncode": 0,
+        "stderr": ""
+      },
+      "native_fixture_start": {
+        "at": 1793133379.149548,
+        "event": "playback_started",
+        "position_seconds": 0,
+        "play_id": "99c3dc9cb241472ea04909bf5ce342ce",
+        "native_at": 1793133379.149405,
+        "native_monotonic": 158403.10236750002,
+        "duration_seconds": 35.6445625
+      }
+    },
+    "no_self_trigger": {
+      "ok": false,
+      "artifact_type": "reconstruction_from_saved_events",
+      "is_new_acoustic_test": false,
+      "reconstructed_utc": "2026-10-27T20:45:01.343328+00:00",
+      "source_artifact": "/Users/vahallo/ted-ops/voice/FULL-1027/final-hardware.json",
+      "source_sha256": "43b572c824501216f1f70008caf2adb023d65a3741e99583701fe9256d6e63f5",
+      "source_started_utc": "2026-10-27T20:35:41.695946+00:00",
+      "required_trials": 10,
+      "requested_trials": 10,
+      "completed_trials": 3,
+      "failed_trials": 1,
+      "error": "RuntimeError: installed service did not accept diagnostic fixture; hook may be unavailable or service busy",
+      "failed_to_start_trial": 4,
+      "zero_self_triggers": false,
+      "total_provisional_pauses": 2,
+      "counting_note": "self_triggers retains the classifier count of relevant raw events; provisional_pause_count counts pause requests once per native interruption attempt",
+      "limitations": [
+        "Reconstructed from existing final-hardware.json raw fixture events, not a new measurement.",
+        "The original run aborted before no_self_trigger returned, so its partial trials were absent from checks.",
+        "Only three fixture trials completed; this does not satisfy the required ten-trial measurement.",
+        "The saved source contains device-removal and no-input evidence after trial three."
+      ],
+      "trials": [
+        {
+          "ok": true,
+          "fixture_started": {
+            "at": 1793133559.886774,
+            "event": "diagnostic_fixture_started",
+            "trial_id": "no-self-1-d0510b3c41c44184ac1d1874d6194580",
+            "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-1-d0510b3c41c44184ac1d1874d6194580.wav",
+            "started_at": 1793133559.88677,
+            "started_monotonic": 158583.838683291
+          },
+          "fixture_completed": {
+            "at": 1793133595.784251,
+            "event": "diagnostic_fixture_completed",
+            "trial_id": "no-self-1-d0510b3c41c44184ac1d1874d6194580",
+            "completed_at": 1793133595.78425,
+            "completed_monotonic": 158619.735948958
+          },
+          "played_seconds": 35.897,
+          "self_triggers": 0,
+          "self_trigger_events": [],
+          "candidate_events": [],
+          "failures": [],
+          "fixture": {
+            "trial_id": "no-self-1-d0510b3c41c44184ac1d1874d6194580",
+            "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-1-d0510b3c41c44184ac1d1874d6194580.wav",
+            "started": {
+              "at": 1793133559.886774,
+              "event": "diagnostic_fixture_started",
+              "trial_id": "no-self-1-d0510b3c41c44184ac1d1874d6194580",
+              "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-1-d0510b3c41c44184ac1d1874d6194580.wav",
+              "started_at": 1793133559.88677,
+              "started_monotonic": 158583.838683291
+            }
+          },
+          "provisional_pause_count": 0,
+          "distinct_stop_ids": []
+        },
+        {
+          "ok": true,
+          "fixture_started": {
+            "at": 1793133599.439779,
+            "event": "diagnostic_fixture_started",
+            "trial_id": "no-self-2-260c9848a25f48bfbf61d41e1de6d434",
+            "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-2-260c9848a25f48bfbf61d41e1de6d434.wav",
+            "started_at": 1793133599.439774,
+            "started_monotonic": 158623.391451916
+          },
+          "fixture_completed": {
+            "at": 1793133635.3419368,
+            "event": "diagnostic_fixture_completed",
+            "trial_id": "no-self-2-260c9848a25f48bfbf61d41e1de6d434",
+            "completed_at": 1793133635.341936,
+            "completed_monotonic": 158659.293406333
+          },
+          "played_seconds": 35.902,
+          "self_triggers": 0,
+          "self_trigger_events": [],
+          "candidate_events": [],
+          "failures": [],
+          "fixture": {
+            "trial_id": "no-self-2-260c9848a25f48bfbf61d41e1de6d434",
+            "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-2-260c9848a25f48bfbf61d41e1de6d434.wav",
+            "started": {
+              "at": 1793133599.439779,
+              "event": "diagnostic_fixture_started",
+              "trial_id": "no-self-2-260c9848a25f48bfbf61d41e1de6d434",
+              "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-2-260c9848a25f48bfbf61d41e1de6d434.wav",
+              "started_at": 1793133599.439774,
+              "started_monotonic": 158623.391451916
+            }
+          },
+          "provisional_pause_count": 0,
+          "distinct_stop_ids": []
+        },
+        {
+          "ok": false,
+          "fixture_started": {
+            "at": 1793133638.9594471,
+            "event": "diagnostic_fixture_started",
+            "trial_id": "no-self-3-3dcb49f6ea624189b24d5a7b7865706b",
+            "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-3-3dcb49f6ea624189b24d5a7b7865706b.wav",
+            "started_at": 1793133638.959444,
+            "started_monotonic": 158662.910894083
+          },
+          "fixture_completed": {
+            "at": 1793133684.4306061,
+            "event": "diagnostic_fixture_completed",
+            "trial_id": "no-self-3-3dcb49f6ea624189b24d5a7b7865706b",
+            "completed_at": 1793133684.4306061,
+            "completed_monotonic": 158708.381793208
+          },
+          "played_seconds": 45.471,
+          "self_triggers": 4,
+          "self_trigger_events": [
+            {
+              "at": 1793133639.88699,
+              "event": "playback_stop_requested",
+              "stop_id": "7face125d613444692fe35ab19acd8e6",
+              "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+              "trigger_monotonic": 158663.838190416,
+              "trigger_at": 1793133639.886781,
+              "requested_monotonic": 158663.838396208,
+              "requested_at": 1793133639.88696,
+              "provisional": true
+            },
+            {
+              "at": 1793133639.8872151,
+              "event": "playback_stopped",
+              "requested_at": 1793133639.88696,
+              "provisional": true,
+              "trigger_monotonic": 158663.838190416,
+              "trigger_at": 1793133639.886781,
+              "stopped_monotonic": 158663.83854625002,
+              "requested_monotonic": 158663.838396208,
+              "duration_seconds": 35.6445625,
+              "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+              "stop_id": "7face125d613444692fe35ab19acd8e6",
+              "stopped_at": 1793133639.8871,
+              "position_seconds": 0.896,
+              "stop_method": "player_pause"
+            },
+            {
+              "at": 1793133671.277747,
+              "event": "playback_stop_requested",
+              "stop_id": "a66cd52ccf674e0db76e543b31a5383e",
+              "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+              "trigger_monotonic": 158695.228720708,
+              "trigger_at": 1793133671.277506,
+              "requested_monotonic": 158695.228975291,
+              "requested_at": 1793133671.277719,
+              "provisional": true
+            },
+            {
+              "at": 1793133671.278035,
+              "event": "playback_stopped",
+              "requested_at": 1793133671.277719,
+              "provisional": true,
+              "trigger_monotonic": 158695.228720708,
+              "trigger_at": 1793133671.277506,
+              "stopped_monotonic": 158695.22917733336,
+              "requested_monotonic": 158695.228975291,
+              "duration_seconds": 35.6445625,
+              "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+              "stop_id": "a66cd52ccf674e0db76e543b31a5383e",
+              "stopped_at": 1793133671.277911,
+              "position_seconds": 28.3840625,
+              "stop_method": "player_pause"
+            }
+          ],
+          "candidate_events": [
+            {
+              "at": 1793133639.8868532,
+              "event": "wake_candidate",
+              "score": 0.99123,
+              "barge_in": true,
+              "trigger_id": "7face125d613444692fe35ab19acd8e6",
+              "trigger_monotonic": 158663.838190416,
+              "trigger_at": 1793133639.886781,
+              "source": "wake_model"
+            },
+            {
+              "at": 1793133671.277633,
+              "event": "wake_candidate",
+              "score": 0.99985,
+              "barge_in": true,
+              "trigger_id": "a66cd52ccf674e0db76e543b31a5383e",
+              "trigger_monotonic": 158695.228720708,
+              "trigger_at": 1793133671.277506,
+              "source": "wake_model"
+            }
+          ],
+          "failures": [],
+          "fixture": {
+            "trial_id": "no-self-3-3dcb49f6ea624189b24d5a7b7865706b",
+            "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-3-3dcb49f6ea624189b24d5a7b7865706b.wav",
+            "started": {
+              "at": 1793133638.9594471,
+              "event": "diagnostic_fixture_started",
+              "trial_id": "no-self-3-3dcb49f6ea624189b24d5a7b7865706b",
+              "path": "/Users/vahallo/ted-ops/voice/tmp/no-self-3-3dcb49f6ea624189b24d5a7b7865706b.wav",
+              "started_at": 1793133638.959444,
+              "started_monotonic": 158662.910894083
+            }
+          },
+          "provisional_pause_count": 2,
+          "distinct_stop_ids": [
+            "7face125d613444692fe35ab19acd8e6",
+            "a66cd52ccf674e0db76e543b31a5383e"
+          ]
+        }
+      ],
+      "post_trial_events": [
+        {
+          "at": 1793133684.644674,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133684.644486,
+          "native_monotonic": 158708.59567500002,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133684.844936,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133684.844708,
+          "native_monotonic": 158708.79589516667,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133685.044794,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133685.044646,
+          "native_monotonic": 158708.99583258334,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133685.2449439,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133685.244756,
+          "native_monotonic": 158709.19594158334,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133685.444454,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133685.4442658,
+          "native_monotonic": 158709.39544983333,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133685.647211,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133685.644355,
+          "native_monotonic": 158709.595538625,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133685.844598,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133685.8444362,
+          "native_monotonic": 158709.79561791668,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133686.0446699,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133686.044513,
+          "native_monotonic": 158709.99569345833,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133686.1782022,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133686.177297,
+          "native_monotonic": 158710.12847854168,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133686.4449642,
+          "event": "playback_progress",
+          "position_seconds": 35.6445625,
+          "play_id": "06e3b78d3c38448e904a7425fcf20acd",
+          "native_at": 1793133686.444689,
+          "native_monotonic": 158710.39586733334,
+          "duration_seconds": 35.6445625
+        },
+        {
+          "at": 1793133686.550025,
+          "event": "selected_device_removed",
+          "input_present": false,
+          "output_present": false,
+          "input_id": 99,
+          "output_id": 94
+        },
+        {
+          "at": 1793133686.55072,
+          "event": "audio_retry"
+        },
+        {
+          "at": 1793133700.248451,
+          "event": "no_input"
+        },
+        {
+          "at": 1793133700.248786,
+          "event": "audio_retry"
+        }
+      ],
+      "continue_on_failure": true,
+      "reconstruction": {
+        "is_new_acoustic_test": false,
+        "source_artifact": "/Users/vahallo/ted-ops/voice/FULL-1027/final-hardware.json",
+        "source_sha256": "43b572c824501216f1f70008caf2adb023d65a3741e99583701fe9256d6e63f5",
+        "reconstructed_utc": "2026-10-27T20:45:01.343328+00:00",
+        "basis": "Saved final-hardware.json raw fixture events; no acoustic replay or new capture."
+      }
+    },
+    "bare_stop": {
+      "ok": true,
+      "fixture_started": {
+        "at": 1793133265.9055202,
+        "event": "diagnostic_fixture_started",
+        "trial_id": "barge-in-1a1555607f4944fd96681751a087838e",
+        "path": "/Users/vahallo/ted-ops/voice/tmp/barge-in-1a1555607f4944fd96681751a087838e.wav",
+        "started_at": 1793133265.905517,
+        "started_monotonic": 158289.859129666
+      },
+      "candidate": {
+        "at": 1793133271.218557,
+        "event": "wake_candidate",
+        "score": 0.99989,
+        "barge_in": true,
+        "trigger_id": "7c753f5f948e495a96729aed5fa85544",
+        "trigger_monotonic": 158295.171940791,
+        "trigger_at": 1793133271.218466,
+        "source": "wake_model"
+      },
+      "native_stop": {
+        "at": 1793133271.218982,
+        "event": "playback_stopped",
+        "requested_at": 1793133271.21866,
+        "provisional": true,
+        "trigger_monotonic": 158295.171940791,
+        "trigger_at": 1793133271.218466,
+        "stopped_monotonic": 158295.17243116666,
+        "duration_seconds": 35.6445625,
+        "requested_monotonic": 158295.172241625,
+        "play_id": "be4ba7f2c33749939ff0325b03814ecb",
+        "stop_id": "7c753f5f948e495a96729aed5fa85544",
+        "stopped_at": 1793133271.2188458,
+        "position_seconds": 5.269375,
+        "stop_method": "player_pause"
+      },
+      "confirmation": {
+        "at": 1793133275.283763,
+        "event": "wake",
+        "score": 0.99989,
+        "barge_in": true,
+        "trigger_id": "7c753f5f948e495a96729aed5fa85544",
+        "trigger_monotonic": 158295.171940791,
+        "trigger_at": 1793133271.218466,
+        "confirmed_monotonic": 158299.236861458,
+        "confirmed_at": 1793133275.283762
+      },
+      "fixture_interrupted": {
+        "at": 1793133275.283473,
+        "event": "diagnostic_fixture_interrupted",
+        "trial_id": "barge-in-1a1555607f4944fd96681751a087838e",
+        "interrupted_at": 1793133275.2834718,
+        "interrupted_monotonic": 158299.236861458
+      },
+      "trigger_to_native_stop_ms": 0.49,
+      "stop_latency_timing_basis": "monotonic clocks",
+      "stimulus_start_to_trigger_ms": 1587.898,
+      "stimulus_start_to_native_stop_ms": 1588.278,
+      "followup_handled": true,
+      "followup_chain": [
+        {
+          "at": 1793133278.8963358,
+          "event": "transcribed",
+          "seconds": 1.596
+        },
+        {
+          "at": 1793133278.8986602,
+          "event": "submitted",
+          "seconds": 7.68
+        },
+        {
+          "at": 1793133303.693881,
+          "event": "reply_received",
+          "seconds": 24.795
+        },
+        {
+          "at": 1793133306.028616,
+          "event": "speech_started",
+          "seconds": 34.81
+        },
+        {
+          "at": 1793133308.088093,
+          "event": "playback_done",
+          "duration_seconds": 1.8024489795918368,
+          "position_seconds": 1.8024489795918368,
+          "play_id": "c3c4991c7419418c9c392da047814224",
+          "native_at": 1793133308.087295,
+          "native_monotonic": 158332.040665
+        }
+      ],
+      "followup_reply_route": "account2",
+      "followup_reply_event": {
+        "at": 1793133303.467274,
+        "event": "claude_voice_reply",
+        "account": 2,
+        "characters": 26
+      },
+      "followup_local_notice_events": [],
+      "failures": [],
+      "fixture": {
+        "trial_id": "barge-in-1a1555607f4944fd96681751a087838e",
+        "path": "/Users/vahallo/ted-ops/voice/tmp/barge-in-1a1555607f4944fd96681751a087838e.wav",
+        "text": "This is a local long reply for the Jabra acceptance measurement. The microphone keeps listening while this reply plays through the Jabra speaker. The quoted words Hey Ted and Ted stop are part of this reply. There is no external request in this recording. The room should remain quiet until the full reply finishes. This is a local long reply for the Jabra acceptance measurement. The microphone keeps listening while this reply plays through the Jabra speaker. The quoted words Hey Ted and Ted stop are part of this reply. There is no external request in this recording. The room should remain quiet until the full reply finishes. ",
+        "word_count": 108,
+        "duration_seconds": 35.6445625,
+        "queued_at": 1793133265.848432,
+        "started": {
+          "at": 1793133265.9055202,
+          "event": "diagnostic_fixture_started",
+          "trial_id": "barge-in-1a1555607f4944fd96681751a087838e",
+          "path": "/Users/vahallo/ted-ops/voice/tmp/barge-in-1a1555607f4944fd96681751a087838e.wav",
+          "started_at": 1793133265.905517,
+          "started_monotonic": 158289.859129666
+        }
+      },
+      "stimulus": {
+        "kind": "barge-in-stop",
+        "text": "Ted, stop.",
+        "speaker": "88",
+        "dispatched_at": 1793133269.630568,
+        "dispatched_monotonic": 158293.584160458,
+        "timing_basis": "say process dispatch and exit; physical acoustic onset is not instrumented",
+        "finished_at": 1793133271.537646,
+        "finished_monotonic": 158295.491226416,
+        "returncode": 0,
+        "stderr": ""
+      },
+      "followup": {
+        "kind": "barge-in-followup",
+        "text": "Reply exactly, the follow up was handled.",
+        "speaker": "88",
+        "dispatched_at": 1793133271.537663,
+        "dispatched_monotonic": 158295.491243125,
+        "timing_basis": "say process dispatch and exit; physical acoustic onset is not instrumented",
+        "finished_at": 1793133275.348547,
+        "finished_monotonic": 158299.302105375,
+        "returncode": 0,
+        "stderr": ""
+      },
+      "native_fixture_start": {
+        "at": 1793133265.918803,
+        "event": "playback_started",
+        "position_seconds": 0,
+        "play_id": "be4ba7f2c33749939ff0325b03814ecb",
+        "native_at": 1793133265.918644,
+        "native_monotonic": 158289.87225837502,
+        "duration_seconds": 35.6445625
+      }
+    },
+    "main_ted": {
+      "ok": false,
+      "status": "blocked",
+      "reason": "Authenticated voice messages are held by the receiving Claude permission policy before model delivery.",
+      "settings_proposal_applied": false,
+      "approval_required_by": "BRIEF.md prohibits Claude settings changes."
+    },
+    "read_only_scope": {
+      "ok": true,
+      "roots": [
+        "~/ted-ops/ted-state",
+        "~/biz",
+        "~/kres",
+        "~/ventures"
+      ],
+      "voice_card_present": true
+    },
+    "source_verification": {
+      "ok": true,
+      "tests": 140,
+      "passed": 137,
+      "skipped": 3,
+      "skips": "Optional native tests; installed acoustic evidence is separate.",
+      "ruff_ok": true,
+      "diff_check_ok": true
+    },
+    "installation": {
+      "ok": true,
+      "healthy": true,
+      "source_runtime_match": true,
+      "model_match": true,
+      "approval_unchanged": true,
+      "queue_count": 0,
+      "diagnostic_markers_present": []
+    }
+  },
+  "measurement": {
+    "pause_latency": "Detected wake candidate to native player.pause acknowledgement using monotonic clocks. Not independently measured acoustic silence.",
+    "stimulus_latency": "say process dispatch to native pause, not measured physical acoustic onset.",
+    "limitations": [
+      "Synthetic speakers and an uncontrolled room do not establish natural voice accuracy or a general false-trigger rate.",
+      "Historical passes do not establish current-build acceptance.",
+      "The model candidate was rolled back after failed installed trials; final model hashes are in parity.json."
+    ]
+  },
+  "constraints": {
+    "claude_settings_changed": false,
+    "billing_settings_changed": false,
+    "main_competing_cli_started": false,
+    "shared_remote_push": false,
+    "scheduled_on_mini_only": true,
+    "api_billing_used": false
+  },
+  "evidence": {
+    "BRIEF.md": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/BRIEF.md",
+      "sha256": "fc2ec0cf00ac56e096994633a9bdcdab943238e3128ea30dce5bf60e3f9580f7"
+    },
+    "final-hardware.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/final-hardware.json",
+      "sha256": "43b572c824501216f1f70008caf2adb023d65a3741e99583701fe9256d6e63f5"
+    },
+    "final-bare-stop.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/final-bare-stop.json",
+      "sha256": "efafa7b7cf40900535cff5adefc976b6dde9c0ec76b34dbcbc1f13220c380b26"
+    },
+    "read-only-scope.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/read-only-scope.json",
+      "sha256": "635044632ab84186796df3578886efe8a1abe2c72985d83b49f201cb26f65887"
+    },
+    "main-inbox-held.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/main-inbox-held.json",
+      "sha256": "7e0227ee695d87629a5e023295c30518cc43d7309a702344a16c35a130f89827"
+    },
+    "main-route-diagnosis.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/main-route-diagnosis.json",
+      "sha256": "2da084671851ef6a5292eeef0b93f9c82ff24ea1daf3488fa016e345bcdea17c"
+    },
+    "main-inbox-policy-proposal.patch": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/main-inbox-policy-proposal.patch",
+      "sha256": "1741dd54f234ebbb70f123e5736d599c7c579aba1f9381ca960d6ea57e5c8d85"
+    },
+    "main-inbox-policy-proposal.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/main-inbox-policy-proposal.json",
+      "sha256": "83b278befaaba6d043380d7cd6180796431930a90cce4e6ebe0022c43ee1a1bc"
+    },
+    "service-health.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/service-health.json",
+      "sha256": "9d68455e028ef87bd4b798a6596b80e71741bbc571ef2ddf5f7ab654f49b8ddc"
+    },
+    "parity.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/parity.json",
+      "sha256": "05377be6274209df99deed91a185e25cd128d846d84d13c2cc8d399fcde515b2"
+    },
+    "unit-tests.log": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/unit-tests.log",
+      "sha256": "9f86baf0b40538548b767b1ce51d53bdf95fbc442e7db878d191d220b57e38a4"
+    },
+    "ruff.log": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "install-final.log": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/install-final.log",
+      "sha256": "9c64de56d3bb444cb18abe585bc4cc21d84e60de7f76bbc873e616cc920f1e81"
+    },
+    "bare-stop-recognition.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/bare-stop-recognition.json",
+      "sha256": "0e6e7e27c5e9513476733ee7bc68480e6d90ccf902c9231f47713ad6899805d9"
+    },
+    "energy-calibration.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/energy-calibration.json",
+      "sha256": "4335e72e7bfcc89e6cddbf094cdf315a652c79a379fc7ab108d71adf5b32716a"
+    },
+    "hardware-disconnect.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/hardware-disconnect.json",
+      "sha256": "12a7eaa666e900478514a26c06ac16b662d7a65881c40ffa983b0c628699f2fe"
+    },
+    "reconstructed-self-trigger.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/reconstructed-self-trigger.json",
+      "sha256": "760aa53e507a89f1d75f93c0a432b954a2324c98f49ac035a19c84bb29047672"
+    },
+    "model-rollback.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/model-rollback.json",
+      "sha256": "4cb7f9768fe1f696a5c9a50cc86ac1fc80b60f0c695f9a23372111a18e357dc6"
+    },
+    "false-wake-cleanup.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/false-wake-cleanup.json",
+      "sha256": "ccd7fdfe4d44ce7d5d70a1e077ebcd538c1ea6eb4549c6f81d7cf0e0e85d3ca8"
+    },
+    "private-diagnostic-cleanup.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/private-diagnostic-cleanup.json",
+      "sha256": "1dab24e3bd066d5624b761ecd7254be7f758629ce20a2b75e8405dfd7117e60d"
+    },
+    "wake-candidate/SUMMARY.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/wake-candidate/SUMMARY.json",
+      "sha256": "22a8a1ae3bdfea0a1ca8e4662eeccaedc7af5d24c08e6a5f2d9686b4fb3ee036"
+    },
+    "wake-candidate/threshold-summary.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/wake-candidate/threshold-summary.json",
+      "sha256": "b331073eae39f6f106ba9cb82b3d918583f38f16c38dd096d30ad4d7230a6fdc"
+    }
+  },
+  "historical_trials": {
+    "barge-in.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/barge-in.json",
+      "sha256": "517875a1de53e5927183b813a0ea507bfaf9cc607f859d4cc58002a30da61fcf"
+    },
+    "no-self-trigger.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/no-self-trigger.json",
+      "sha256": "bfbac4ea252e29aac80bbeb7713d3827f466d3ce43d41a1d6b1416702f2f270a"
+    },
+    "bare-stop-verified.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/bare-stop-verified.json",
+      "sha256": "0bcb0a3cee87dda16f21b3be7d680e5357a471aea94d47e234e71a7ba70e3764"
+    },
+    "hardware-final.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/hardware-final.json",
+      "sha256": "620393e38f14b3ef622fa9bc2935644291c43ecc3f36348d2a573ea6807deb94"
+    },
+    "bare-stop-calibrated.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/bare-stop-calibrated.json",
+      "sha256": "18d866906c23fd593925047232a3967a00f2efd54df0535d53b74d56aa5afbfe"
+    },
+    "baseline-final.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/baseline-final.json",
+      "sha256": "207f405cae18f8485258b602718e379060a547de4416f6e395132e3bbd3a329f"
+    },
+    "baseline-bare-stop.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/baseline-bare-stop.json",
+      "sha256": "a6dbb525a6273545cbfd91e643dcb2597005ae090ee8bacc07da4a6b32a6cc3f"
+    },
+    "baseline50-build.json": {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/baseline50-build.json",
+      "sha256": "50a2f56131a8dde1668961082d3cead9cf9d0632a945b1146d2d5ebfe846aaa1"
+    }
+  },
+  "next_required": [
+    "Approve the specific per-main receiver-policy exception, apply through the normal Fresh Ted lifecycle, and verify actual main transcript delivery and spoken final reply.",
+    "Confirm the Jabra connection is stable and the room is quiet, then retest Hey Ted interruption and ten long replies."
+  ]
+}

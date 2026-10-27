@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Always-on mini voice service. Native audio supplies echo-cancelled PCM."""
+"""Always-on mini voice service with direct, explicitly routed Jabra PCM."""
 
 import argparse
 import fcntl
@@ -10,8 +10,8 @@ from pathlib import Path
 
 from core import Pause
 from loop import VoiceLoop
+from routing import RoutedBridge
 from runtime import Audio, CaptureDiagnostics, Whisper, logger
-from session import SessionBridge
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
             Path.home() / ".cache/whisper/ggml-medium.en.bin",
             Path.home() / ".cache/whisper/ggml-small.en.bin",
         )
-        bridge = SessionBridge()
+        bridge = RoutedBridge(home, emit)
         audio = None
         loop = None
         stopping = False
@@ -60,6 +60,8 @@ def main():
                 if Pause(home).paused:
                     if audio:
                         audio.close()
+                        if loop:
+                            loop.close()
                         audio = None
                         loop = None
                         emit("capture_closed_for_pause")
@@ -75,10 +77,7 @@ def main():
                         bridge,
                         emit,
                         debug=debug,
-                        verifier=Whisper(
-                            "/opt/homebrew/bin/whisper-cli",
-                            Path.home() / ".cache/whisper/ggml-small.en.bin",
-                        ),
+                        verifier=whisper,
                     )
                 try:
                     frames = audio.pump()
@@ -97,16 +96,20 @@ def main():
                 except RuntimeError:
                     audio.close()
                     audio = None
-                    if loop and loop.future:
-                        loop.future.cancel()
+                    if loop:
+                        loop.close()
+                        loop = None
                     emit("audio_retry")
                     for _ in range(40):
                         if stopping:
                             break
                         time.sleep(0.25)
         finally:
+            bridge.close()
             if audio:
                 audio.close()
+            if loop:
+                loop.close()
             emit("service_stopped")
     return 0
 

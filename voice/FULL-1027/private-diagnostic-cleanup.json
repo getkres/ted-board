@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-27T20:26:53.471774+00:00",
+  "removed_task_private_directories": [
+    {
+      "path": "/Users/vahallo/ted-ops/voice/FULL-1027/private-diagnostics",
+      "files": 28,
+      "wav_files": 16,
+      "bytes": 1315418
+    },
+    {
+      "path": "/Users/vahallo/ted-ops/voice/diagnostics/verification",
+      "files": 10,
+      "wav_files": 5,
+      "bytes": 426920
+    }
+  ],
+  "remaining_private_capture_directories": [],
+  "raw_capture_marker_present": false,
+  "diagnostics_fixture_marker_note": "Full acceptance harness is active; its diagnostics-enabled marker is removed by its finally block. Final marker status is in service-health.json.",
+  "compact_hashes_retained": [
+    "energy-calibration.json",
+    "bare-stop-recognition.json"
+  ]
+}

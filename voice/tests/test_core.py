@@ -32,7 +32,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("https", s)
         self.assertNotIn("rm -rf", s)
         self.assertLessEqual(len(s.split()), 60)
-        self.assertTrue(s.endswith("Details are on your phone."))
+        self.assertTrue(s.endswith("Rest is on screen."))
 
     def test_own_playback_never_contains_either_trigger_phrase(self):
         s = speech_text("Say hey Ted, or say Ted, stop listening.")
@@ -44,6 +44,32 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(wake_command("hey dad, what time is it"))
         self.assertEqual(wake_command("Ted, stop listening."), "__pause__")
         self.assertEqual(wake_command("hey Ted stop listening"), "__pause__")
+
+    def test_stop_interrupts_and_preserves_a_followup_without_durable_pause(self):
+        self.assertEqual(wake_command("Ted, stop."), "__interrupt__")
+        self.assertEqual(wake_command("Hey Ted, stop."), "__interrupt__")
+        self.assertEqual(wake_command("Ted, stop. What is open?"), "What is open?")
+        self.assertIsNone(wake_command("The answer is Ted, stop."))
+
+    def test_playback_echo_is_rejected_with_punctuation_and_wake_variations(self):
+        from core import spoken_echo
+
+        spoken = "Ted, the current order is three sales today."
+        self.assertTrue(spoken_echo("Hey Ted, the current order is three sales today!", spoken))
+        self.assertTrue(spoken_echo("the current order is three sales", spoken))
+        self.assertTrue(spoken_echo("Hey Ted.", "The quoted words Hey Ted and Ted stop are part of this reply."))
+        self.assertFalse(spoken_echo("Hey Ted.", "The quoted words are nearby."))
+        self.assertFalse(spoken_echo("Hey Ted, stop", spoken))
+        self.assertFalse(spoken_echo("Hey Ted, what changed yesterday?", spoken))
+
+    def test_wake_vocabulary_retry_requires_observed_phonetic_ambiguity(self):
+        from core import wake_retry_plausible
+
+        for text in ["Third storm.", "Ted Stone", "Ted, storm.", "Fed, stop."]:
+            self.assertTrue(wake_retry_plausible(text))
+            self.assertIsNone(wake_command(text), "ambiguous text is never a wake command by itself")
+        for text in ["", "(eerie music)", "[Third storm]", "you", "the storm", "Third storm is approaching"]:
+            self.assertFalse(wake_retry_plausible(text))
 
     def test_only_reply_after_exact_request_and_final_text(self):
         c = ReplyCursor("voice:abc")

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-27T20:22:01.211936+00:00",
+  "candidate_promoted": false,
+  "restored_original_model_sha256": "68f66ae5eec9e304eb00d41c726e6778289cbb2fb2f9c0369b9e471ef17760f1",
+  "candidate_sha256": "fd3131cccfe721523e76248df6fedbf50e62abd0d58c084d32c242c0c0acbc8d",
+  "reason": "Candidate offline improvements did not satisfy acoustic acceptance. Current bare-stop trial missed the score gate; subsequent full run missed e2e confirmation and Hey Ted stop confirmation. Full run interrupted before no-self trials; partial evidence preserved. Restore prior model and .99 playback gate, with current code fixes to be reverified.",
+  "failed_trials": [
+    "bare-stop-verified.json",
+    "hardware-final.json"
+  ],
+  "prior_passes_not_final_acceptance": true
+}
