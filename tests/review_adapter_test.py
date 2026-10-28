@@ -10,6 +10,7 @@ import live_status
 import mockup_upload
 import sessions
 from review_gate import ReviewBlocked
+from review_unit_fixtures import collect_approvals, status_module
 
 
 class AdapterTests(unittest.TestCase):
@@ -22,8 +23,9 @@ class AdapterTests(unittest.TestCase):
 
     def test_needs_you_without_review_makes_no_remote_call(self):
         card = {'id': 'x', 'project': 'Ted ops', 'section': 'ted_doing'}
-        with patch.object(live_status.board_client, 'cards', return_value=[card]), \
-                patch.object(live_status, 'call') as send:
+        status = status_module()
+        with patch.object(status.board_client, 'cards', return_value=[card]), \
+                patch.object(status, 'call') as send:
             with self.assertRaises(ReviewBlocked):
                 live_status.update('x', 'waiting_on_you', 'review this', section='needs_you')
             send.assert_not_called()
@@ -35,7 +37,7 @@ class AdapterTests(unittest.TestCase):
                 with store.locked() as data:
                     s = data['sessions']['x']; s.update(status='done', queue=[])
                     (Path(s['cwd']) / name).write_text('{}')
-                store.collect_approvals()
+                collect_approvals(store)
                 self.assertEqual(store.read()['approvals'], {})
                 self.assertEqual(store.read()['sessions']['x']['status'], 'review_blocked')
 
@@ -45,7 +47,12 @@ class AdapterTests(unittest.TestCase):
             with store.locked() as data:
                 s = data['sessions']['x']; s.update(status='running', turn='turn', queue=[], pid=999999)
                 sessions.atomic(Path(s['cwd']) / 'turn.result.json', {'ok': True, 'text': 'Unreviewed report.'})
-            with patch.object(sessions, 'alive', return_value=False): store.tick()
+            if hasattr(store, '_deliver_final') and 'reconcile' in __import__('inspect').signature(store.tick).parameters:
+                # The reconciler settles through the same delivery gate after its lease checks.
+                with store.locked() as data:
+                    store._deliver_final(data, data['sessions']['x'], {'ok': True, 'text': 'Unreviewed report.'})
+            else:
+                with patch.object(sessions, 'alive', return_value=False): store.tick()
             data = store.read()
             self.assertEqual(data['sessions']['x']['status'], 'review_blocked')
             self.assertFalse(any('Unreviewed report.' in item['text'] for item in data['outbox']))

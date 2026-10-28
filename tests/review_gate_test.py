@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import review_gate as gate
 import review
+from review_unit_fixtures import collect_approvals, status_module
 
 
 class GateTests(unittest.TestCase):
@@ -168,7 +169,7 @@ class GateTests(unittest.TestCase):
             self.assertEqual([c.kwargs['title'] for c in send.call_args_list], [gate.ATTRIBUTION_TITLE, 'Frame'])
 
     def test_full_pass_allows_needs_you_and_kill_then_blocks(self):
-        import live_status
+        live_status = status_module()
         self.passing()
         (self.root / 'sessions.json').write_text(json.dumps({'sessions': {'x': {
             'cwd': str(self.job), 'project': 'Ted ops'}}}))
@@ -196,7 +197,7 @@ class GateTests(unittest.TestCase):
         (self.job / 'draft-email.json').write_text('{"text":"draft","recipient":"fixture@example.invalid"}')
         self.passing()
         with patch.object(gate, 'BIZ_ROOT', self.biz):
-            store.collect_approvals()
+            collect_approvals(store)
             self.assertEqual(len(store.snapshot()[1]), 1)
             (self.job / 'draft-email.json').write_text('{"text":"changed"}')
             self.assertEqual(store.snapshot()[1], [])

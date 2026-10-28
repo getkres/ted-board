@@ -26,3 +26,18 @@ def upload_prerequisite(job, images, title='Test'):
     with patch.object(mockup_upload, 'validate_upload', return_value=rows), \
             patch.object(mockup_upload, 'UPLOAD_LOG', receipt):
         yield
+
+
+def status_module():
+    """The module whose update() is live: reconciler_status when routed."""
+    import sys
+    import live_status
+    return sys.modules[live_status.update.__module__]
+
+
+def collect_approvals(store):
+    """Collect on the live path. The reconciler only stages with reconcile=True."""
+    import inspect
+    if 'reconcile' in inspect.signature(store.collect_approvals).parameters:
+        return store.collect_approvals(reconcile=True)
+    return store.collect_approvals()

@@ -10,6 +10,7 @@ import tempfile
 import deploy_review_gate as deploy
 
 ROOT = Path(__file__).resolve().parent
+RUNTIME_DATA = ('runner_failure_templates.json', 'capacity.json')
 NEW_TESTS = ('review_gate_test.py', 'review_adapter_test.py', 'review_deploy_test.py', 'review_transport_test.py', 'review_unit_fixtures.py')
 
 
@@ -22,6 +23,9 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix='ted-review-test-') as tmp:
         staged = Path(tmp) / 'ted-board'; staged.mkdir()
         for p in args.private_root.glob('*.py'): shutil.copy2(p, staged / p.name)
+        # Runtime data the worker modules read at import. Named, never globbed.
+        for name in RUNTIME_DATA:
+            if (args.private_root / name).is_file(): shutil.copy2(args.private_root / name, staged / name)
         for name in ('tests', 'supabase'):
             shutil.copytree(args.private_root / name, staged / name)
         for name in ('ted-decisions', 'telegram-ted'):
