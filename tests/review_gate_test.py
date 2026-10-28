@@ -202,6 +202,83 @@ class GateTests(unittest.TestCase):
             (self.job / 'draft-email.json').write_text('{"text":"changed"}')
             self.assertEqual(store.snapshot()[1], [])
 
+    def test_routine_handoff_stages_only_after_exact_output_review(self):
+        import sessions
+        if not hasattr(sessions.Store, 'record_output'):
+            self.skipTest('current private routine handoff not installed')
+        store = sessions.Store(self.root / 'jobs')
+        store.record_output({'id': 'routine', 'title': 'Routine output',
+                             'body': 'Review the exact proposal.', 'project': 'Ted ops'},
+                            {'REPORT.md': 'Routine proposal.\n',
+                             'draft-email.json': '{"text":"draft","recipient":"fixture@example.invalid"}'},
+                            'needs_approval')
+        self.assertEqual(store.read()['approvals'], {})
+        self.job = Path(store.read()['sessions']['routine']['cwd'])
+        self.passing()
+        with patch.object(gate, 'BIZ_ROOT', self.biz):
+            collect_approvals(store)
+            self.assertEqual(len(store.snapshot()[1]), 1)
+            (self.job / 'draft-email.json').write_text('{"text":"changed"}')
+            self.assertEqual(store.snapshot()[1], [])
+
+    def test_routine_handoff_wrong_business_review_cannot_stage_approval(self):
+        import sessions
+        if not hasattr(sessions.Store, 'record_output'):
+            self.skipTest('current private routine handoff not installed')
+        store = sessions.Store(self.root / 'jobs')
+        store.record_output({'id': 'routine', 'title': 'Routine output',
+                             'body': 'Review the exact proposal.', 'project': 'Library'},
+                            {'REPORT.md': 'Routine proposal.\n',
+                             'draft-email.json': '{"text":"draft","recipient":"fixture@example.invalid"}'},
+                            'needs_approval')
+        self.job = Path(store.read()['sessions']['routine']['cwd'])
+        self.passing()  # A genuine pass for Ted ops does not cover Library.
+        with patch.object(gate, 'BIZ_ROOT', self.biz):
+            collect_approvals(store)
+            self.assertEqual(store.read()['approvals'], {})
+            self.assertEqual(store.snapshot()[1], [])
+            self.assertEqual(store.read()['sessions']['routine']['status'], 'review_blocked')
+
+    def test_old_session_without_project_cannot_stage_reviewed_approval(self):
+        import sessions
+        store = sessions.Store(self.root / 'jobs')
+        store.enqueue({'id': 'old', 'title': 'Old session', 'project': 'Ted ops'}, 'work', 'receipt')
+        with store.locked() as data:
+            session = data['sessions']['old']
+            session.update(status='done', queue=[])
+            session.pop('project', None)
+            self.job = Path(session['cwd'])
+        (self.job / 'REPORT.md').write_text('A reviewed draft.\n')
+        (self.job / 'draft-email.json').write_text('{"text":"draft"}')
+        self.passing()
+        with patch.object(gate, 'BIZ_ROOT', self.biz):
+            collect_approvals(store)
+            self.assertEqual(store.read()['approvals'], {})
+            self.assertEqual(store.snapshot()[1], [])
+
+    def test_zero_wait_wrong_business_review_cannot_stage_approval(self):
+        try:
+            import reconciler_sessions as managed
+        except ImportError:
+            self.skipTest('current private reconciler not installed')
+        store = managed.Store(self.root / 'jobs')
+        with patch.object(managed, 'reconciler_enabled', return_value=True):
+            queued = store.enqueue_zero_wait({'id': 'zero', 'title': 'Review a draft',
+                                             'body': 'Prepare only.', 'project': 'Library',
+                                             'section': 'up_next'}, 'work', 'receipt', 'codex', ['card:zero'], now=100)
+            self.assertTrue(queued)
+            with store.locked() as data:
+                session = data['sessions']['zero']
+                session.update(status='done', queue=[])
+                self.job = Path(session['cwd'])
+            (self.job / 'REPORT.md').write_text('A reviewed draft.\n')
+            (self.job / 'draft-email.json').write_text('{"text":"draft"}')
+            self.passing()
+            with patch.object(gate, 'BIZ_ROOT', self.biz):
+                store.collect_approvals(reconcile=True)
+                self.assertEqual(store.read()['approvals'], {})
+                self.assertEqual(store.snapshot()[1], [])
+
     def test_whimsy_score_below_nine_blocks(self):
         target = self.biz / 'library'
         (target / 'pod').mkdir(parents=True)

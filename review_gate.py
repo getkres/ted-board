@@ -161,6 +161,12 @@ def check_project(business,project,biz_root=None):
     if str(project).strip().lower() not in allowed:raise blocked()
 
 
+def session_project(session):
+    project = session.get('project') if isinstance(session, dict) else None
+    if not isinstance(project, str) or not project.strip(): raise blocked()
+    return project
+
+
 def validate_review(job_dir, required_paths=(), project=None, biz_root=None):
     try:
         job_dir = Path(job_dir)
@@ -247,7 +253,7 @@ def validate_card(card_id, jobs_root=None):
     except (KeyError, TypeError): raise blocked() from None
     job = Path(session['cwd']).resolve()
     if not job.is_relative_to(root.resolve()): raise blocked()
-    return validate_review(job, required_paths=['REPORT.md'], project=session.get('project'))
+    return validate_review(job, required_paths=['REPORT.md'], project=session_project(session))
 
 
 def validate_payload(job_dir, filename, payload, project=None):
@@ -336,13 +342,13 @@ def card_job(card_id, jobs_root=None):
 
 def validate_card_payload(card_id,filename,payload,jobs_root=None):
     session=card_job(card_id,jobs_root)
-    validate_payload(session['cwd'],filename,payload,project=session.get('project'))
+    validate_payload(session['cwd'],filename,payload,project=session_project(session))
 
 
 def validate_approval_payload(approval,jobs_root=None):
     try:
         session=card_job(approval['card_id'],jobs_root)
-        validate_review(session['cwd'],project=session.get('project'))
+        validate_review(session['cwd'],project=session_project(session))
         from sessions import artifact
         current=artifact(session['cwd'],approval['kind'])
         summaries={'db':'Apply database SQL after a fresh safety review','email':'Send the exact drafted email','spend':'Execute the exact proposed spend'}

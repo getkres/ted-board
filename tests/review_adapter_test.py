@@ -16,6 +16,43 @@ from review_unit_fixtures import collect_approvals, status_module
 
 
 class AdapterTests(unittest.TestCase):
+    def test_routine_handoff_cannot_publish_unreviewed_approvals(self):
+        if not hasattr(sessions.Store, 'record_output'):
+            self.skipTest('current private routine handoff not installed')
+        for name in ('draft-email.json', 'spend.json', 'apply.sql'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                store = sessions.Store(tmp)
+                store.record_output({'id': 'routine', 'title': 'Routine output',
+                                     'body': 'Review the exact proposal.', 'project': 'Ted ops'},
+                                    {'REPORT.md': 'Routine proposal.\n', name: '{}'}, 'needs_approval')
+                collect_approvals(store)
+                self.assertEqual(store.snapshot()[1], [])
+                self.assertEqual(store.read()['approvals'], {})
+                self.assertEqual(store.read()['sessions']['routine']['status'], 'review_blocked')
+
+    def test_oversized_unreviewed_packet_keeps_bounded_draft_recovery(self):
+        try:
+            import reconciler_sessions as managed
+        except ImportError:
+            self.skipTest('current private reconciler not installed')
+        with tempfile.TemporaryDirectory() as tmp, patch.object(managed, 'reconciler_enabled', return_value=True):
+            store = managed.Store(tmp)
+            store.enqueue({'id': 'repair', 'title': 'Prepare a packet'}, 'work', 'receipt')
+            with store.locked() as data:
+                session = data['sessions']['repair']
+                session.update(status='done', queue=[], turn='maker-turn')
+                packet = Path(session['cwd']) / 'apply.sql'
+                packet.write_text('x' * 60001)
+            store.collect_approvals(reconcile=True)
+            session = store.read()['sessions']['repair']
+            self.assertEqual(session['status'], 'queued')
+            self.assertEqual(len(session['queue']), 1)
+            self.assertEqual(session['queue'][0]['kind'], 'work')
+            self.assertTrue(session['queue'][0]['artifact_repair'])
+            self.assertNotIn('approval_id', session['queue'][0])
+            self.assertEqual(store.read()['approvals'], {})
+            self.assertEqual(packet.stat().st_size, 60001)
+
     def test_upload_without_review_makes_no_remote_call(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(mockup_upload, 'call') as send:
             from PIL import Image

@@ -185,8 +185,9 @@ def review_turn(session, result, model):
     job = Path(session['cwd'])
     final = job / 'final-answer.txt'; final.write_text(result['text']); final.chmod(0o600)
     request = gate.load_json(job / 'review-request.json') if (job / 'review-request.json').exists() else {}
-    business = request.get('business') or gate.business_id(session.get('project', ''))
-    gate.check_project(business, session.get('project'))
+    project = gate.session_project(session)
+    business = request.get('business') or gate.business_id(project)
+    gate.check_project(business, project)
     maker = {'agent': session['engine'], 'model': model, 'session_id': result.get('session_id')}
     return run_review(job, business, maker, paths=[x['path'] for x in request.get('items', [])],
                       design=request.get('design', False), upload=request.get('upload'))

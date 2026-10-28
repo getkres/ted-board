@@ -14,6 +14,35 @@ RUNTIME_DATA = ('runner_failure_templates.json', 'capacity.json')
 NEW_TESTS = ('review_gate_test.py', 'review_adapter_test.py', 'review_deploy_test.py', 'review_transport_test.py', 'review_unit_fixtures.py')
 
 
+def python_suite(private_root):
+    import importlib.abc
+    import importlib.machinery
+    import unittest
+    from unittest.mock import patch
+    staged = Path.cwd().resolve()
+
+    class OverlayFinder(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            # Sibling legacy modules mutate sys.path. Keep local runtime imports
+            # bound to this snapshot even after those mutations.
+            if '.' not in fullname and (staged / (fullname + '.py')).is_file():
+                return importlib.machinery.PathFinder.find_spec(fullname, [str(staged)])
+            return None
+
+    sys.meta_path.insert(0, OverlayFinder())
+    with patch('urllib.request.urlopen', side_effect=RuntimeError('network disabled during tests')):
+        import board_live, card
+        assert all(Path(m.__file__).resolve().parent == staged for m in (board_live, card))
+        suite = unittest.defaultTestLoader.discover('tests', pattern='*_test.py')
+        suite.addTests(unittest.defaultTestLoader.discover('tests', pattern='test_*.py'))
+        result = unittest.TextTestRunner(verbosity=1).run(suite)
+    live = Path(private_root).resolve()
+    leaked = sorted(n for n, m in list(sys.modules.items()) if getattr(m, '__file__', None)
+                    and Path(m.__file__).resolve().parent == live)
+    print('live modules imported during tests: ' + (', '.join(leaked) or 'none'))
+    return int(bool(leaked) or not result.wasSuccessful())
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--private-root', type=Path, default=Path.home() / 'ted-ops/ted-board')
@@ -26,27 +55,19 @@ def main(argv=None):
         # Runtime data the worker modules read at import. Named, never globbed.
         for name in RUNTIME_DATA:
             if (args.private_root / name).is_file(): shutil.copy2(args.private_root / name, staged / name)
-        for name in ('tests', 'supabase'):
+        for name in ('tests', 'supabase', 'scripts'):
             shutil.copytree(args.private_root / name, staged / name)
         for name in ('ted-decisions', 'telegram-ted'):
             (Path(tmp) / name).symlink_to(args.private_root.parent / name, target_is_directory=True)
         for target, content in deploy.worker_changes(args.private_root,args.bundle).items():
             (staged / target.relative_to(args.private_root)).write_bytes(content)
-        for name in ('review_gate.py', 'review.py', 'deploy_review_gate.py'):
+        for name in ('review_gate.py', 'review.py', 'deploy_review_gate.py', 'test_review_gate.py'):
             shutil.copy2(ROOT / name, staged / name)
         for name in NEW_TESTS: shutil.copy2(ROOT / 'tests' / name, staged / 'tests' / name)
         # Force any accidentally unmocked Python HTTP request to fail locally.
         command = [sys.executable, '-c',
-                   'import unittest; from unittest.mock import patch; from pathlib import Path; '
-                   'import board_live; '
-                   'assert Path(board_live.__file__).resolve().parent==Path.cwd().resolve(), "reaper must use the reconstructed overlay"; '
-                   'suite=unittest.defaultTestLoader.discover("tests",pattern="*_test.py"); '
-                   'block=patch("urllib.request.urlopen",side_effect=RuntimeError("network disabled during tests")); '
-                   'block.start(); result=unittest.TextTestRunner(verbosity=1).run(suite); '
-                   'import sys; live=Path(%r).resolve(); '
-                   'leaked=sorted(n for n,m in list(sys.modules.items()) if getattr(m,"__file__",None) and Path(m.__file__).resolve().parent==live); '
-                   'print("live modules imported during tests: "+(", ".join(leaked) or "none")); '
-                   'raise SystemExit(not result.wasSuccessful())' % str(args.private_root)]
+                   'import test_review_gate as harness; raise SystemExit(harness.python_suite(%r))'
+                   % str(args.private_root)]
         python = subprocess.run(command, cwd=staged)
         if args.python_only: return python.returncode
         deno = shutil.which('deno') or str(Path.home() / '.deno/bin/deno')

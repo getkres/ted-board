@@ -197,8 +197,11 @@ python3 deploy_review_gate.py --bundle PRIVATE_BUNDLE
 python3 test_review_gate.py --bundle PRIVATE_BUNDLE
 ```
 
-Tests reconstruct the private overlay in a temporary directory. Python HTTP is
-disabled, and Deno uses database fakes. Only Ted, after reviewing the PR and
+Tests reconstruct the private overlay in a temporary directory, discover both
+`*_test.py` and `test_*.py`, and resolve local runtime imports from that snapshot
+even when sibling integrations modify the Python path. Any remaining import
+from the live runtime fails verification. Python HTTP is disabled before test
+discovery, and Deno uses database fakes. Only Ted, after reviewing the PR and
 private bundle, runs the local rollout with a private backup:
 
 ```sh
