@@ -10,6 +10,8 @@ import live_status
 import mockup_upload
 import sessions
 from review_gate import ReviewBlocked
+try: import reconciler_card
+except ImportError: reconciler_card = None
 from review_unit_fixtures import collect_approvals, status_module
 
 
@@ -107,5 +109,36 @@ class AdapterTests(unittest.TestCase):
                 self.assertIn('receipt recorded by the worker',send.call_args.args[2])
                 self.assertNotIn('card reply',send.call_args.args[2])
 
+
+    def test_runner_notices_pass_but_model_text_needs_review(self):
+        import review_gate
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'sessions.json').write_text(json.dumps({'sessions': {}}))
+            review_gate.validate_reply('x', 'Approval needed: Send the exact drafted email. Review the exact content on this card.', tmp)
+            review_gate.validate_reply('x', 'Job stop queued for the reconciler.', tmp)
+            for text in ('Approval needed: wire 5000 dollars. Review the exact content on this card.', 'Here is the client email.'):
+                with self.assertRaises(ReviewBlocked): review_gate.validate_reply('x', text, tmp)
+
+    def test_reconciler_needs_you_card_requires_review(self):
+        if reconciler_card is None: self.skipTest('reconciler not installed')
+        with tempfile.TemporaryDirectory() as tmp, patch.object(reconciler_card, 'resolve_rule') as rule, \
+                patch.object(reconciler_card, 'urlopen_json') as send:
+            cwd = Path.cwd()
+            try:
+                __import__('os').chdir(tmp)
+                with self.assertRaises(ReviewBlocked):
+                    reconciler_card.create('Ted ops', 'Pick one', 'choose the copy', needs_you=True, kind='other')
+            finally: __import__('os').chdir(cwd)
+            rule.assert_not_called(); send.assert_not_called()
+
+    def test_heartbeat_drops_a_stale_approval_and_keeps_jobs(self):
+        import board_client
+        approvals = [{'id': 'a', 'card_id': 'missing'}]
+        with patch.object(board_client, 'load_env', return_value={'TED_DECISIONS_KEY': 'k', 'TED_DECISIONS_WORKER_KEY': 'k'}), \
+                patch.object(board_client, 'urlopen_json', return_value={'ok': True}) as send, \
+                patch('review_gate.validate_approval_payload', side_effect=ReviewBlocked('stale')):
+            board_client.call('heartbeat', jobs=[{'id': 'j'}], approvals=approvals)
+        body = json.loads(send.call_args.args[0].data)
+        self.assertEqual(body['approvals'], []); self.assertEqual(body['jobs'], [{'id': 'j'}])
 
 if __name__ == '__main__': unittest.main()

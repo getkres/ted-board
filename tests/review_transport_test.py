@@ -15,12 +15,17 @@ class TransportTests(unittest.TestCase):
         examples = [
             ('ted_reply', {'card_id': 'unreviewed-fixture', 'text': 'Unreviewed report.'}),
             ('veto_mark', {'card_id': 'unreviewed-fixture', 'draft_text': 'Unreviewed draft.'}),
-            ('heartbeat', {'jobs': [], 'approvals': [{'card_id': 'unreviewed-fixture', 'kind': 'email'}]}),
         ]
         for action, body in examples:
             with self.subTest(action=action), patch.object(board_client, 'load_env', return_value={}) as secrets:
                 with self.assertRaises(gate.ReviewBlocked): board_client.call(action, **body)
                 secrets.assert_not_called()
+        # A stale approval is dropped so job statuses still publish; it never leaves the machine.
+        keys = {'TED_DECISIONS_KEY': 'k', 'TED_DECISIONS_WORKER_KEY': 'k'}
+        with patch.object(board_client, 'load_env', return_value=keys), \
+                patch.object(board_client, 'urlopen_json', return_value={'ok': True}) as send:
+            board_client.call('heartbeat', jobs=[], approvals=[{'card_id': 'unreviewed-fixture', 'kind': 'email'}])
+        self.assertEqual(__import__('json').loads(send.call_args.args[0].data)['approvals'], [])
 
     def test_unreviewed_pod_pulse_is_not_published(self):
         row = {'pod_id': 'fixture', 'project': 'Ted ops'}

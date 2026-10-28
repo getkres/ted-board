@@ -6,6 +6,7 @@ arbitrary access to the worker's filesystem or production credentials.
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import textwrap
 
@@ -261,12 +262,40 @@ def validate_pod(pod_dir, project):
     validate_payload(job, 'pod-status.json', status, project=project)
 
 
+RUNNER_NOTICES = frozenset((
+    'Ted review: the approval artifact is unsafe, unreadable, or over 60 KB. Ted will repair the packet.',
+    'Ted review: a worker failed. Ted owns bounded recovery from the job files.',
+    'Ted review: a worker failed. Ted owns recovery from the job files. Timeout and missing-result work gets one automatic retry, then holds for Ted.',
+    'Ted recovery: the card reached its lifetime automatic dispatch limit.',
+    'The approved artifact changed. Execution refused. Reply to prepare a fresh approval.',
+    'Ted review: a prepared packet needs operational review. It is not a Sebastian decision.',
+    'Job stop queued for the reconciler.',
+    'Job stop requested.',
+    'Job is already stopped, or process identity changed.',
+))
+APPROVAL_NOTICE = re.compile(r'Approval needed: (?:Apply database SQL after a fresh safety review|Send the exact drafted email|Execute the exact proposed spend)\. Review the exact content on this card\.')
+
+
+def runner_notice(text):
+    """Fixed runner text carries no model output, so it needs no content review."""
+    if not isinstance(text, str): return False
+    if text in RUNNER_NOTICES or APPROVAL_NOTICE.fullmatch(text): return True
+    try:
+        templates = json.loads((Path(__file__).resolve().parent / 'runner_failure_templates.json').read_text())
+        failures = list(templates['failures'].values())
+        recoveries = [''] + list(templates.get('recovery', {}).values())
+        return any(text == failure + recovery for failure in failures for recovery in recoveries)
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return False
+
+
 def validate_reply(card_id, text, jobs_root=None):
+    if runner_notice(text): return
     root = Path(jobs_root) if jobs_root is not None else Path(__file__).resolve().parent / 'jobs'
     validate_card(card_id, root)
     try:
         session = load_json(root / 'sessions.json')['sessions'][card_id]
-        validate_review(session['cwd'], required_paths=['final-answer.txt'])
+        validate_review(session['cwd'], required_paths=['final-answer.txt', 'REPORT.md'])
         final = local_file(session['cwd'], 'final-answer.txt').read_text().replace(chr(8212), '-')[:2000]
         if text != final: raise blocked()
     except (OSError, KeyError): raise blocked() from None

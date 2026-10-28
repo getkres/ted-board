@@ -43,7 +43,10 @@ def main(argv=None):
                    'suite=unittest.defaultTestLoader.discover("tests",pattern="*_test.py"); '
                    'block=patch("urllib.request.urlopen",side_effect=RuntimeError("network disabled during tests")); '
                    'block.start(); result=unittest.TextTestRunner(verbosity=1).run(suite); '
-                   'raise SystemExit(not result.wasSuccessful())']
+                   'import sys; live=Path(%r).resolve(); '
+                   'leaked=sorted(n for n,m in list(sys.modules.items()) if getattr(m,"__file__",None) and Path(m.__file__).resolve().parent==live); '
+                   'print("live modules imported during tests: "+(", ".join(leaked) or "none")); '
+                   'raise SystemExit(not result.wasSuccessful())' % str(args.private_root)]
         python = subprocess.run(command, cwd=staged)
         if args.python_only: return python.returncode
         deno = shutil.which('deno') or str(Path.home() / '.deno/bin/deno')
