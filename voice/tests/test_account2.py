@@ -55,6 +55,7 @@ if args[:2] == ["auth", "status"]:
         pathlib.Path(__file__).unlink()
         (root / "fail_before_child").unlink()
     sys.exit(0)
+if (root / "exit_before_session").exists(): sys.exit(1)
 sid = args[args.index("--resume") + 1] if "--resume" in args else args[args.index("--session-id") + 1]
 request = json.loads(sys.stdin.read())
 if (root / "extra_rows").exists(): print("[]")
@@ -289,6 +290,28 @@ print(json.dumps({"type": "result", "session_id": sid, "is_error": error, "subty
         child.terminate.assert_called_once()
         child.kill.assert_called_once()
         self.assertEqual(child.wait.call_count, 2)
+
+    def test_first_child_exit_before_session_does_not_poison_future_resume(self):
+        from session import Offline
+
+        bridge = self.bridge()
+        failure = self.home / "exit_before_session"
+        failure.touch()
+        request = bridge.deliver("What is the status?")
+        with self.assertRaises(Offline):
+            request["future"].result(timeout=5)
+        state = json.loads((self.home / "claude-voice-session.json").read_text())
+        self.assertFalse(state["launched"])
+        failure.unlink()
+        fresh = bridge.deliver("What is the status now?")
+        self.assertEqual(fresh["future"].result(timeout=5), "Jabra voice loop is working.")
+        calls = [
+            json.loads(line)["args"]
+            for line in (self.home / "calls.jsonl").read_text().splitlines()
+        ]
+        turns = [args for args in calls if "-p" in args]
+        self.assertIn("--session-id", turns[-1])
+        self.assertNotIn("--resume", turns[-1])
 
 
 if __name__ == "__main__":

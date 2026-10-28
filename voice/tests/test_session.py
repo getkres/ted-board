@@ -126,6 +126,27 @@ class SessionTests(unittest.TestCase):
             p.write_text("[]\nnull\n{}\n")
             self.assertEqual(JsonlTail(p, 0).read(), [{}])
 
+    def test_meta_notice_with_marker_cannot_acknowledge_delivery(self):
+        import json
+
+        from core import ReplyCursor
+
+        with tempfile.TemporaryDirectory() as d:
+            bridge = SessionBridge.__new__(SessionBridge)
+            bridge.transcripts = Path(d)
+            path = bridge.transcripts / "main.jsonl"
+            meta = dict(type="user", isMeta=True, message=dict(content="held voice:abc"))
+            path.write_text(json.dumps(meta) + "\n")
+            self.assertFalse(bridge.acknowledged("main", "voice:abc"))
+            cursor = ReplyCursor("voice:abc")
+            cursor.feed(meta)
+            self.assertFalse(cursor.seen)
+            with path.open("a") as stream:
+                stream.write(
+                    json.dumps(dict(type="user", message=dict(content="[voice] voice:abc"))) + "\n"
+                )
+            self.assertTrue(bridge.acknowledged("main", "voice:abc"))
+
 
 if __name__ == "__main__":
     unittest.main()

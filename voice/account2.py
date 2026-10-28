@@ -20,7 +20,8 @@ SYSTEM = (
     "is unavailable or busy. Reply naturally in brief spoken prose, usually under 60 words. "
     "You may use only Read, Grep, and Glob in the four provided context directories. You cannot "
     "execute actions, send messages, spend money, or modify data. Requests for actions are "
-    "queued separately for main Ted. Never claim to have completed an action. Do not invoke "
+    "handled only by main Ted. Say you cannot perform actions from this fallback, and "
+    "never claim that you queued a request or completed an action. Do not invoke "
     "speech tools: the local loop speaks your final text. Never use an em dash, and always "
     "use the Oxford comma."
 )
@@ -220,6 +221,7 @@ class Account2Bridge:
 
     def _turn(self, request, env):
         proc = None
+        first_session_id = None
         try:
             self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
             self._verify_auth(env)
@@ -268,6 +270,8 @@ class Account2Bridge:
                 self.assert_current(sid)
                 # Record intent before starting, but undo it if no child was created.
                 previously_launched = self.state["launched"]
+                if not previously_launched:
+                    first_session_id = sid
                 self.state["launched"] = True
                 self._save()
                 try:
@@ -336,6 +340,21 @@ class Account2Bridge:
             with self.lock:
                 if self.process is proc:
                     self.process = None
+                if (
+                    proc is not None
+                    and first_session_id
+                    and not request["accepted"]
+                    and not self.closed
+                    and self.state["session_id"] == first_session_id
+                ):
+                    # Do not resume a first launch whose session creation was never
+                    # confirmed. A later distinct request starts fresh, without retrying this one.
+                    self.state.update(
+                        session_id=str(uuid.uuid4()),
+                        launched=False,
+                        previous_session_id=first_session_id,
+                    )
+                    self._save()
 
     def poll(self, request):
         self.assert_current(request["session_id"])

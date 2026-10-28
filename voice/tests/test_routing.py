@@ -166,9 +166,7 @@ class RoutingTests(unittest.TestCase):
         second.tick()
         self.assertEqual(len(self.main.sent), 1)
         self.assertEqual(self.main.sent[0]["text"], "Fix the deployment.")
-        self.assertEqual(
-            json.loads((self.home / "main-voice-queue.json").read_text())[0]["state"], "delivered"
-        )
+        self.assertEqual(json.loads((self.home / "main-voice-queue.json").read_text()), [])
 
     def test_main_recovers_before_deadline_without_fallback(self):
         self.main.online = False
@@ -207,9 +205,7 @@ class RoutingTests(unittest.TestCase):
         self.main.acknowledge(request["marker"])
         bridge.tick()
         self.assertTrue(request["main_delivered"])
-        self.assertEqual(
-            json.loads((self.home / "main-voice-queue.json").read_text())[0]["state"], "delivered"
-        )
+        self.assertEqual(json.loads((self.home / "main-voice-queue.json").read_text()), [])
         self.now += 5
         bridge.tick()
         self.assertEqual(len(self.main.sent), 1)
@@ -249,9 +245,7 @@ class RoutingTests(unittest.TestCase):
         self.main.acknowledge(request["marker"])
         second = self.bridge()
         second.tick()
-        self.assertEqual(
-            json.loads((self.home / "main-voice-queue.json").read_text())[0]["state"], "delivered"
-        )
+        self.assertEqual(json.loads((self.home / "main-voice-queue.json").read_text()), [])
         self.assertEqual(len(self.main.sent), 1)
 
     def test_uncertain_send_is_not_automatically_retried_after_restart(self):
@@ -429,6 +423,43 @@ class RoutingTests(unittest.TestCase):
         self.now = 20
         bridge.poll(request)
         self.assertEqual(bridge.poll(request), "The build is passing.")
+
+    def test_stale_pending_action_expires_across_restart_without_sending(self):
+        from unittest.mock import patch
+
+        self.main.online = False
+        wall = [1000.0]
+        with patch("routing.time.time", side_effect=lambda: wall[0]):
+            first = self.bridge()
+            first.deliver("Deploy the fix.")
+            first.close()
+            wall[0] = 1601.0
+            self.main.online = True
+            second = self.bridge()
+            second.tick()
+        self.assertEqual(self.main.sent, [])
+        entry = json.loads((self.home / "main-voice-queue.json").read_text())[0]
+        self.assertEqual(entry["state"], "expired")
+        self.assertEqual(entry["queued_at"], 1000.0)
+
+    def test_action_possibility_questions_are_queued_instead_of_claimed_by_fallback(self):
+        self.main.online = False
+        bridge = self.bridge()
+        for text in ("Is it possible to deploy the fix?", "Is there a way to send Bob the report?"):
+            request = bridge.deliver(text)
+            self.now += 20
+            notice = bridge.poll(request) or bridge.poll(request)
+            self.assertIsNotNone(notice)
+            self.assertIn("queued", notice.lower())
+        self.assertEqual(self.fallback.sent, [])
+
+    def test_confirmed_action_text_is_removed_from_persistent_queue(self):
+        bridge = self.bridge()
+        self.main.answer = "The local task is complete."
+        request = bridge.deliver("Fix the deployment.")
+        self.assertEqual(bridge.poll(request), "The local task is complete.")
+        self.assertTrue(request["main_delivered"])
+        self.assertEqual(json.loads((self.home / "main-voice-queue.json").read_text()), [])
 
 
 if __name__ == "__main__":

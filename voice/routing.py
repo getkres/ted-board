@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import math
 import os
 import re
 import threading
@@ -33,6 +34,10 @@ def asks_for_action(text):
     )
     if re.search(r"\b(?:can|could|would|will) you\b", lowered) or re.search(
         r"(?:^|[.!?;,]\s*|\b(?:and|then|also)\s+)(?:please\s+)?(?:" + verbs + r")\b", lowered
+    ):
+        return True
+    if re.match(r"^is (?:it possible|there a way)\b", lowered) and re.search(
+        r"\b(?:" + verbs + r")\b", lowered
     ):
         return True
     return not bool(
@@ -83,7 +88,7 @@ class RoutedBridge:
                     or not re.fullmatch(r"voice:[a-f0-9]{32}", entry["marker"])
                     or entry["marker"] in markers
                     or entry.get("state")
-                    not in ("pending", "dispatching", "uncertain", "delivered")
+                    not in ("pending", "dispatching", "uncertain", "delivered", "expired")
                 ):
                     raise ValueError()
                 markers.add(entry["marker"])
@@ -102,7 +107,9 @@ class RoutedBridge:
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
                 with os.fdopen(fd, "w") as stream:
-                    json.dump(self.queue, stream)
+                    json.dump(
+                        [entry for entry in self.queue if entry["state"] != "delivered"], stream
+                    )
                     stream.flush()
                     os.fsync(stream.fileno())
                 temporary.replace(self.path)
@@ -154,7 +161,9 @@ class RoutedBridge:
         self.assert_current(self.identity)
         request = self._request(text)
         if asks_for_action(text):
-            entry = dict(marker=request["marker"], text=text, state="pending")
+            entry = dict(
+                marker=request["marker"], text=text, state="pending", queued_at=time.time()
+            )
             with self.lock:
                 self.queue.append(entry)
                 self._save()
@@ -162,8 +171,27 @@ class RoutedBridge:
         self._submit(request)
         return request
 
+    def _expire_pending(self, entry):
+        if entry is None or entry["state"] != "pending":
+            return entry is not None and entry["state"] == "expired"
+        queued = entry.get("queued_at")
+        if (
+            type(queued) in (int, float)
+            and math.isfinite(queued)
+            and 0 <= time.time() - queued < 600
+        ):
+            return False
+        with self.lock:
+            entry["state"] = "expired"
+            self._save()
+        self.emit("voice_action_expired", marker=entry["marker"])
+        return True
+
     def _submit(self, request):
         if request["submit_future"] or request["socket_sent"] or request["uncertain"]:
+            return
+        if self._expire_pending(request["entry"]):
+            request["reason"] = "queued voice action expired"
             return
         request["next_attempt"] = self.clock() + 3
 
@@ -172,6 +200,8 @@ class RoutedBridge:
                 if self.closed:
                     raise Offline("voice router closed before dispatch")
                 entry = request["entry"]
+                if self._expire_pending(entry):
+                    raise Offline("queued voice action expired before dispatch")
                 if entry is not None:
                     entry.update(state="dispatching", session_id=main_request["session_id"])
                     self._save()
@@ -198,7 +228,9 @@ class RoutedBridge:
                 session_id=request["main_request"]["session_id"],
             )
         except (Offline, OSError, RuntimeError) as exc:
-            request["reason"] = str(exc)
+            request["reason"] = (
+                "main inbox filesystem unavailable" if isinstance(exc, OSError) else str(exc)
+            )
             entry = request["entry"]
             if isinstance(exc, DeliveryUncertain) or (entry and entry["state"] == "dispatching"):
                 request["uncertain"] = True
@@ -278,6 +310,11 @@ class RoutedBridge:
         )
         if entry is not None:
             request["accepted"] = True
+            if entry["state"] == "expired":
+                return self._finish(
+                    request,
+                    "That queued request expired. Please ask again when main Ted is available.",
+                )
             if request["uncertain"]:
                 return self._finish(
                     request,
@@ -332,7 +369,11 @@ class RoutedBridge:
                         )
                         return self._finish(request, reply)
                 except (Offline, OSError, RuntimeError) as exc:
-                    request["reason"] = str(exc)
+                    request["reason"] = (
+                        "main inbox filesystem unavailable"
+                        if isinstance(exc, OSError)
+                        else str(exc)
+                    )
         if self.clock() - request["started"] >= 20:
             return self._fallback(request)
         if self.clock() >= request["next_attempt"]:
@@ -361,6 +402,8 @@ class RoutedBridge:
                     self._collect_ack(request)
         for entry in self.queue:
             if entry["state"] != "pending":
+                continue
+            if self._expire_pending(entry):
                 continue
             request = self.requests.get(entry["marker"])
             if request is None:

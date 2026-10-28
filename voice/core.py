@@ -51,7 +51,7 @@ def wake_command(text: str):
         return "__pause__"
     stop = re.match(r"^(?:hey[ ,.!]*)?ted\b[ ,.!:]*stop\b[ ,.!:]*", text, re.I)
     if stop:
-        return text[stop.end():].strip() or "__interrupt__"
+        return text[stop.end() :].strip() or "__interrupt__"
     m = re.match(r"^hey[ ,.!]*ted\b[ ,.!:]*", text, re.I)
     return text[m.end() :].strip() if m else None
 
@@ -67,7 +67,8 @@ def spoken_echo(transcript: str, spoken: str) -> bool:
     if not source or len(re.findall(r"[a-z0-9]+", transcript.lower())) < 2:
         return False
     return (" " + heard + " ") in (" " + source + " ") or (
-        len(heard.split()) >= 4 and SequenceMatcher(None, heard, source, autojunk=False).ratio() >= 0.85
+        len(heard.split()) >= 4
+        and SequenceMatcher(None, heard, source, autojunk=False).ratio() >= 0.85
     )
 
 
@@ -76,7 +77,10 @@ def wake_retry_plausible(text: str) -> bool:
     if any(mark in text for mark in "()[]"):
         return False
     return tuple(re.findall(r"[a-z]+", text.lower())) in {
-        ("third", "storm"), ("ted", "storm"), ("ted", "stone"), ("fed", "stop"),
+        ("third", "storm"),
+        ("ted", "storm"),
+        ("ted", "stone"),
+        ("fed", "stop"),
     }
 
 
@@ -97,11 +101,20 @@ class ReplyCursor:
             return None
         content = msg.get("content", [])
         parts = content if isinstance(content, list) else []
-        text = content if isinstance(content, str) else "\n".join(
-            p.get("text", "") for p in parts
-            if isinstance(p, dict) and p.get("type") == "text" and isinstance(p.get("text"), str)
+        text = (
+            content
+            if isinstance(content, str)
+            else "\n".join(
+                p.get("text", "")
+                for p in parts
+                if isinstance(p, dict)
+                and p.get("type") == "text"
+                and isinstance(p.get("text"), str)
+            )
         )
         if row.get("type") == "user":
+            if row.get("isMeta"):
+                return None
             if re.search(r"(?<![\w:])" + re.escape(self.marker) + r"(?![\w:-])", text):
                 self.seen = True
                 return None
