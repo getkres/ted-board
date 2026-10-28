@@ -1,0 +1,69 @@
+{
+  "captured_utc": "2026-10-27T20:45:56.241505+00:00",
+  "host": "Teds-Mac-mini.local",
+  "service": "co.ted.voice",
+  "launchctl_exit": 0,
+  "service_started": {
+    "at": 1793133247.328817,
+    "event": "service_started"
+  },
+  "audio_ready": {
+    "at": 1793133714.1007302,
+    "event": "audio_ready",
+    "output_id": 94,
+    "capture": true,
+    "echo_cancellation": "jabra_usb_hardware",
+    "output_input_format": {
+      "common_format": 1,
+      "channels": 2,
+      "sample_rate": 44100,
+      "interleaved": false
+    },
+    "echo_cancelled": true,
+    "output_au_device": 94,
+    "capture_method": "audio_queue",
+    "microphone_permission": 3,
+    "default_output_id": 94,
+    "input_name": "Jabra Speak2 55 MS",
+    "default_input_id": 99,
+    "output_name": "Jabra Speak2 55 MS",
+    "output_hardware_format": {
+      "common_format": 1,
+      "interleaved": false,
+      "channels": 2,
+      "sample_rate": 48000
+    },
+    "input_id": 99
+  },
+  "capture_audio_ready": {
+    "at": 1793133714.094594,
+    "event": "capture_audio_ready",
+    "microphone_permission": 3,
+    "input_device_uid": "AppleUSBAudioEngine:QTIL:Jabra Speak2 55 MS:6CFBED9B449B:1",
+    "input_name": "Jabra Speak2 55 MS",
+    "capture_format": {
+      "sample_rate": 16000,
+      "channels": 1,
+      "format_flags": 12,
+      "bits_per_channel": 16,
+      "format_id": 1819304813,
+      "bytes_per_frame": 2
+    },
+    "capture_method": "audio_queue",
+    "input_id": 99
+  },
+  "capture_failures_since_start": [
+    {
+      "at": 1793133686.55072,
+      "event": "audio_retry"
+    },
+    {
+      "at": 1793133700.248786,
+      "event": "audio_retry"
+    }
+  ],
+  "healthy": true,
+  "recovered_after_capture_failure": true,
+  "queue_count": 0,
+  "diagnostic_markers_present": []
+}

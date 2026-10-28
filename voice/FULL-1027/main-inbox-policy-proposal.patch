@@ -1,0 +1,11 @@
+--- a/fresh_ted.py
++++ b/fresh_ted.py
+@@ -321,7 +321,7 @@
+   else:
+    prompt="you are Ted, fresh shift. read ~/ted-ops/ted-state/HANDOFF-TODAY.md, AGENTS.md, and MEMORY.md, then message Sebastian a 3-line hello with what's open. Do not launch other work during startup. After reading and sending the hello, confirm startup by running this exact command using Bash: "+shlex.join(command)+'. Then wait for Sebastian.'
+   if not self.test:prompt+=' MEMORY.md is at '+str(TRANSCRIPTS/'memory/MEMORY.md')+'.'
+-  try:output=cli('--bg',*(['--resume',resume['sessionId']] if resume else []),'--remote-control',state['name'],'-n',state['name'],'--permission-mode','bypassPermissions',prompt,timeout=60)
++  try:output=cli('--bg',*(['--resume',resume['sessionId']] if resume else []),'--remote-control',state['name'],'-n',state['name'],'--permission-mode','bypassPermissions',*(['--settings','{"crossSessionInbound":"accept"}'] if not self.test else []),prompt,timeout=60)
+   except (FileNotFoundError,PermissionError):raise LaunchRejected('Claude executable could not be started') from None
+   except LaunchRejected:
+    existing=self.discover(state)

@@ -1,0 +1,50 @@
+# Voice validation, 2026-10-23
+
+Delivery state: blocked pending reliable room wake confirmation, PR review, and Ted's live wake and reply acceptance. The installed KeepAlive agent is running on the Mac mini with the connected Jabra and granted microphone access.
+
+## Silent PCM follow-up, late 2026-10-23
+
+- Reproduced the reported failure with the real Jabra and the production launchd daemon. The native tap delivered nonzero samples and the converter reported normal frame counts and zero conversion errors, while the final 16 kHz mono PCM had RMS 0, peak 0, VAD ratio 0, and maximum wake score 0.000203. Startup alone had therefore been an insufficient acceptance check.
+- Set the AVAudioConverter channel map explicitly to `[0]`, copying the processed microphone channel into mono. The implicit three-channel downmix on this route had emitted digital silence. Echo processing stays enabled, bypass stays false, and input mute stays false. The Jabra input and output defaults and the matched 16 kHz graph remain unchanged.
+- Added opt-in five-second PCM health summaries at the daemon boundary and native channel and conversion summaries. Debug wake verification records match booleans and word counts only. No diagnostic PCM or recognized speech is retained. The new behavioral test checks hand-calculated RMS, VAD ratio, maximum score, zero-sample reporting, and window reset.
+- Played locally synthesized clips from the Mac mini Speakers, device 88, into the room while capture and assistant output remained on the Jabra. At 1792820276.376, the recorded “hey Ted, what's open today?” clip produced wake_candidate at 0.99949. At 1792820277.919, local confirmation produced wake and the listen chime. The corresponding five-second PCM RMS was 0.1039602, VAD voiced ratio was 0.9879, and maximum wake score was 0.999925. The test paused capture before sending the synthetic question to Ted.
+- This success is not repeatable acceptance. Multiple short standalone clips failed local confirmation, and a repeat of the wake-and-question clip on the final build also failed confirmation. Some tests produced candidates, while others did not satisfy the existing neural gate. A controlled temporary capture was rejected by both small.en and medium.en. That comparison retained only word counts and match booleans, then deleted its temporary WAV.
+- The standalone source clips pass the wake model offline above 0.9999. This separates the fixed zero-PCM conversion problem from the remaining room playback and confirmation problem. Its cause is not established. Thresholds, the local confirmation requirement, and echo processing were not relaxed to make a test pass.
+- Two diagnostic trials ran before actual audio readiness during launchd warmup and are excluded from acceptance evidence. Subsequent tests waited for audio_ready and flowing PCM before playback. launchd running is not an audio-readiness signal.
+- A near-field spoken check was requested through Ted, with no confirmed spoken response during this run. Ted must ask Sebastian to say “hey Ted” near the Jabra and correlate that exact moment with the debug events. PR review, reliable standalone wake acceptance, live inbox delivery, reply playback, and physical barge-in remain open.
+- Current suite: 39 tests discovered, 38 passed, and one optional two-chime native test skipped. Ruff and formatting pass. The offline Data API guard checks zero future migrations, and its 17 regression tests pass. The native helper was rebuilt, ad hoc signed, and installed under the unchanged approved app launcher. No security settings, paid calls, or database SQL were used.
+
+## Jabra startup repair, 2026-10-23
+
+- Reproduced startup failure on the real hardware: NSError domain `com.apple.coreaudio.avfaudio`, code `-10875`. The original graph had an input client format of 16 kHz and three channels, an output client format of 44.1 kHz and two channels, and invalid zero-rate hardware formats after assigning separate devices to the shared voice-processing audio unit.
+- Select Jabra as the system default input and output before creating the engine. Remove per-node `CurrentDevice` assignments, and connect the mixer to the output using the input node's output format. No sample-rate setting was forced on the USB hardware.
+- Actual launchd `events.jsonl` now records `audio_ready`, `capture: true`, and `echo_cancelled: true`. Input ID 99 and output ID 94 both name Jabra Speak2 55 MS. Both graph sides are 16 kHz, float32, and three channels. Output hardware is 16 kHz stereo. The shared unit reports output device 94 on both nodes, while the system default input remains Jabra input 99.
+- Default output changed from Mac mini Speakers, ID 88, to Jabra, ID 94. Default input remains Jabra, ID 99. The service remains running without a pause marker after the test.
+- Exactly one listen-tone playback was commanded through the installed helper under the microphone-approved app supervisor. It reported `playback_started` and `playback_done` with the Jabra duplex route active. This verifies software playback completion, not a human listening assessment.
+- Rebuilt and ad hoc signed the separate audio helper. Preserved the approved app launcher and Info.plist byte for byte, verified both signatures, and registered the app through LaunchServices. No microphone reapproval or system security change was needed.
+- Native NSError and route fields now reach the rotating event log instead of being discarded by the Python adapter. Regression tests cover metadata forwarding and preservation of the approved launcher during updates.
+- Current suite: 38 tests discovered, 37 passed, and one optional two-chime native test skipped to honor the one-chime limit. Ruff passes. The offline grants guard checks zero future migrations, and its 17 regression tests pass. No SQL was applied.
+- No wake phrase, live Ted message, transcription benchmark, speech synthesis, or account API call was initiated in this hardware repair. The existing Brian approval was temporarily held during diagnostics and restored unchanged. Physical echo rejection, barge-in, live delivery, and reply playback remain for Ted.
+
+## Previous virtual validation, 2026-10-22
+
+- 36 behavioral and native output tests pass in the durable Python 3.11 environment.
+- Six held-out wake clips pass: Daniel and Samantha at 140, 180, and 220 words per minute.
+- Two held-out stop clips pass: Daniel and Samantha saying "Ted, stop listening."
+- Final background input: 1,800 seconds, consisting of 10 minutes of held-out LibriSpeech, 10 minutes of unseen SoundHelix Song 2, and 10 minutes mixed. Zero confirmed false wakes. All 46 neural candidates were rejected by local Whisper before a chime or playback interruption.
+- This was an accelerated virtual-input run, processed in 48.706 seconds. It was not 30 wall-clock minutes of room microphone audio, and it does not establish a household false-trigger rate.
+- Initial unverified model testing exposed frequent music candidates. The final model adds music negatives, uses VAD gating and 0.95/0.99 thresholds, and requires local Whisper confirmation. Its 15,436 training examples include 2,400 synthetic positive clips, 1,500 confusable clips, negative speech, music, and mixed speech.
+- Whisper cold benchmark on the same clip: small.en 0.564 seconds, and medium.en 1.846 seconds. Both transcribed the wake and question exactly. The final replay's medium.en pass took 0.740 seconds.
+- Virtual end-to-end replay uses real wake inference, VAD, local Whisper, the state machine, tones, and Mac mini speaker playback. Ted's reply is explicitly stubbed. Neural candidate to confirmed wake: 1.442 seconds. Candidate to speech dispatch: 6.771 seconds. Speaker playback completed 14.472 seconds after test startup, including speech duration. These are local pipeline measurements, not live Ted latency.
+- Native playback stop control was measured at 0.0027 seconds to completion. Physical barge-in detection and Jabra echo rejection remain untested.
+- The live inbox socket accepted a write in 0.160 seconds, but no correlated user entry or reply appeared within 180 seconds. The installed CLI holds unregistered peers without a permission-mode assertion when Ted uses bypass mode. The adapter now reports submission separately from transcript-confirmed delivery and refuses a session already waiting at a permission prompt. No inbox security setting was changed.
+- On 10-22, CoreAudio reported two outputs and no input devices, and microphone consent was not determined. This is superseded by the 10-23 Jabra results above.
+- ElevenLabs calls were not made. Brian was subsequently approved for seven days using existing credits and $0 in new charges. Its installed ISO expiry marker is now recognized, alongside legacy Unix timestamps. The daily cap and no-overage subscription guard remain required. All audio testing used local speech; the follow-up made no API call.
+
+Model SHA-256: `68f66ae5eec9e304eb00d41c726e6778289cbb2fb2f9c0369b9e471ef17760f1`.
+
+Private evidence is retained in the card job's artifacts directory. No private transcript, session identifier, recorded user voice, or secret is included in this PR.
+
+Review acceptance: resolve the voice sender's inbox admission through the supported CLI approval flow, run live wake and correlated reply playback, honor the existing credit approval, and assess room echo rejection and physical barge-in.
+
+Follow-up handoff: the card is Up next. Ted owns inbox admission and live wake and reply testing. Sebastian has already granted microphone access, and no further physical setup is requested.

@@ -1,0 +1,65 @@
+{
+  "seed": 20261022,
+  "positive_clips": 2400,
+  "confusable_clips": 1500,
+  "train_examples": 15436,
+  "validation_examples": 869,
+  "validation_loss": 0.010411103256046772,
+  "thresholds": {
+    "0.5": {
+      "positive_recall": 0.9944444444444445,
+      "negative_false_positive_fraction": 0.0
+    },
+    "0.7": {
+      "positive_recall": 0.9916666666666667,
+      "negative_false_positive_fraction": 0.0
+    },
+    "0.8": {
+      "positive_recall": 0.9916666666666667,
+      "negative_false_positive_fraction": 0.0
+    },
+    "0.9": {
+      "positive_recall": 0.9888888888888889,
+      "negative_false_positive_fraction": 0.0
+    },
+    "0.95": {
+      "positive_recall": 0.9888888888888889,
+      "negative_false_positive_fraction": 0.0
+    }
+  },
+  "training_speakers": [
+    "1089",
+    "1188",
+    "121",
+    "1221",
+    "1284",
+    "1320",
+    "1580",
+    "1995",
+    "2094",
+    "2300",
+    "237",
+    "260",
+    "2830",
+    "2961",
+    "3570",
+    "3575",
+    "3729",
+    "4077",
+    "4446",
+    "4507",
+    "4970",
+    "4992",
+    "5105",
+    "5142",
+    "5639",
+    "5683",
+    "61",
+    "672"
+  ],
+  "music_sources": [
+    "background-music.wav",
+    "background-train-extra.wav"
+  ],
+  "note": "Synthetic holdout, not a room or user-voice acceptance test."
+}

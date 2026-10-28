@@ -1,0 +1,60 @@
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:137:55: warning: 'audioUnit' was deprecated in macOS 27.0: Deprecated in favor of withAudioUnit [#DeprecatedDeclaration]
+135 | let player = AVAudioPlayerNode()
+136 | do {
+137 |     guard outputID != 0, let unit = engine.outputNode.audioUnit else { throw NSError(domain: "no-output", code: 75) }
+    |                                                       `- warning: 'audioUnit' was deprecated in macOS 27.0: Deprecated in favor of withAudioUnit [#DeprecatedDeclaration]
+138 |     var selectedOutput = outputID
+139 |     let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &selectedOutput, UInt32(MemoryLayout<AudioDeviceID>.size))
+
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:144:8: warning: 'connect(_:to:format:)' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+142 | } catch { eventError("device_selection_failed", error); exit(75) }
+143 | engine.attach(player)
+144 | engine.connect(player, to: engine.mainMixerNode, format: nil)
+    |        `- warning: 'connect(_:to:format:)' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+145 | let outputFormat = engine.outputNode.inputFormat(forBus: 0)
+146 | engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)
+
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:146:8: warning: 'connect(_:to:format:)' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+144 | engine.connect(player, to: engine.mainMixerNode, format: nil)
+145 | let outputFormat = engine.outputNode.inputFormat(forBus: 0)
+146 | engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)
+    |        `- warning: 'connect(_:to:format:)' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+147 | var inputQueue: AudioQueueRef?
+148 | var inputUID: CFString = "" as CFString
+
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:265:28: warning: 'play()' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+263 |                 }
+264 |                 if op == "resume", row["play_id"] as? String == playbackID {
+265 |                     player.play()
+    |                            `- warning: 'play()' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+266 |                     var fields = playbackFields(); fields["stop_id"] = row["stop_id"]
+267 |                     event("playback_resumed", fields)
+
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:56:27: warning: 'audioUnit' was deprecated in macOS 27.0: Deprecated in favor of withAudioUnit [#DeprecatedDeclaration]
+ 54 | }
+ 55 | func currentDevice(_ node: AVAudioIONode) -> UInt32 {
+ 56 |     guard let unit = node.audioUnit else { return 0 }
+    |                           `- warning: 'audioUnit' was deprecated in macOS 27.0: Deprecated in favor of withAudioUnit [#DeprecatedDeclaration]
+ 57 |     var device: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
+ 58 |     AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, &size)
+
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:236:16: warning: 'connect(_:to:format:)' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+234 |         player.stop()
+235 |         engine.disconnectNodeOutput(player)
+236 |         engine.connect(player, to: engine.mainMixerNode, format: file.processingFormat)
+    |                `- warning: 'connect(_:to:format:)' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+237 |         player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { _ in
+238 |             DispatchQueue.main.async { if generation == playbackGeneration { event("playback_done", playbackFields()); if args.contains("--play") { exit(0) } } }
+
+/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/Audio.swift:240:16: warning: 'play()' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+238 |             DispatchQueue.main.async { if generation == playbackGeneration { event("playback_done", playbackFields()); if args.contains("--play") { exit(0) } } }
+239 |         }
+240 |         player.play(); event("playback_started", playbackFields())
+    |                `- warning: 'play()' was deprecated in macOS 27.0 [#DeprecatedDeclaration]
+241 |     } catch { event("playback_failed", ["play_id": playID]) }
+242 | }
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Users/vahallo/ted-ops/voice/bin/TedVoiceAudio: replacing existing signature
+/Users/vahallo/Library/LaunchAgents/co.ted.voice.plist: OK
+voice installation staged on the mini

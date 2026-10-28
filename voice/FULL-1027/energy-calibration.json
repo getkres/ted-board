@@ -1,0 +1,263 @@
+{
+  "recorded_at": "2026-10-27T20:26:10.554748+00:00",
+  "purpose": "Calibration of the playback-only recent-frame energy floor using two known external-stop captures and one known false playback candidate. No transcripts are included.",
+  "format": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "pcm_bits": 16,
+    "frame_samples": 1280,
+    "frame_seconds": 0.08,
+    "rms_reference": 32768
+  },
+  "alignment": {
+    "preroll_frames": 30,
+    "post_trigger_tail_frames": 8,
+    "total_capture_frames": 38,
+    "trigger_frame_index_zero_based": 29,
+    "guard_frame_indices_zero_based": [
+      26,
+      27,
+      28,
+      29
+    ],
+    "basis": "The candidate is created after appending its trigger frame to the 30-frame preroll. These are the same four frames available to the gate at that instant, not the loudest later portion of the recording."
+  },
+  "floor": {
+    "dbfs": -45,
+    "normalized_rms": 0.005623413251903491,
+    "scope": "Playback and provisionally paused playback only. Idle wake admission is unchanged."
+  },
+  "clips": [
+    {
+      "label": "true_stop_1",
+      "original_private_path": "/Users/vahallo/ted-ops/voice/FULL-1027/private-diagnostics/bare-stop-candidate.wav",
+      "wav_sha256": "a1db697b22c0480e45f6322e8ae86c186a1a91a9122debd3010851425a1a5031",
+      "audio_seconds": 3.04,
+      "trigger_recent_four_frames": [
+        {
+          "frame_index_zero_based": 26,
+          "start_seconds": 2.08,
+          "end_seconds": 2.16,
+          "rms": 0.0029929758361981703,
+          "rms_dbfs": -50.477935788476216
+        },
+        {
+          "frame_index_zero_based": 27,
+          "start_seconds": 2.16,
+          "end_seconds": 2.24,
+          "rms": 9.621056738614607e-05,
+          "rms_dbfs": -80.33554448326791
+        },
+        {
+          "frame_index_zero_based": 28,
+          "start_seconds": 2.24,
+          "end_seconds": 2.32,
+          "rms": 0.0007419193914482972,
+          "rms_dbfs": -62.59286555347358
+        },
+        {
+          "frame_index_zero_based": 29,
+          "start_seconds": 2.32,
+          "end_seconds": 2.4,
+          "rms": 0.05891123767137779,
+          "rms_dbfs": -24.596037060743242
+        }
+      ],
+      "max_recent_rms_dbfs": -24.596037060743242,
+      "passes_energy_floor": true
+    },
+    {
+      "label": "true_stop_2",
+      "original_private_path": "/Users/vahallo/ted-ops/voice/FULL-1027/private-diagnostics/calibrated-1793131683/1793131692678962000-2f1861e6e9934e0ebd8dd4c545808293.wav",
+      "wav_sha256": "a57d6d8a88431d148cbbf2b9d0f88d5392d160153b561b97281440055159bdf1",
+      "audio_seconds": 3.04,
+      "trigger_recent_four_frames": [
+        {
+          "frame_index_zero_based": 26,
+          "start_seconds": 2.08,
+          "end_seconds": 2.16,
+          "rms": 0.004823429014912219,
+          "rms_dbfs": -46.332882169719845
+        },
+        {
+          "frame_index_zero_based": 27,
+          "start_seconds": 2.16,
+          "end_seconds": 2.24,
+          "rms": 0.0001235043219582786,
+          "rms_dbfs": -78.16635688536748
+        },
+        {
+          "frame_index_zero_based": 28,
+          "start_seconds": 2.24,
+          "end_seconds": 2.32,
+          "rms": 2.38837827186562e-05,
+          "rms_dbfs": -92.43793776882866
+        },
+        {
+          "frame_index_zero_based": 29,
+          "start_seconds": 2.32,
+          "end_seconds": 2.4,
+          "rms": 0.03505175486953528,
+          "rms_dbfs": -29.105804683146307
+        }
+      ],
+      "max_recent_rms_dbfs": -29.105804683146307,
+      "passes_energy_floor": true
+    },
+    {
+      "label": "false_candidate_1",
+      "original_private_path": "/Users/vahallo/ted-ops/voice/FULL-1027/private-diagnostics/focused-replay-1793130152/1793130184488344000-16cddc45d6f1437389a4297ca064f0cb.wav",
+      "wav_sha256": "fcd608cb8b351cc5f1ee3b106fbe458abc13682e0ffbbc9d7efc9b7173aef01f",
+      "audio_seconds": 3.04,
+      "trigger_recent_four_frames": [
+        {
+          "frame_index_zero_based": 26,
+          "start_seconds": 2.08,
+          "end_seconds": 2.16,
+          "rms": 0.00011449812412976772,
+          "rms_dbfs": -78.82403256984679
+        },
+        {
+          "frame_index_zero_based": 27,
+          "start_seconds": 2.16,
+          "end_seconds": 2.24,
+          "rms": 0.0005332668444528921,
+          "rms_dbfs": -65.46110834954806
+        },
+        {
+          "frame_index_zero_based": 28,
+          "start_seconds": 2.24,
+          "end_seconds": 2.32,
+          "rms": 0.0010037982816284315,
+          "rms_dbfs": -59.96707104217525
+        },
+        {
+          "frame_index_zero_based": 29,
+          "start_seconds": 2.32,
+          "end_seconds": 2.4,
+          "rms": 0.0011957177554498524,
+          "rms_dbfs": -58.447426435655856
+        }
+      ],
+      "max_recent_rms_dbfs": -58.447426435655856,
+      "passes_energy_floor": false
+    }
+  ],
+  "implementation": {
+    "source": "/Users/vahallo/ted-ops/ted-board/jobs/card-c-hey-ted-voice-1022/worktree/voice/loop.py",
+    "source_sha256": "e00390d721a8fbfe39749a4f10684eb644139bd535088e84a51c915ecc89db72",
+    "initial_gate": "VoiceLoop.feed requires recent VAD and recent energy before supplying a score to PlaybackGate.",
+    "late_gate": "A retained playback candidate requires recent VAD and recent energy after a real score reset, using the configured high score threshold.",
+    "supplemental_scan": "Playback supplemental stop-scan admission also requires recent energy.",
+    "unchanged_guards": [
+      "Configured wake-score threshold and consecutive hits",
+      "Recent voiced-audio requirement",
+      "Verified USB Jabra route",
+      "Whisper confirmation",
+      "Temporal source-audio echo rejection"
+    ],
+    "source_locations": {
+      "recent_frame_rms": "voice/loop.py:298",
+      "initial_playback_gate": "voice/loop.py:367",
+      "late_candidate_gate": "voice/loop.py:337",
+      "supplemental_scan_gate": "voice/loop.py:383"
+    }
+  },
+  "tests": [
+    "voice/tests/test_loop.py::test_candidate_pauses_playback_but_waits_for_confirmation_before_listening",
+    "voice/tests/test_loop.py::test_quiet_voiced_model_peak_cannot_pause_playback",
+    "voice/tests/test_loop.py::test_recent_speech_energy_preserves_wake_across_a_short_quiet_gap",
+    "voice/tests/test_loop.py::test_playback_energy_floor_does_not_change_idle_wake_admission",
+    "voice/tests/test_loop.py::test_quiet_model_peak_cannot_recheck_a_provisionally_paused_candidate",
+    "voice/tests/test_loop.py::test_borderline_noise_is_rejected_while_softer_true_voice_still_wakes"
+  ],
+  "source_verification": {
+    "command": "python3 -m unittest discover -s tests",
+    "working_directory": "voice",
+    "tests": 139,
+    "passed": true,
+    "native_skipped": 3,
+    "ruff": "Passed for loop.py and tests/test_loop.py",
+    "python_compilation": "Passed for loop.py",
+    "recorded_at": "2026-10-27T20:32:27.788222+00:00"
+  },
+  "limits": [
+    "This is a calibration sample of only two unique true-stop clips and one false candidate, not a room false-positive or false-negative rate.",
+    "Soft or distant voices and other microphone gains are not represented.",
+    "RMS dBFS is digital signal level, not calibrated physical audibility or acoustic SNR.",
+    "Louder environmental audio can exceed this floor, so amplitude is not a replacement for VAD, wake scoring, confirmation, or echo rejection.",
+    "The floor does not fix missed or low neural wake scores.",
+    "Original private files are temporary diagnostic material and may be deleted by root after this compact record is saved.",
+    "Latest observed true-event energy was as low as -36.35 dBFS at a qualifying score frame, leaving 8.65 dB margin to the current floor. This does not establish a margin for softer voices."
+  ],
+  "calibration_revisions": [
+    {
+      "recorded_at": "2026-10-27T20:32:27.788034+00:00",
+      "previous_floor_dbfs": -50,
+      "new_floor_dbfs": -45,
+      "basis": "One unintended candidate in no-interruption trial 3 crossed the prior floor at -49.84 dBFS on both qualifying score frames. Both latest verified baseline interruption pairs remain above -45 dBFS.",
+      "live_verified_baseline_pairs": [
+        {
+          "trigger_id": "9a106a0695d7436fbdb0d6c2f881c8e6",
+          "qualifying_frames": [
+            {
+              "at": 1793132663.5880268,
+              "score": 0.997144,
+              "recent_rms_dbfs": -20.28,
+              "voiced": true
+            },
+            {
+              "at": 1793132663.6522381,
+              "score": 0.999765,
+              "recent_rms_dbfs": -20.55,
+              "voiced": true
+            }
+          ],
+          "minimum_margin_above_new_floor_db": 24.45
+        },
+        {
+          "trigger_id": "cdece967705e47cf87116c5d6a5ca3ca",
+          "qualifying_frames": [
+            {
+              "at": 1793132770.946713,
+              "score": 0.990411,
+              "recent_rms_dbfs": -26.31,
+              "voiced": true
+            },
+            {
+              "at": 1793132771.0107698,
+              "score": 0.999833,
+              "recent_rms_dbfs": -36.35,
+              "voiced": true
+            }
+          ],
+          "minimum_margin_above_new_floor_db": 8.65
+        }
+      ],
+      "unintended_trial_candidate": {
+        "trial_id": "no-self-3-b637373a21ff4eec8ededa49246307e5",
+        "trigger_id": "b720883a2e6d41bca241ab899e34dfb3",
+        "qualifying_frames": [
+          {
+            "at": 1793132915.9676852,
+            "score": 0.999788,
+            "recent_rms_dbfs": -49.84,
+            "voiced": true
+          },
+          {
+            "at": 1793132916.0315578,
+            "score": 0.999779,
+            "recent_rms_dbfs": -49.84,
+            "voiced": true
+          }
+        ],
+        "source_position_seconds": 27.5414375,
+        "verification_words": 0,
+        "rejected_as": "unconfirmed",
+        "playback_resumed_at": 1793132923.079743,
+        "rejection_margin_below_new_floor_db": 4.84
+      },
+      "limit": "These live events were recorded with the prior -50 dBFS floor. Admission under -45 is a calculation from logged energy, not a new acoustic acceptance result."
+    }
+  ]
+}
