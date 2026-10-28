@@ -1,0 +1,223 @@
+/* Glass sky theme (BACKLOG-1028). Approved art: 08 Inbox night A and 12b Inbox day A, Origin sky.
+   Glass values come from the measured reference lock: 24px blur, 1px light edge, soft shadow, flat fills.
+   The sky is the only painted surface; UI chrome stays flat. Loads after theme.css and only changes tokens and surfaces. */
+:root[data-sky]{
+ --blur:24px;--onink-sky:#0c1328;
+ --v3-body:Archivo,Arial,sans-serif;--v3-display:Archivo,Impact,sans-serif;--v3-mono:'Courier Prime',monospace;--v3-hand:var(--v3-display);
+}
+:root[data-sky=night]{
+ color-scheme:dark;--sky-base:#0d1531;--chip-sky:rgba(255,255,255,.10);--chipedge-sky:rgba(255,255,255,.22);
+ --sky-ink:#f3f5fa;--sky-ink2:#d3dae9;--sky-rule:rgba(255,255,255,.22);
+ --glass:rgba(14,22,46,.58);--glass-solid:#131c39;--edge:rgba(255,255,255,.16);--edge-top:rgba(255,255,255,.24);--outer:transparent;--shadow:0 14px 36px rgba(2,6,22,.45);
+ --ink:#f3f5fa;--ink2:#d3dae9;--onink:#0c1328;--red:#c02e1b;--redink:#ffa596;--ring:#ff7a66;--chip-glass:rgba(255,255,255,.10);--chipedge-glass:rgba(255,255,255,.22);
+ --overlay:rgba(4,8,24,.72);
+}
+:root[data-sky=day]{
+ color-scheme:light;--sky-base:#1a6ea8;--chip-sky:rgba(6,40,84,.30);--chipedge-sky:rgba(255,255,255,.40);
+ /* Origin sky: deep cerulean, so type that sits straight on the sky is white, and type on glass is navy. */
+ --sky-ink:#ffffff;--sky-ink2:#ffffff;--sky-rule:rgba(255,255,255,.38);
+ --glass:rgba(255,255,255,.66);--glass-solid:#eef3f9;--edge:rgba(255,255,255,.75);--edge-top:rgba(255,255,255,.95);--outer:rgba(14,26,46,.12);--shadow:0 16px 40px rgba(4,30,64,.28);
+ --ink:#0e1a2e;--ink2:#1c283d;--onink:#ffffff;--red:#b52a18;--redink:#8f1f10;--ring:#b52a18;--chip-glass:rgba(255,255,255,.55);--chipedge-glass:rgba(14,26,46,.18);
+ --overlay:rgba(6,32,64,.62);
+}
+/* Page level: text that sits on the sky. */
+:root[data-sky]{
+ --bg:transparent;--text:var(--sky-ink);--muted:var(--sky-ink2);--line:var(--sky-rule);--raised:var(--chip);--card:var(--glass);--accent:var(--ring);--green:var(--ink);
+ --v3-ink:var(--sky-ink);--v3-light:var(--sky-ink);--v3-rule:var(--sky-rule);--v3-faint:var(--sky-rule);
+ --v3-paper:var(--onink);--v3-cream:var(--chip);--v3-wash:var(--chip);--v3-silver:var(--chip);--v3-white:#fff;
+ --v3-red:var(--red);--v3-hot:var(--ring);--v3-backdrop:var(--overlay);--v3-viewer:#0b1020;
+ background:var(--sky-base);
+ --chip:var(--chip-sky);--chipedge:var(--chipedge-sky);
+}
+/* Inside glass, the ink flips to the glass palette. */
+:root[data-sky] :is(.v3-paper:not(:has(.v3-projects)),.v3-home-spaces,body:not(.deciding) main:not(:has(.v3-hero)):not(:empty),footer,.masthead.v3-top,.v3-bubble,.v3-splits,.v3 .card,.v3-ticket,.v3-stream,.v3-detail,.v3-review,.v3-routine,.v3-row,.v3-attention,.v3-tools,.v3-call,
+ .sp-space-tile,.sp-pod-card,.sp-seat,.rm-item,.rm-col,.mk3-cover,.mk3-frame-card,.mk3-slot,.mk3-compare-view,.mk3-filters,.mockup-card,.mockup-panel,
+ .control-center,.board-control,.job-list>.card,.decide-card,.bp-panel,dialog,.mockup-dialog,.mk3-feedback,.mkup-dialog,#notice:not(:empty),.aging-banner:not([hidden]),.state,.loading,.datechip){
+ --chip:var(--chip-glass);--chipedge:var(--chipedge-glass);
+ --text:var(--ink);--muted:var(--ink2);--line:var(--chipedge);--v3-ink:var(--ink);--v3-light:var(--ink);--v3-rule:var(--chipedge);--v3-faint:var(--chipedge);
+ color:var(--ink);
+}
+
+body{background:transparent;color:var(--text)}
+/* The sky: fixed behind everything, cross-fades over 600ms, glass stays put. */
+.sky-layer{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:var(--sky-base)}
+.sky-art{position:absolute;inset:0;background:center/cover no-repeat;transition:opacity .6s ease;opacity:0}
+.sky-night{background-image:url('assets/sky/night.webp')}
+.sky-day{background-image:url('assets/sky/day-origin.webp');inset:0 -160px 0 0;animation:sky-drift 120s linear infinite alternate}
+:root[data-sky=night] .sky-night,:root[data-sky=day] .sky-day{opacity:1}
+.sky-stars i{position:absolute;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;border-radius:50%;background:#fff;box-shadow:0 0 4px 1px rgba(255,255,255,.6);opacity:0;animation:sky-twinkle var(--period) ease-in-out var(--delay) infinite}
+@keyframes sky-twinkle{0%,100%{opacity:0}50%{opacity:var(--lift)}}
+/* About 1.3px a second, left to right: one pass takes two minutes. */
+@keyframes sky-drift{from{transform:translateX(-160px)}to{transform:translateX(0)}}
+:root.sky-still .sky-stars i,:root.sky-still .sky-day{animation:none}
+:root.sky-still .sky-day{transform:translateX(-80px)}
+@media(prefers-reduced-motion:reduce){.sky-art{transition:none}.sky-stars i,.sky-day{animation:none}}
+
+/* Glass surfaces. Dense views sit on one glass sheet, like every small line in the approved frame. */
+:root[data-sky] :is(.v3-paper:not(:has(.v3-projects)),.v3-home-spaces,body:not(.deciding) main:not(:has(.v3-hero)):not(:empty),footer,.masthead.v3-top,.v3-bubble,.v3-splits,.v3 .card,.v3-ticket,.v3-stream,.v3-detail,.v3-attention,.v3-tools,.sp-space-tile,.sp-pod-card,.rm-item,.mk3-cover,.mk3-frame-card,.mk3-slot,.mk3-compare-view,.mockup-card,.mockup-panel,.control-center,.decide-card,.bp-panel,#notice:not(:empty),.aging-banner:not([hidden])){
+ background:var(--glass);-webkit-backdrop-filter:blur(var(--blur)) saturate(1.15);backdrop-filter:blur(var(--blur)) saturate(1.15);
+ border:1px solid var(--edge);border-top-color:var(--edge-top);box-shadow:0 0 0 1px var(--outer),var(--shadow);border-radius:20px;
+}
+/* Rows inside a glass column get their own inner padding. */
+:root[data-sky] :is(.v3-stream,.v3-detail,.v3-tools) .v3-decision{padding:14px 16px;margin:0 0 10px}
+/* Nested glass would double the blur and the fill, so inner panes go flat. */
+:root[data-sky] :is(.v3-paper:not(:has(.v3-projects)),.v3-home-spaces,body:not(.deciding) main:not(:has(.v3-hero)):not(:empty),footer,.v3-stream,.v3-detail,.control-center,.v3-tools,.mockup-panel) :is(.card,.v3-ticket,.v3-decision,.v3-stream,.v3-detail,.v3-tools,.v3-splits,.v3-bubble,.v3-attention,.sp-space-tile,.sp-pod-card,.rm-item,.mk3-cover,.mk3-frame-card,.mk3-slot,.mk3-compare-view,.mockup-card,.control-center,#notice:not(:empty)){background:var(--chip);-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none;border:1px solid var(--chipedge);border-radius:14px}
+
+/* Header slab. */
+:root[data-sky] .masthead.v3-top{margin-top:22px;padding:14px 20px;align-items:center;gap:10px}
+@media(min-width:1400px){:root[data-sky] .shell{padding:0 24px}:root[data-sky] .masthead.v3-top{flex-wrap:nowrap}:root[data-sky] .masthead .tab-wrap{flex:none;min-width:0}:root[data-sky] .masthead .v3-command{width:auto;flex:1 1 280px;min-width:150px;max-width:300px}:root[data-sky] .masthead .tab{font-size:17px;padding:7px 10px}:root[data-sky] .masthead .tabs{gap:2px}}
+:root[data-sky] .v3-logo{color:var(--ink);font-size:44px;font-weight:900;font-stretch:70%;letter-spacing:-1px}
+:root[data-sky] .masthead .tab-wrap{background:transparent;border:0}
+:root[data-sky] .tab{border:0;border-radius:14px;background:none;color:var(--ink);font-weight:800;font-stretch:75%;letter-spacing:.3px}
+:root[data-sky] .tab-count{color:var(--redink);font-family:var(--v3-mono);font-weight:700}
+:root[data-sky] .tab[aria-selected=true]{background:var(--ink);color:var(--onink)}
+:root[data-sky] .tab[aria-selected=true] .tab-count,:root[data-sky] .tab[aria-selected=true] .v3-attention-count{color:inherit}
+:root[data-sky] .tab:hover:not(:disabled):not([aria-selected=true]){background:var(--chip);color:var(--ink)}
+:root[data-sky] :is(.v3-command,.masthead button:not(.tab):not([role=radio]),.talk-ted,.sky-switch){border:1px solid var(--chipedge);background:var(--chip);color:var(--ink);border-radius:14px;box-shadow:none}
+:root[data-sky] .v3-command{height:44px;min-height:44px;font-size:13px;padding:0 12px}
+:root[data-sky] .talk-ted{border-radius:14px!important;white-space:nowrap;padding:0 14px}
+:root[data-sky] :is(.talk-ted,.fresh-ted) br{display:none}
+:root[data-sky] .fresh-ted{white-space:nowrap;padding:0 14px;min-height:44px}
+:root[data-sky] .v3-command::placeholder{color:var(--ink2)}
+:root[data-sky] .v3-command-results{background:var(--glass-solid);color:var(--ink);border:1px solid var(--edge);border-radius:14px;box-shadow:var(--shadow);--v3-ink:var(--ink);--text:var(--ink);--muted:var(--ink2)}
+:root[data-sky] .masthead button:not(.tab){font-weight:700;font-size:14px;white-space:nowrap}
+:root[data-sky] .masthead button:not(.tab):not([role=radio]):hover:not(:disabled),:root[data-sky] .talk-ted:hover{background:var(--ink);color:var(--onink);border-color:var(--ink)}
+:root[data-sky] #refresh{border-radius:14px}
+:root[data-sky] .fresh-ted,:root[data-sky] .fresh-ted.due{background:var(--red);color:#fff;border:1px solid transparent;border-radius:14px}
+:root[data-sky] .fresh-ted:hover:not(:disabled){background:var(--ink);color:var(--onink)}
+:root[data-sky] .ted-controls{gap:6px;flex-wrap:nowrap}
+.sky-controls{display:flex;align-items:center;gap:6px;flex:none}
+:root[data-sky] .sky-switch{display:flex;align-items:center;gap:2px;padding:3px;border-radius:22px;height:44px}
+:root[data-sky] .sky-switch button{min-height:36px;min-width:44px;height:36px;padding:0 12px;border:0;border-radius:18px;background:none;color:var(--ink);display:flex;align-items:center;gap:6px;font:700 13px var(--v3-body);white-space:nowrap}
+:root[data-sky] .sky-switch button[aria-checked=true]{background:var(--ink);color:var(--onink)}
+:root[data-sky] .sky-switch button:hover:not([aria-checked=true]){background:var(--chip);color:var(--ink)}
+:root[data-sky] .masthead .sky-still-toggle{min-height:44px;padding:0 12px;font-size:12px;border-radius:22px;white-space:nowrap}
+:root[data-sky] .masthead .sky-still-toggle[aria-pressed=true]{background:var(--ink);color:var(--onink);border-color:var(--ink)}
+:root[data-sky] .masthead .sky-still-toggle:disabled{opacity:1;cursor:default}
+
+/* Hero: straight on the sky. */
+:root[data-sky] .v3-headline{color:var(--sky-ink);font-stretch:68%;letter-spacing:-2px;padding-left:0}
+:root[data-sky] .v3-counter rect{fill:var(--red)}
+:root[data-sky] .v3-hero-copy:has(.v3-counter){display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;column-gap:0;row-gap:14px}
+:root[data-sky] .v3-hero-copy:has(.v3-counter) .v3-counter{grid-row:1/3;align-self:start;margin-right:28px}
+:root[data-sky] .v3-hero-copy:has(.v3-counter) .v3-headline{grid-column:2/4;padding:0}
+:root[data-sky] .v3-hero-copy:has(.v3-counter) .v3-scrawl{justify-self:start;margin:0 0 0 18px}
+:root[data-sky] .v3-sub{display:inline-block;color:var(--sky-ink);padding:6px 12px;border-radius:12px;background:var(--chip);border:1px solid var(--chipedge);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+:root[data-sky] .v3-hero-copy:has(.v3-counter) .v3-sub{margin:0;justify-self:start;color:var(--sky-ink);font:14px var(--v3-mono);padding:4px 10px;border-radius:10px;background:var(--chip);border:1px solid var(--chipedge);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);vertical-align:middle}
+:root[data-sky] .v3-scrawl{display:inline-block;transform:none;background:#fff;color:#b52a18;border:2px solid #b52a18;outline:1px solid #b52a18;outline-offset:3px;padding:7px 14px;line-height:1;margin-left:6px}
+:root[data-sky] .v3-bubble{border-radius:20px;color:var(--ink);font-weight:700;padding:14px 18px}
+:root[data-sky=day] .v3-bubble{box-shadow:0 0 0 1px rgba(14,26,46,.2),var(--shadow)}
+:root[data-sky=night] .v3-bear .bear{filter:drop-shadow(0 0 1px rgba(255,255,255,.7)) drop-shadow(0 0 14px rgba(255,190,160,.28))}
+:root[data-sky=day] .v3-bear .bear{filter:none}
+
+/* Content: cards float on the sky, there is no paper sheet. */
+:root[data-sky] .v3-paper:has(.v3-projects){background:transparent;border:0;color:var(--sky-ink);padding-left:0;padding-right:0}
+:root[data-sky] .v3-paper:not(:has(.v3-projects)){padding:24px 26px 30px}
+:root[data-sky] .v3-home-spaces{padding:22px 24px 26px}
+:root[data-sky] body:not(.deciding) main:not(:has(.v3-hero)):not(:empty){padding:24px 26px;margin-bottom:24px}
+:root[data-sky] footer{margin:24px 0 max(20px,env(safe-area-inset-bottom));padding:14px 20px;border-radius:18px}
+:root[data-sky] .v3-splits{display:flex;width:fit-content;max-width:100%;padding:6px;gap:4px;border-radius:18px}
+:root[data-sky] nav.v3-splits button{border:0;border-radius:14px;background:none;color:var(--ink);font-size:17px}
+:root[data-sky] nav.v3-splits button[aria-pressed=true],:root[data-sky] nav.v3-splits button[aria-pressed=true]:hover{background:var(--ink);color:var(--onink)}
+:root[data-sky] nav.v3-splits button:hover:not([aria-pressed=true]):not(:disabled){background:var(--chip);color:var(--ink)}
+:root[data-sky] .v3-keys{color:var(--v3-ink)}
+:root[data-sky] :is(.v3-project-heading,.v3-home-spaces>h2,.v3-stream h2){border-bottom:1px solid var(--sky-rule);font-stretch:72%}
+:root[data-sky] .v3-project-count{border:1px solid var(--chipedge);background:var(--chip);border-radius:8px;padding:2px 8px;font-size:13px}
+:root[data-sky] .v3-ticket{padding:18px 20px;margin:0 0 12px;border-bottom:1px solid var(--edge)}
+:root[data-sky] .v3-ticket-hero{border:1px solid var(--edge);outline:2px solid var(--ring);outline-offset:-1px;box-shadow:0 0 0 1px var(--outer),var(--shadow);margin:0 0 12px}
+:root[data-sky] :is(.v3-tag,.v3-status,.v3 .chip,.chip){border:1px solid var(--chipedge);background:var(--chip);color:var(--ink);border-radius:8px;font-weight:700}
+:root[data-sky] :is(.v3-why,.v3 .card-body){color:var(--ink2)}
+/* Bordered controls become glass chips; text-style buttons (titles, links) keep their own look. */
+/* Ink and fill invert together. The legacy background-only fade briefly hides the new ink. */
+:root[data-sky] button{transition:none}
+:root[data-sky] .v3 button{border-radius:14px;border-color:var(--chipedge)}
+:root[data-sky] :is(.v3-actions button,.v3 button:not([class]),.v3-tools button,.v3-decision button,.control-center button,.decide-shell button){border-radius:14px;border:1px solid var(--chipedge);background:var(--chip);color:var(--v3-ink)}
+:root[data-sky] :is(.v3-actions button,.v3 button:not([class]),.v3-tools button,.v3-decision button,.control-center button,.decide-shell button):hover:not(:disabled){background:var(--v3-ink);color:var(--onink);border-color:var(--v3-ink)}
+:root[data-sky] :is(button.primary,.v3 .primary,.v3 .option,.decide-actions button.primary){background:var(--red);color:#fff;border:1px solid transparent}
+:root[data-sky] :is(button.primary,.v3 .primary,.v3 .option):hover:not(:disabled){background:var(--ink);color:var(--onink)}
+:root[data-sky] .v3-stream{outline:0;border:1px solid var(--edge);padding:20px}
+:root[data-sky] .v3-detail{padding:22px}
+:root[data-sky] .v3-call{border-left:4px solid var(--red);border-radius:10px;color:var(--ink)}
+:root[data-sky] :is(input,textarea,select){border-radius:12px}
+:root[data-sky] :is(.note-form textarea,.guide-note textarea,.key-form input,.state input,.control-center input,.control-center textarea,.control-center select,.mk3-filters select,.mockup-comment-form textarea,.decide-note textarea){background:var(--chip);color:var(--ink);border:1px solid var(--chipedge)}
+:root[data-sky] ::placeholder{color:var(--ink2);opacity:1}
+
+/* Spaces, Roadmap, Mockups, Jobs, and Decide share the same glass. */
+:root[data-sky] .sp-space-tile::before{content:none}
+:root[data-sky] .sp-space-tile,:root[data-sky] .sp-space-tile:nth-child(3n+2),:root[data-sky] .sp-space-tile:nth-child(3n){background:var(--glass)}
+:root[data-sky] .sp-shelf,:root[data-sky] .v3-home-spaces .sp-shelf{color:var(--v3-ink)}
+:root[data-sky] .sp-switch [aria-current=page]{background:var(--sky-ink);color:var(--onink-sky)}
+:root[data-sky] :is(.sp-state[data-state=stuck],.sp-state[data-state=risk],.sp-state[data-state=failed]){background:var(--red);color:#fff}
+:root[data-sky] .mk3-cover-art{background:var(--chip)}
+:root[data-sky] :is(.mk3-segments,.mk3-modes,.mk3-reasons) [aria-pressed=true]{background:var(--v3-ink);color:var(--onink)}
+:root[data-sky] .control-center,:root[data-sky] .mockups{background:transparent;color:var(--sky-ink)}
+:root[data-sky] .control-center{background:var(--glass);color:var(--ink);padding:20px}
+:root[data-sky] .control-nav-button[aria-current=true]{background:var(--ink);color:var(--onink);border-color:var(--ink)}
+:root[data-sky] .control-nav{flex-wrap:wrap;overflow:visible;margin-right:0;padding-right:0}
+:root[data-sky] .control-center .control-stop{background:var(--red);color:#fff}
+:root[data-sky] .control-center .control-danger{color:var(--redink)!important}
+:root[data-sky] .rm-item{border-radius:14px}
+:root[data-sky] .decide-toast,:root[data-sky] .mockup-archive-toast{background:var(--ink);color:var(--onink);border-radius:14px}
+
+/* Dialogs and overlays use opaque glass so content behind never fights the text. */
+:root[data-sky] :is(dialog,.guide-shell,.mockup-dialog,.mk3-feedback,.mkup-dialog){background:var(--glass-solid);color:var(--ink)}
+:root[data-sky] dialog::backdrop{background:var(--overlay)}
+:root[data-sky] .mockup-dialog :is(.mockup-tools,.mockup-dialog-head,.mockup-dialog-verdicts){background:var(--glass-solid)}
+
+:root[data-sky] footer .access-button{color:var(--ink)}
+:root[data-sky] :focus-visible{outline:3px solid var(--ring);outline-offset:3px}
+:root[data-sky=day] :is(.v3-hero,.v3-paper:has(.v3-projects)>.v3-keys,.v3-project-heading) :focus-visible{outline-color:#fff}
+
+/* No blur support, reduced transparency, or forced colors: opaque panes, so stars never show sharp through text. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+ :root[data-sky=night]{--glass:#131c39;--chip:#1f2a4b}
+ :root[data-sky=day]{--glass:#eef3f9;--chip:#ffffff}
+}
+@media(prefers-reduced-transparency:reduce){
+ :root[data-sky=night]{--glass:#131c39;--chip:#1f2a4b}
+ :root[data-sky=day]{--glass:#eef3f9;--chip:#ffffff}
+}
+@media(forced-colors:active){
+ .sky-layer{display:none}
+ :root[data-sky] *{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;box-shadow:none!important}
+ :root[data-sky] .sky-switch button[aria-checked=true],:root[data-sky] .tab[aria-selected=true],:root[data-sky] .sky-still-toggle[aria-pressed=true]{forced-color-adjust:none;background:Highlight;color:HighlightText}
+}
+
+/* Phone: the slab wraps, the switch stays reachable. */
+@media(max-width:800px){
+ :root[data-sky] .masthead.v3-top{margin-top:12px;padding:12px;border-radius:18px}
+ :root[data-sky] .v3-logo{font-size:36px}
+ :root[data-sky] .ted-controls{flex-wrap:wrap;justify-content:flex-end}
+ .sky-controls{order:10;flex:0 0 100%;justify-content:space-between}
+ :root[data-sky] .v3-ticket{padding:14px}
+ :root[data-sky] .v3-hero-copy:has(.v3-counter){grid-template-columns:78px minmax(0,1fr);gap:12px}
+ :root[data-sky] .v3-hero-copy:has(.v3-counter) .v3-counter{grid-row:1;margin-right:0}
+ :root[data-sky] .v3-hero-copy:has(.v3-counter) .v3-headline{grid-column:2}
+ :root[data-sky] .v3-hero-copy:has(.v3-counter) :is(.v3-sub,.v3-scrawl){grid-column:1/-1;margin:0}
+}
+
+/* Small fixes for text that used a surface token as its color. */
+:root[data-sky] .mk3-review-dots>span{color:var(--onink)}
+:root[data-sky] .mk3-review-dots .dot-fail{color:var(--ink)}
+:root[data-sky]{--aging-red:var(--redink)}
+:root[data-sky] .mk3-review-dots .dot-fix{color:#fff}
+:root[data-sky] .make-rule{color:var(--v3-ink);border-color:var(--chipedge)}
+
+/* Body-level Undo toasts must not inherit the transparent page-background token. */
+:root[data-sky] :is(.decide-toast,.mockup-archive-toast) button{background:transparent;color:var(--onink);border-color:var(--onink)}
+:root[data-sky] :is(.decide-toast,.mockup-archive-toast) button:hover:not(:disabled){background:var(--onink);color:var(--ink)}
+:root[data-sky] :is(.decide-toast,.mockup-archive-toast) button:focus-visible{outline-color:var(--onink)}
+/* Decide's counter, recovery, and empty state sit on the sky; only its card is glass. */
+:root[data-sky] .decide-shell>:is(.decide-head,.decide-empty,.decide-recovery) button{background:var(--chip-sky);color:var(--sky-ink);border-color:var(--sky-rule)}
+:root[data-sky] .decide-shell>:is(.decide-head,.decide-empty,.decide-recovery) button:hover:not(:disabled){background:var(--sky-ink);color:var(--onink-sky)}
+/* Current-main Business patch is a glass panel, including its alerts and card links. */
+:root[data-sky] .v3-business-patch>summary{width:fit-content;max-width:100%;padding:10px 14px;border:1px solid var(--chipedge-sky);border-radius:14px;background:var(--chip-sky);color:var(--sky-ink)}
+:root[data-sky] .v3-paper:not(:has(.v3-projects)) .v3-business-patch>summary{background:var(--chip);color:var(--ink);border-color:var(--chipedge)}
+:root[data-sky] .bp-panel{padding:20px}
+:root[data-sky] .bp-panel :is(.bp-toolbar,.bp-label,.bp-open){background:var(--chip);color:var(--ink)}
+:root[data-sky] .bp-panel .bp-open:hover:not(:disabled){background:var(--ink);color:var(--onink)}
+:root[data-sky] .bp-panel :is(.bp-alert .bp-marker,.bp-alert .bp-state,.bp-count-alert){color:var(--redink)}
+:root[data-sky] .bp-panel :is(.bp-warning,.bp-warnings){border-color:var(--redink)}
+
+
+:root[data-sky] .bp-panel :focus-visible{outline-color:var(--ring)}

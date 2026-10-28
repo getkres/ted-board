@@ -1,0 +1,48 @@
+name: Sky controls
+on:
+  pull_request:
+    paths:
+      - 'sky.*'
+      - 'index.html'
+      - 'tests/sky_controls_test.cjs'
+      - 'qa/sky-*.cjs'
+      - 'qa/chrome.cjs'
+      - 'assets/sky/**'
+      - '.github/workflows/sky-controls.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'sky.*'
+      - 'index.html'
+      - 'tests/sky_controls_test.cjs'
+      - 'qa/sky-*.cjs'
+      - 'qa/chrome.cjs'
+      - 'assets/sky/**'
+      - '.github/workflows/sky-controls.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/sky_controls_test.cjs tests/business_patch_test.cjs
+      - run: node --check sky.js
+      - name: Install the test driver
+        run: npm install --no-save --ignore-scripts --prefix "$RUNNER_TEMP/sky-qa" playwright@1.64.1
+      - name: Exercise sky controls in Google Chrome with offline fixtures
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/qa/chrome.cjs
+          PLAYWRIGHT_PACKAGE: ${{ runner.temp }}/sky-qa/node_modules/playwright
+        run: |
+          python3 -m http.server 8763 --bind 127.0.0.1 > "$RUNNER_TEMP/sky-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --silent --fail http://127.0.0.1:8763/ > /dev/null; then break; fi
+            sleep 0.2
+          done
+          node --require ./qa/offline.cjs --test qa/sky-behavior.cjs
