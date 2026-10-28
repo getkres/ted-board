@@ -141,4 +141,16 @@ class AdapterTests(unittest.TestCase):
         body = json.loads(send.call_args.args[0].data)
         self.assertEqual(body['approvals'], []); self.assertEqual(body['jobs'], [{'id': 'j'}])
 
+    def test_unreviewed_pin_reply_makes_no_remote_call(self):
+        import mockup_client
+        with tempfile.TemporaryDirectory() as tmp, patch.object(mockup_client, 'load_env') as secrets:
+            cwd = Path.cwd()
+            try:
+                __import__('os').chdir(tmp)
+                with self.assertRaises(ReviewBlocked):
+                    mockup_client.call('ted_reply', pin_id='00000000-0000-0000-0000-000000000000', text='Unreviewed copy.')
+            finally: __import__('os').chdir(cwd)
+            secrets.assert_not_called()
+
+
 if __name__ == '__main__': unittest.main()

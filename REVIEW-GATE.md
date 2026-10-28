@@ -157,6 +157,23 @@ status, with the existing reconciliation instruction, when review prevents a
 Needs you transition. No Needs you exception is added. Confirmed sends state
 that the worker recorded the receipt rather than pointing to an unposted reply.
 
+Mockup pin replies need a reviewed JOB/pin-reply.json that equals the exact
+pin_id and text payload. Fixed runner notices (artifact errors, worker
+failures, approval-needed lines, and stop notices) are an exact-match
+allowlist in review_gate.RUNNER_NOTICES because they carry no model text.
+Anything else must equal the reviewed final-answer.txt, and the reviewed
+REPORT.md must exist. A stale approval is dropped from the heartbeat rather
+than failing it. A new card message resets the review, so a pending or
+approved but not yet executed approval is superseded and must be prepared
+again. This fails safe.
+
+The live runner uses the reconciler route (jobs/reconciler-config.json).
+The overlay gates reconciler_sessions.py, reconciler_worker.py,
+reconciler_status.py, and reconciler_card.py, and the legacy sessions.py and
+session_worker.py as a fallback. Run the overlay tests in both modes with the
+live interpreter, /Library/Developer/CommandLineTools/usr/bin/python3, with
+TED_RECONCILER_ENABLED unset and set to true.
+
 Pod instructions and templates require canon_check and review. Copy the exact
 status to JOB/pod-status.json before review, then add review_job_dir to the live
 status. The publisher compares every other status field with the reviewed
