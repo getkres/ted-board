@@ -195,7 +195,7 @@ class MockupsView {
     }
   }
   imagePins(id) {
-    return this.pins.filter((p) => p.mockup_id === id).sort((a, b) =>
+    return this.pins.filter((p) => p.mockup_id === id && p.batch_note !== true).sort((a, b) =>
       a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)
     );
   }

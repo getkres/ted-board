@@ -1,0 +1,38 @@
+--- a/mockups-backend/supabase/functions/ted-mockups/handler.ts
++++ b/mockups-backend/supabase/functions/ted-mockups/handler.ts
+@@ -1,3 +1,4 @@
++import { handleMockupBatchNote, createMockupBatchNoteStore } from "./mockup-batch-comments.ts";
+ import { handleMockupArchive, createMockupArchiveStore } from "./mockup-archive.ts";
+ import { attachFull, DETAIL_BUCKET, enrich, normalizedPin } from "./detail.ts";
+ import { actionArgs, InputError, metadata, sameKey, uuid } from "./domain.ts";
+@@ -73,6 +74,7 @@
+         let projectEnabled = false;
+         let wholeImageEnabled = false;
+         let approveBatchEnabled = false;
++        let batchCommentsEnabled = false;
+         try {
+           const batchCapability = await db.rpc("ted_mockup_verdict_batch", {p_action:"capability"});
+           batchEnabled = !batchCapability.error && batchCapability.data?.enabled === true;
+@@ -83,7 +85,11 @@
+           const approvalCapability = await db.rpc("ted_mockup_approve_batch", {p_action:"capability"});
+           approveBatchEnabled = !approvalCapability.error && approvalCapability.data?.enabled === true;
+         } catch { /* A missing or unreachable RPC fails closed. */ }
+-        return json({ archive_enabled: true, whole_image_comments_enabled: wholeImageEnabled, verdicts_enabled: capability.data?.enabled === true, verdict_batch_enabled: batchEnabled, verdict_project_enabled: projectEnabled, approve_batch_enabled: approveBatchEnabled, mockups: await Promise.all(mockups.map(m => enrich(db, m))), pins: pins.map(normalizedPin) });
++        try {
++          const batchComments = await db.rpc("ted_mockup_batch_note", {p_action:"capability"});
++          batchCommentsEnabled = !batchComments.error && batchComments.data?.enabled === true;
++        } catch { /* Missing or unreachable batch SQL keeps the composer hidden. */ }
++        return json({ capabilities: {batch_comments: batchCommentsEnabled}, archive_enabled: true, whole_image_comments_enabled: wholeImageEnabled, verdicts_enabled: capability.data?.enabled === true, verdict_batch_enabled: batchEnabled, verdict_project_enabled: projectEnabled, approve_batch_enabled: approveBatchEnabled, mockups: await Promise.all(mockups.map(m => enrich(db, m))), pins: pins.map(normalizedPin) });
+       }
+       if (req.method !== "POST") {
+         return json({ error: "GET or POST only" }, 405);
+@@ -316,6 +322,9 @@
+           String(b.action),
+         )
+       ) throw new InputError("Unknown action");
++      const batchNote = await handleMockupBatchNote(b, worker ? "worker" : "page", createMockupBatchNoteStore(db));
++      if (batchNote) return json(batchNote.body.pin
++        ? {...batchNote.body, pin: normalizedPin(batchNote.body.pin)} : batchNote.body, batchNote.status);
+       const args = actionArgs(b);
+       if (b.whole_image === true) {
+         let enabled = false;

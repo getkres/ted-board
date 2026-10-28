@@ -23,12 +23,12 @@ async function setup(width=1440,{enabled=true}={}){
 }
 test('batch archive disappears immediately, Undo lasts five seconds, and polling cannot revive it',async()=>{
  const f=await setup();try{const {page:p,posts}=f;
-  await p.locator('.mk3-cover').filter({hasText:'Lander looks'}).getByRole('button',{name:'Archive',exact:true}).click();
-  assert.equal(await p.locator('.mk3-cover').count(),2);assert.equal(posts.length,0);
+  await p.locator('.mk3-cover').filter({hasText:'Lander looks'}).getByRole('button',{name:'Not relevant anymore',exact:true}).click();
+  assert.equal(await p.locator('.mk3-cover').count(),2);assert.equal(posts.length,0);assert.equal(await p.locator('.mk3-feedback[open]').count(),0,'batch archive never asks for a reason');
   await p.evaluate(()=>mockups.load());assert.equal(await p.locator('.mk3-cover').count(),2);
   await p.clock.runFor(4999);await p.locator('.mockup-archive-toast').getByRole('button',{name:'Undo',exact:true}).click();
   assert.equal(await p.locator('.mk3-cover').count(),3);await p.clock.runFor(2);assert.equal(posts.length,0);
-  await p.locator('.mk3-cover').filter({hasText:'Lander looks'}).getByRole('button',{name:'Archive',exact:true}).click();
+  await p.locator('.mk3-cover').filter({hasText:'Lander looks'}).getByRole('button',{name:'Not relevant anymore',exact:true}).click();
   await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
   assert.deepEqual(posts,[{action:'archive',project:'Test line 1',batch:'Lander looks'}]);
   await p.reload();await p.waitForSelector('.mk3-wall');assert.equal(await p.locator('.mk3-cover').count(),2);
@@ -40,7 +40,7 @@ test('batch archive disappears immediately, Undo lasts five seconds, and polling
 });
 test('every batch mode and the frame viewer expose archive, and single-frame archive keeps siblings',async()=>{
  const f=await setup(375);try{const p=f.page;
-  for(const kind of ['round','stack','set']){await p.evaluate(kind=>mockups.openBatch(mockups.batches().find(b=>b.kind===kind)),kind);assert.equal(await p.getByRole('button',{name:'Archive batch',exact:true}).count(),1);}
+  for(const kind of ['round','stack','set']){await p.evaluate(kind=>mockups.openBatch(mockups.batches().find(b=>b.kind===kind)),kind);assert.equal(await p.getByRole('button',{name:'Not relevant anymore',exact:true}).count(),1);}
   await p.evaluate(()=>mockups.open(mockups.mockups.find(m=>m.id==='look1')));await p.getByRole('button',{name:'Archive frame',exact:true}).click();
   assert.equal(await p.locator('.mockup-dialog[open]').count(),0);assert.equal(await p.locator('.mockup-archive-toast').getByRole('button',{name:'Undo'}).isVisible(),true);
   await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
@@ -54,20 +54,20 @@ test('every batch mode and the frame viewer expose archive, and single-frame arc
 });
 test('failed archive restores the card, and changing keys cancels queued writes',async()=>{
  const f=await setup();try{const p=f.page;f.fail();
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
   assert.equal(await p.locator('.mk3-cover').count(),3);assert.match(await p.locator('#notice').innerText(),/unavailable/);
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();
   await p.evaluate(()=>{key='changed-fixture';resetForKeyChange();mockups.reset();});await p.clock.runFor(6000);assert.equal(f.posts.length,1);
   assert.equal(await p.locator('.mockup-archive-toast').count(),0);
  }finally{await f.browser.close();}
 });
 test('unsupported backend disables writes, while the Archived filter stays usable',async()=>{
- const f=await setup(1440,{enabled:false});try{assert.equal(await f.page.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).isDisabled(),true);assert.equal(f.posts.length,0);await f.page.getByRole('button',{name:'Archived',exact:true}).click();assert.equal(await f.page.locator('.mk3-cover').count(),0);}finally{await f.browser.close();}
+ const f=await setup(1440,{enabled:false});try{assert.equal(await f.page.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).isDisabled(),true);assert.equal(f.posts.length,0);await f.page.getByRole('button',{name:'Archived',exact:true}).click();assert.equal(await f.page.locator('.mk3-cover').count(),0);}finally{await f.browser.close();}
 });
 test('multiple queued archives undo together, and a toast stays operable inside another frame viewer',async()=>{
  const f=await setup();try{const p=f.page;
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();
   assert.equal(await p.locator('.mk3-cover').count(),1);
   await p.locator('.mockup-archive-toast button').focus();await p.clock.runFor(1000);
   assert.equal(await p.locator('.mockup-archive-toast button').evaluate(b=>document.activeElement===b),true,'countdown preserves keyboard focus');
@@ -87,11 +87,11 @@ test('stale polls and old-key archive acknowledgements cannot overwrite current 
    received();await gate;return route.fulfill({json:{mockups:stale,pins:[],archive_enabled:true}});
   });
   await p.evaluate(()=>void mockups.load());await started;
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();
   await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
   release();await p.waitForFunction(()=>!mockups.loading);assert.equal(await p.locator('.mk3-cover').count(),2);
   let finish;f.hold(new Promise(r=>finish=r));
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();await p.clock.runFor(5001);
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();await p.clock.runFor(5001);
   await p.waitForFunction(()=>[...mockups.archives.pending.values()].some(e=>e.phase==='saving'));
   await p.evaluate(()=>{key='new-fixture-key';resetForKeyChange();mockups.reset();});finish();await p.waitForTimeout(50);
   assert.equal(await p.evaluate(()=>mockups.mockups.length),0);assert.equal(await p.locator('.mockup-archive-toast').count(),0);
@@ -99,14 +99,14 @@ test('stale polls and old-key archive acknowledgements cannot overwrite current 
 });
 test('restore failures keep the archived frame available for retry',async()=>{
  const f=await setup();try{const p=f.page;
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();await p.clock.runFor(5001);await p.waitForFunction(()=>!mockups.archives.pending.size);
   await p.getByRole('button',{name:'Archived',exact:true}).click();f.fail();await p.getByRole('button',{name:'Restore',exact:true}).click();await p.waitForFunction(()=>!mockups.archives.restoring.size);
   assert.equal(await p.locator('.mk3-cover').count(),1);assert.match(await p.locator('#notice').innerText(),/unavailable/);
  }finally{await f.browser.close();}
 });
 test('page exit saves a queued archive once using keepalive',async()=>{
  const f=await setup();try{const p=f.page;
-  await p.locator('.mk3-cover').first().getByRole('button',{name:'Archive',exact:true}).click();
+  await p.locator('.mk3-cover').first().getByRole('button',{name:'Not relevant anymore',exact:true}).click();
   await p.evaluate(()=>{const original=window.fetch;window.fetch=(url,options)=>{window.archiveKeepalive=options.keepalive;return original(url,options);};window.dispatchEvent(new Event('pagehide'));window.dispatchEvent(new Event('pagehide'));});
   await p.waitForFunction(()=>!mockups.archives.pending.size);assert.equal(await p.evaluate(()=>window.archiveKeepalive),true);
   await p.clock.runFor(6000);assert.equal(f.posts.length,1);assert.equal(f.posts[0].action,'archive');
