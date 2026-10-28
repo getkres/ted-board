@@ -1,0 +1,2 @@
+# A space-only context line is required syntax inside a unified patch.
+runner-fix/*.patch -whitespace

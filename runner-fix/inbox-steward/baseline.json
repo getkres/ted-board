@@ -1,0 +1,20 @@
+{
+  "baseline_release": "b7a4092689d42418b9fd43a2838a5159bcf8aad0",
+  "files": {
+    "inbox_steward.py": "6588b8d15c691ba5ec7b3330418f3c641c1041719e97d9ea2935e3f228d9bcb0",
+    "steward_review.py": "60b7ec5933fe280eb2b5dc10b36dd32ced02acea83f2863acb56f6237f50a3b6"
+  },
+  "feed_files": {
+    "chat.ts": "35d5783d5ec95832e3a871fe915567121404527c96bc006deb043ea17aec5af9",
+    "control.ts": "84ec76430c9c84deb42f417a4399abfcb625d029b05bb3638f22c39f44abe8d2",
+    "domain.ts": "147a263d71b606b3aac27d02e0b8c55d97578f71ec8b41a786f7385a58695644",
+    "frontdoor.ts": "6046c9bf7f0e267d8a1951f48907419435a46c96588777edcff309105d3669d2",
+    "handler.ts": "206ec8899bc1713aa68e3164b6acb3c7355a98f4e2b65ba5e13bed8438f3cc34",
+    "sync.ts": "e6abc05e3f5743049f411caa97cb71199db02a83e9d28f4841c81bb3fb70f373",
+    "veto-mail.ts": "5e9d05efb6ec626f8471e1491ece45ce517a1801bb938287b281ac7b41c7f704"
+  },
+  "patches": {
+    "runtime.patch": "1f3438f641385c69d6e4ce919f8edf7ae6b7b4442f0494c5aa2af038cde37120",
+    "feed.patch": "63ffcde8ca8ba1dd3464c9b00692889a9cd7daab682a0384b0596383862c281f"
+  }
+}

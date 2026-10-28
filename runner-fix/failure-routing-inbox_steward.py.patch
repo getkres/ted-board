@@ -1,0 +1,44 @@
+--- inbox_steward.py
++++ inbox_steward.py
+@@ -15,0 +16 @@
++from inbox_policy import disposition
+@@ -175 +176,4 @@
+-    reason = protection(card, now)
++    messages=card.get('messages') or []
++    if not isinstance(messages,list) or any(not isinstance(m,dict) for m in messages):
++        return None, 'ambiguous, retain'
++    reason=protection(card,now)
+@@ -177,3 +181,3 @@
+-        return None, reason
+-    last = latest(card)
+-    if not last or str(last.get('who', '')).lower() not in WORKERS:
++        return None,reason
++    last=latest(card)
++    if not last or str(last.get('who','')).lower() not in WORKERS:
+@@ -181,2 +185,2 @@
+-    text = str(last.get('text') or '')
+-    reason = report_only_reason(text)
++    text=str(last.get('text') or '')
++    reason=report_only_reason(text)
+@@ -184,4 +188,4 @@
+-        return None, reason
+-    if FYI.search(text) and not positive_completion(text, REPORT):
+-        return 'done', 'pure fyi, no action required'
+-    return 'up_next', 'Ted review'
++        return None,reason
++    if not positive_completion(text):
++        return None, 'no positive completion evidence'
++    return disposition(card)
+@@ -279 +283,11 @@
+-    return call('move', page=True, card_id=card_id, value=value, note=note)
++    card=next((c for c in state.cards if c.get('id')==card_id),None)
++    if not card or not stamp(card.get('updated_at')):
++        raise RuntimeError('Card timestamp required for guarded inbox move')
++    if value!='up_next' or disposition(card,line=note)[0]!='up_next':
++        raise RuntimeError('Inbox card retained, move not admitted')
++    can_write(root)
++    result=call('live_status',card_id=card_id,state='blocked',line=note,section=value,
++                expected_section='needs_you',expected_updated_at=card['updated_at'])
++    if not isinstance(result,dict) or result.get('ok') is not True or (result.get('card') or {}).get('section')!=value:
++        raise RuntimeError('Inbox card retained, move not confirmed')
++    return result

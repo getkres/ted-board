@@ -1,0 +1,24 @@
+--- a/live_status.py
++++ b/reconciler_status.py
+@@ -5,7 +5,7 @@
+ import sys
+ import board_client
+ from board_client import call
+-from inbox_policy import disposition, failure_kind, pending_approval, FAILURE_LINE, TED_LINE
++from inbox_policy import decision, disposition, failure_kind, pending_approval, FAILURE_LINE, TED_LINE
+ 
+ STATES=('running','blocked','waiting_on_you','done')
+ SECTIONS=('done','needs_you','ted_doing','up_next')
+@@ -57,6 +57,12 @@
+    payload=mockup_call()
+    if not isinstance(payload,dict) or not isinstance(payload.get('mockups'),list) or any(not isinstance(m,dict) for m in payload['mockups']):raise RuntimeError('Mockup scope could not be confirmed')
+    mockups=payload['mockups']
++  if decision(card,line,mockups) is None:
++   body=dict(card_id=card_id,state='blocked',line=FAILURE_LINE if failure_kind(line) else TED_LINE,section='up_next',expected_section='ted_doing',expected_updated_at=card.get('updated_at'))
++   body.update({k:v for k,v in guards.items() if k in ('expected_section','expected_updated_at') and v is not None})
++   result=call('live_status',**body)
++   if not result.get('ok') or not result.get('card'):raise RuntimeError('Ted review handoff was not confirmed')
++   return result['card']
+   section='needs_you'
+   if state!='waiting_on_you':state='waiting_on_you'
+   stored_kind=card.get('decision_kind') or 'other'

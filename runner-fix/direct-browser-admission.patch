@@ -1,0 +1,9 @@
+--- a/codex-browser.sh
++++ b/codex-browser.sh
+@@ -12 +12 @@
+-cd "$HOME/ted-ops" && /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex exec -m ${CODEX_MODEL:-gpt-6-sol} --skip-git-repo-check "$RULES
++cd "$HOME/ted-ops" && python3 "$HOME/ted-ops/ted-board/scripts/shared_admission.py" run --lane direct -- /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex exec -m ${CODEX_MODEL:-gpt-6-sol} --skip-git-repo-check "$RULES
+@@ -14,0 +15 @@
++RUN_STATUS=$?
+@@ -15,0 +17 @@
++exit $RUN_STATUS

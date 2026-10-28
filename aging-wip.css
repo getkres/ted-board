@@ -1,0 +1,47 @@
+:root{--aging-red:#b42318}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--aging-red:#ffbcaa}}
+:root[data-theme=dark]{--aging-red:#ffbcaa}
+.aging-banner{margin:18px 0;padding:14px 16px;border:1px solid var(--aging-red);border-radius:10px;color:var(--aging-red);font-size:.875rem;line-height:1.5;overflow-wrap:anywhere}
+.aging-banner[hidden]{display:none}
+.aging-wip{margin:0 0 34px;min-width:0}
+.aging-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px;margin-bottom:14px}
+.aging-heading h3,.aging-reviews h3{font-size:1.2rem}
+.aging-meta{display:block;margin-top:6px;color:var(--muted);font-size:.78rem;line-height:1.5}
+.aging-warnings{margin:14px 0;padding:12px 14px;border:1px solid var(--aging-red);border-radius:10px;color:var(--aging-red);font-size:.8rem;line-height:1.5;overflow-wrap:anywhere}
+.aging-warnings p+p{margin-top:6px}
+.aging-table{width:100%;border-collapse:collapse;table-layout:fixed;text-align:left;font-size:.8rem;line-height:1.5}
+.aging-table thead th{color:var(--muted);font-weight:500;font-size:.72rem}
+.aging-table th,.aging-table td{padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.aging-table th:first-child{width:38%;padding-left:0}
+.aging-table th:nth-child(2){width:15%}
+.aging-table th:nth-child(3){width:12%}
+.aging-table th:nth-child(4){width:23%}
+.aging-table th:last-child{width:12%;padding-right:0}
+.aging-table tbody th{font-weight:500}
+.aging-summary{display:block;color:var(--text);overflow-wrap:anywhere}
+.aging-kind,.aging-date{display:block;margin-top:5px;color:var(--muted);font-size:.72rem;font-weight:400}
+.aging-defect{display:block;margin-top:6px;color:var(--aging-red);font-size:.75rem;font-weight:400;line-height:1.5}
+.aging-due-overdue{color:var(--aging-red);font-weight:600}
+.aging-overdue th[scope=row]{box-shadow:inset 3px 0 var(--aging-red);padding-left:12px}
+.aging-open{display:block;font-size:.75rem;margin:4px 0 -5px -10px}
+.aging-empty{color:var(--muted);font-size:.85rem;line-height:1.6;padding:8px 0}
+.aging-reviews{margin-top:28px;padding-top:20px;border-top:1px solid var(--line)}
+.aging-review-list{margin:14px 0 0;padding-left:28px;max-width:850px}
+.aging-review-list li{padding:10px 0 12px 6px;border-bottom:1px solid var(--line);font-size:.85rem;line-height:1.5}
+.aging-review-overdue .aging-meta{color:var(--aging-red);font-weight:600}
+@media(max-width:699px){
+ .aging-heading{display:block}
+ .aging-table,.aging-table tbody{display:block}
+ .aging-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+ .aging-table tr{display:block;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px}
+ .aging-table th,.aging-table td{border:0;padding:4px 0!important;width:auto!important}
+ .aging-table tbody th{display:block;margin-bottom:6px}
+ .aging-table td{display:grid;grid-template-columns:94px minmax(0,1fr);gap:4px 10px}
+ .aging-table td:before{content:attr(data-label);color:var(--muted);font-weight:400;font-size:.75rem}
+ .aging-table .aging-date{grid-column:2;margin:0}
+ .aging-overdue{border-color:var(--aging-red)!important}
+ .aging-overdue th[scope=row]{box-shadow:none}
+}
+
+.aging-decisions{margin:12px 0;color:var(--muted);font-size:.875rem;line-height:1.5;overflow-wrap:anywhere}
+.aging-decisions[hidden]{display:none}

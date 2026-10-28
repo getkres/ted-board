@@ -1,0 +1,11 @@
+--- board_live.py
++++ board_live.py
+@@ -157,2 +157,8 @@
+      ask_anyway_reason='The email send result is uncertain. Sebastian must reconcile Gmail Sent before any retry.'
++   elif job.get('status') in ('done','finished'):
++    completed=max(float(job.get('last_activity') or 0),float(job.get('started_at') or 0))
++    report=directory/'REPORT.md'
++    if report.is_file():completed=max(completed,report.stat().st_mtime)
++    if stamp((card.get('answer') or {}).get('created_at'))>completed:continue
++    state,line,section='blocked','Ted review','up_next'
+    else:
