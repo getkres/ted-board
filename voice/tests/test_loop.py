@@ -396,13 +396,21 @@ class LoopTests(unittest.TestCase):
                 fed_confirmed = loop.verify_frames([b"\x00" * 2560], context).result(timeout=2)
                 context["wake_confirmation"] = False
                 fed_unchanged = loop.verify_frames([b"\x00" * 2560], context).result(timeout=2)
+                loop.verifier.text = "Th head, stop."
+                context["wake_confirmation"] = True
+                room_confirmed = loop.verify_frames([b"\x00" * 2560], context).result(timeout=2)
+                context["wake_confirmation"] = False
+                room_unchanged = loop.verify_frames([b"\x00" * 2560], context).result(timeout=2)
             self.assertEqual(confirmed["text"], "Ted, stop.")
             self.assertEqual(confirmed["initial_text"], "Third storm.")
             self.assertEqual(unchanged["text"], "Third storm.")
             self.assertEqual(fed_confirmed["text"], "Ted, stop.")
             self.assertEqual(fed_confirmed["initial_text"], "Fed, stop.")
             self.assertEqual(fed_unchanged["text"], "Fed, stop.")
-            self.assertEqual(loop.verifier.retries, 2)
+            self.assertEqual(room_confirmed["text"], "Ted, stop.")
+            self.assertEqual(room_confirmed["initial_text"], "Th head, stop.")
+            self.assertEqual(room_unchanged["text"], "Th head, stop.")
+            self.assertEqual(loop.verifier.retries, 3)
 
     def test_non_speech_and_unrelated_words_cannot_be_prompted_into_a_wake(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -558,7 +566,7 @@ class LoopTests(unittest.TestCase):
 
         from routing import asks_for_action
 
-        for prefix in ["Fed, stop.", "Third storm."]:
+        for prefix in ["Fed, stop.", "Third storm.", "Th head, stop."]:
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as d:
                 loop, audio = self.make(d)
                 audio.playing = True
@@ -577,7 +585,7 @@ class LoopTests(unittest.TestCase):
     def test_confirmed_ambiguous_prefix_alone_rearms_followup_without_submission(self):
         from concurrent.futures import Future
 
-        for prefix in ["Fed, stop.", "Third storm."]:
+        for prefix in ["Fed, stop.", "Third storm.", "Th head, stop."]:
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as d:
                 loop, audio = self.make(d)
                 audio.playing = True
@@ -595,7 +603,7 @@ class LoopTests(unittest.TestCase):
                 loop.bridge.deliver.assert_called_once_with("What is open today?")
 
     def test_unconfirmed_ambiguous_prefix_is_not_a_global_alias(self):
-        for prefix in ["Fed, stop.", "Third storm."]:
+        for prefix in ["Fed, stop.", "Third storm.", "Th head, stop."]:
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as d:
                 loop, audio = self.make(d)
                 loop.accept_transcript(prefix)

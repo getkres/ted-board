@@ -81,6 +81,7 @@ def wake_retry_plausible(text: str) -> bool:
         ("ted", "storm"),
         ("ted", "stone"),
         ("fed", "stop"),
+        ("th", "head", "stop"),
     }
 
 

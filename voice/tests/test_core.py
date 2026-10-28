@@ -65,10 +65,11 @@ class CoreTests(unittest.TestCase):
     def test_wake_vocabulary_retry_requires_observed_phonetic_ambiguity(self):
         from core import wake_retry_plausible
 
-        for text in ["Third storm.", "Ted Stone", "Ted, storm.", "Fed, stop."]:
+        for text in ["Third storm.", "Ted Stone", "Ted, storm.", "Fed, stop.", "Th head, stop."]:
             self.assertTrue(wake_retry_plausible(text))
             self.assertIsNone(wake_command(text), "ambiguous text is never a wake command by itself")
-        for text in ["", "(eerie music)", "[Third storm]", "you", "the storm", "Third storm is approaching"]:
+        for text in ["", "(eerie music)", "[Third storm]", "you", "the storm", "Third storm is approaching",
+                     "the head stop", "Th head stop the engine", "[Th head stop]"]:
             self.assertFalse(wake_retry_plausible(text))
 
     def test_only_reply_after_exact_request_and_final_text(self):
