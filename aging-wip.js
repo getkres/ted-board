@@ -71,6 +71,16 @@ const AgingWip = (() => {
     }
     return rows;
   }
+  function liveWorker(job, now) {
+    if (!job || job.worker_live !== true || !['running', 'untracked'].includes(job.status) || !Number.isInteger(job.pid) || job.pid <= 1 || !text(job.identity)) return false;
+    const heartbeat = timestamp(job.heartbeat_at);
+    const observed = typeof job.worker_live_observed_at === 'number' ? job.worker_live_observed_at * 1000 : timestamp(job.worker_live_observed_at);
+    const until = typeof job.worker_live_until === 'number' ? job.worker_live_until * 1000 : timestamp(job.worker_live_until);
+    return [heartbeat, observed, until].every(value => Number.isFinite(value)) && now - heartbeat >= -15000 && now - heartbeat <= 120000 && now - observed >= -15000 && now - observed <= 120000 && until > now;
+  }
+  function workerAttached(row, jobs, now) {
+    return list(jobs).some(job => liveWorker(job, now) && ((row.card_id && [job.card_id, job.zero_wait_source_card_id].includes(row.card_id)) || list(job.zero_wait_item_ids).includes(row.id) || row.id === 'job:' + job.id || (job.card_id && row.id === 'job:' + job.card_id)));
+  }
   function prepare({reconciliation = null, cards = [], jobs = [], approvals = [], loaded = false, error = '', now = Date.now()} = {}) {
     const available = Boolean(reconciliation && Array.isArray(reconciliation.items));
     const generatedAt = timestamp(reconciliation?.generated_at);
@@ -109,13 +119,15 @@ const AgingWip = (() => {
     }
     const seen = new Set();
     const tedQueue = queue.filter(row => !seen.has(row.id) && seen.add(row.id)).sort(oldest);
-    const bannerValue = reconciliation?.banner;
-    let banner = typeof bannerValue === 'string' ? bannerValue : bannerValue && typeof bannerValue === 'object' && bannerValue.active !== false ? text(bannerValue.message) || text(bannerValue.text) : '';
-    const escalated = items.filter(row => row.ageMs !== null && row.ageMs >= 12 * HOUR);
-    if (!banner && escalated.length) banner = 'Ted follow-up needed: ' + escalated.length + ' open ' + (escalated.length === 1 ? 'item has' : 'items have') + ' waited at least 12 hours.';
-    if (!banner && bannerValue === true) banner = 'Ted follow-up needed. Check Jobs for coverage defects or pending work.';
+    const escalated = items.filter(row => row.owner === 'ted' && row.overdue && row.ageMs !== null && row.ageMs >= 12 * HOUR && !workerAttached(row, jobs, now));
+    const tedUnattendedCount = escalated.length;
+    const sebastianDecisionCount = items.filter(row => row.owner === 'sebastian').length;
+    let banner = tedUnattendedCount ? 'Ted follow-up needed: ' + tedUnattendedCount + ' open ' + (tedUnattendedCount === 1 ? 'item has' : 'items have') + ' waited at least 12 hours with no live worker attached.' : '';
+    if (!banner && Array.isArray(coverage) && coverage.length) banner = 'Ted follow-up needed. Check Jobs for incomplete work coverage.';
     if (banner && (stale || error)) banner += ' Reconciliation is ' + (error ? 'not refreshing' : 'stale') + '; check Jobs for coverage defects.';
-    return {available, stale, generatedAt, items, tedQueue, warnings, banner};
+    let decisions = sebastianDecisionCount ? 'Sebastian: ' + sebastianDecisionCount + ' ' + (sebastianDecisionCount === 1 ? 'decision waiting.' : 'decisions waiting.') : '';
+    if (decisions && (stale || error)) decisions += ' Last known count; reconciliation is ' + (error ? 'not refreshing.' : 'stale.');
+    return {available, stale, generatedAt, items, tedQueue, warnings, banner, decisions, tedUnattendedCount, sebastianDecisionCount};
   }
   function render(container, view, {onOpenCard} = {}) {
     const doc = container.ownerDocument;
