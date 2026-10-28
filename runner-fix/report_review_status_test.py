@@ -55,7 +55,7 @@ class ReportReviewStatusTests(unittest.TestCase):
         for phrase in ('NEEDS TED REVIEW', 'pending review', 'PR pending', 'Ted review'):
             with self.subTest(phrase=phrase):
                 observed = self.snapshot('Prior result.\n  ' + phrase + ': inspect the packet.')
-                self.assertIs(observed['workflows']['finished']['review_required'], True)
+                self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
                 result = runtime.plan(observed, now=1800000000)
                 self.assertIn('card:finished', [row['id'] for row in result['items']])
 
@@ -64,7 +64,7 @@ class ReportReviewStatusTests(unittest.TestCase):
                        'blocked on Ted review', 'blocked, PR pending'):
             with self.subTest(status=status):
                 observed = self.snapshot('LIVE_STATE: blocked\nLIVE_STATUS: ' + status)
-                self.assertIs(observed['workflows']['finished']['review_required'], True)
+                self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
 
     def test_negated_or_completed_status_does_not_create_review_work(self):
         for value in ('no pending review', 'not pending review', 'without pending review',
@@ -77,7 +77,30 @@ class ReportReviewStatusTests(unittest.TestCase):
 
     def test_negation_of_other_work_does_not_hide_a_real_status_hold(self):
         observed = self.snapshot('LIVE_STATUS: no SQL or sends; needs ted review')
-        self.assertIs(observed['workflows']['finished']['review_required'], True)
+        self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
+
+    def test_markdown_line_start_holds_remain_visible(self):
+        for prefix, suffix in (('# ', ''), ('## ', ''), ('- ', ''),
+                               ('1. ', ''), ('**', '**'), ('Status: ', '')):
+            with self.subTest(prefix=prefix):
+                observed = self.snapshot(prefix + 'Needs Ted review' + suffix)
+                self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
+
+    def test_latest_live_status_supersedes_an_older_status_line(self):
+        self.assert_finished('LIVE_STATUS: needs ted review\nLIVE_STATUS: done, merged')
+
+    def test_unrelated_completion_and_no_op_words_do_not_negate_hold(self):
+        for status in ('needs ted review before the PR closes',
+                       'needs ted review of the no-op fix'):
+            with self.subTest(status=status):
+                observed = self.snapshot('LIVE_STATUS: ' + status)
+                self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
+
+    def test_pending_design_selection_remains_a_review_hold(self):
+        observed = self.snapshot('LIVE_STATE: blocked\nLIVE_STATUS: finals uploaded; awaiting design selection')
+        self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
+        result = runtime.plan(observed, now=1800000000)
+        self.assertIn('card:finished', [row['id'] for row in result['items']])
 
     def test_negated_first_clause_cannot_promote_later_ordinary_prose(self):
         self.assert_finished('pending review completed; historical needs ted review')
@@ -92,10 +115,10 @@ class ReportReviewStatusTests(unittest.TestCase):
             with self.subTest(value=value):
                 observed = self.snapshot('LIVE_STATUS: needs ted review',
                                          workflow={'review_required': value})
-                self.assertIs(observed['workflows']['finished']['review_required'], value)
+                self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), value)
         observed = self.snapshot('LIVE_STATUS: no pending review',
                                  workflow={'review_required': True})
-        self.assertIs(observed['workflows']['finished']['review_required'], True)
+        self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
 
     def test_pending_sql_and_real_delivery_chain_remain_visible(self):
         for kwargs in ({'sql': True}, {'workflow': {'pr_url':

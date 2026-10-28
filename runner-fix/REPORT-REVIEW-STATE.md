@@ -8,13 +8,24 @@ cards in the open ledger and produced false dead-lane alarms.
 The canonical runtime bundle now keeps an explicit `workflow.json`
 `review_required` value authoritative, including `false`. Only when that field
 is absent does it infer a review hold from a phrase at the start of a line or
-in a `LIVE_STATUS:` clause. It ignores fenced examples, incidental prose, and
-clauses containing `no`, `not`, `without`, `completed`, or `closes`. Other clauses
-can still express a real hold, for example `no SQL or sends; needs ted review`.
+in the latest `LIVE_STATUS:` line. Markdown headings, bullets, emphasis, and a
+line-start `Status:` label retain their status meaning. The fallback recognizes
+an explicit `awaiting design selection` hold as review work, preserving that
+existing pending decision.
+
+It ignores fenced examples and incidental prose. Negation before a phrase, or
+a directly completed/closed predicate after it, cancels that phrase. Words in
+unrelated suffixes, such as `needs ted review before the PR closes` or `needs
+ted review of the no-op fix`, do not cancel it. Separate status clauses can
+still express a real hold, for example `no SQL or sends; needs ted review`.
 
 Pending SQL packets and actual PR delivery chains retain their existing
 independent evidence. This change does not close cards, rewrite reports, edit
 queues, clear dispatch holds, or replay approvals.
+
+The old generic `not merged`, `not deployed`, and `not live` prose signals no
+longer create review workflow records. Actual unfinished deployment remains
+represented by its structured PR, deployment, or verification evidence.
 
 The implementation is part of `reconciler-runtime.patch`, and the manifest pins
 its reconstructed checksum. The regression suite exercises the real snapshot

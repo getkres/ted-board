@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,594 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -168,9 +168,10 @@
 +
 +def report_review_required(text):
 + """Use current status prose only when structured workflow state is absent."""
-+ phrase=re.compile(r'\b(?:needs ted review|pending review|pr pending|ted review)\b',re.I)
-+ negated=re.compile(r'\b(?:no|not|without|completed|closes)\b',re.I)
-+ fence=None
++ phrase=re.compile(r'\b(?:needs ted review|pending review|pr pending|ted review|awaiting design selection)\b',re.I)
++ negated=re.compile(r'\b(?:no|not|without|completed|closes)\b(?!-)',re.I)
++ finished=re.compile(r'^\s*(?:(?:is|was|has been)\s+)?(?:completed|closed|closes|not\s+(?:needed|required))\b',re.I)
++ lines=[];fence=None
 + for line in text.splitlines():
 +  line=line.strip()
 +  marker=re.match(r'(`{3,}|~{3,})',line)
@@ -179,12 +180,20 @@
 +   elif marker[1][0]==fence:fence=None
 +   continue
 +  if fence:continue
++  line=re.sub(r'^(?:#{1,6}\s+|[-+*]\s+|\d+[.)]\s+)','',line)
++  line=re.sub(r'^(?:\*\*|__)(.*?)(?:\*\*|__)(?=\s|:|$)',r'\1',line)
++  line=re.sub(r'^Status\s*:\s*','',line,flags=re.I)
++  lines.append(line)
++ last_status=max((i for i,line in enumerate(lines) if re.match(r'LIVE_STATUS\s*:',line,re.I)),default=-1)
++ for i,line in enumerate(lines):
 +  status=re.match(r'LIVE_STATUS\s*:\s*(.*)$',line,re.I)
++  if status and i!=last_status:continue
 +  value=status[1] if status else line
 +  if not status and not phrase.match(value):continue
 +  clauses=re.split(r'[.;,:!?]',value)
 +  for clause in clauses if status else clauses[:1]:
-+   if phrase.search(clause) and not negated.search(clause):return True
++   match=phrase.search(clause)
++   if match and not negated.search(clause[:match.start()]) and not finished.match(clause[match.end():]):return True
 + return False
 +
 +

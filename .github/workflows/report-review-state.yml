@@ -3,15 +3,13 @@ name: Report review state regressions
 on:
   pull_request:
     paths:
-      - 'runner-fix/reconciler-runtime.patch'
-      - 'runner-fix/reconciler-manifest.json'
+      - 'runner-fix/reconciler*'
       - 'runner-fix/report_review_status_test.py'
       - '.github/workflows/report-review-state.yml'
   push:
     branches: [main]
     paths:
-      - 'runner-fix/reconciler-runtime.patch'
-      - 'runner-fix/reconciler-manifest.json'
+      - 'runner-fix/reconciler*'
       - 'runner-fix/report_review_status_test.py'
       - '.github/workflows/report-review-state.yml'
 
