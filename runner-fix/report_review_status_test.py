@@ -102,6 +102,18 @@ class ReportReviewStatusTests(unittest.TestCase):
         result = runtime.plan(observed, now=1800000000)
         self.assertIn('card:finished', [row['id'] for row in result['items']])
 
+    def test_awaiting_ted_dry_run_review_remains_a_hold(self):
+        observed = self.snapshot('LIVE_STATUS: awaiting ted dry-run review')
+        self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
+
+    def test_unrelated_parenthesis_or_dash_negation_keeps_real_hold(self):
+        for status in ('PR open (not merged) needs ted review',
+                       'not blocked - needs ted review'):
+            with self.subTest(status=status):
+                observed = self.snapshot('LIVE_STATUS: ' + status)
+                self.assertIs(observed['workflows'].get('finished', {}).get('review_required'), True)
+        self.assert_finished('LIVE_STATUS: no (pending review)')
+
     def test_negated_first_clause_cannot_promote_later_ordinary_prose(self):
         self.assert_finished('pending review completed; historical needs ted review')
 

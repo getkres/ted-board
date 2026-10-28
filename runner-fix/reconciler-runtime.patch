@@ -1,6 +1,6 @@
 --- /dev/null
 +++ reconciler_runtime.py
-@@ -0,0 +1,594 @@
+@@ -0,0 +1,596 @@
 +#!/usr/bin/env python3
 +"""Private mini adapter. Default dry-run performs GETs and local reads only."""
 +import argparse
@@ -168,7 +168,7 @@
 +
 +def report_review_required(text):
 + """Use current status prose only when structured workflow state is absent."""
-+ phrase=re.compile(r'\b(?:needs ted review|pending review|pr pending|ted review|awaiting design selection)\b',re.I)
++ phrase=re.compile(r'\b(?:needs ted review|pending review|pr pending|ted review|awaiting (?:ted (?:dry-run )?)?review|awaiting design selection)\b',re.I)
 + negated=re.compile(r'\b(?:no|not|without|completed|closes)\b(?!-)',re.I)
 + finished=re.compile(r'^\s*(?:(?:is|was|has been)\s+)?(?:completed|closed|closes|not\s+(?:needed|required))\b',re.I)
 + lines=[];fence=None
@@ -190,10 +190,12 @@
 +  if status and i!=last_status:continue
 +  value=status[1] if status else line
 +  if not status and not phrase.match(value):continue
-+  clauses=re.split(r'[.;,:!?]',value)
++  clauses=re.split(r'[.;,:!?]|\s+-\s+',value)
 +  for clause in clauses if status else clauses[:1]:
 +   match=phrase.search(clause)
-+   if match and not negated.search(clause[:match.start()]) and not finished.match(clause[match.end():]):return True
++   if not match:continue
++   prefix=re.sub(r'\([^()]*\)','',clause[:match.start()])
++   if not negated.search(prefix) and not finished.match(clause[match.end():]):return True
 + return False
 +
 +
