@@ -109,6 +109,13 @@ class ControlCenterV3 {
  paper(parent){const p=this.el('section','v3-paper');parent.append(p);return p;}
  empty(parent,text='Not logged.'){parent.append(this.el('p','v3-empty',text));}
  tools(parent){const details=this.el('details','v3-tools'),summary=this.el('summary',null,'Rules, sprint, batches, and jobs');details.append(summary);const row=this.el('div','v3-actions');for(const name of ['Veto','Rules','Sprint','Batches'])row.append(this.button(name,'',()=>controlCenter.open(name)));row.append(this.button('Jobs','',()=>this.select('Jobs')));details.append(row);const all=this.el('details','v3-all-cards');all.append(this.el('summary',null,'All project cards'));const list=this.el('div','v3-card-directory');for(const card of this.getState().cards){const open=this.button(card.project+' / '+card.title,'',()=>{this.item=card.id;this.split='yours';this.select('inbox');});list.append(open);}all.append(list);details.append(all);parent.append(details);}
+ businessPatch(parent){
+  const state=this.getState();
+  BusinessPatch.render(parent,BusinessPatch.prepare({cards:state.cards,approvals:state.approvals,loaded:state.loaded,loading:state.loading,error:state.loadError,approvalsLoaded:state.jobsLoaded,approvalsError:state.jobsError}),{onOpenCard:id=>{
+   this.item=id;this.split='yours';this.select('inbox');
+   const detail=parent.ownerDocument.querySelector?.('.v3-detail');if(detail){detail.tabIndex=-1;detail.focus();detail.scrollIntoView({block:'nearest'});}
+  }});
+ }
  needsYou(card){return !['done','killed'].includes(card.section)&&(['yours','needs_you'].includes(card.section)||this.pendingApprovals(card).length>0);}
  needs(){return this.getState().cards.filter(c=>this.needsYou(c));}
  inboxGroups(){
@@ -177,7 +184,7 @@ class ControlCenterV3 {
    grid.append(list);
    const selected=this.getState().cards.find(c=>c.id===this.item);if(selected)grid.append(this.itemDetail(selected,cards));else {const side=this.el('aside','v3-stream');side.append(this.el('h2',null,'Ted decided'),this.decisionList(calls));grid.append(side);}paper.append(grid);
   }
-  this.attentionList(paper);this.tools(paper);
+  this.attentionList(paper);this.businessPatch(paper);this.tools(paper);
   if(this.split==='yours'&&this.spTiles){const spaces=this.el('section','v3-home-spaces');spaces.append(this.el('h2',null,'Spaces'));this.spTiles(spaces);main.append(spaces);}
  }
  ticket(card,i){

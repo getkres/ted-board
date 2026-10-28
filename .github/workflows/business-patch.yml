@@ -1,0 +1,30 @@
+name: Business patch
+on:
+  pull_request:
+    paths:
+      - 'business-patch.*'
+      - 'v3.js'
+      - 'index.html'
+      - 'tests/business_patch_test.cjs'
+      - '.github/workflows/business-patch.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'business-patch.*'
+      - 'v3.js'
+      - 'index.html'
+      - 'tests/business_patch_test.cjs'
+      - '.github/workflows/business-patch.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/business_patch_test.cjs
+      - run: node --check business-patch.js
+      - run: node --check v3.js
