@@ -42,3 +42,6 @@
  .aging-overdue{border-color:var(--aging-red)!important}
  .aging-overdue th[scope=row]{box-shadow:none}
 }
+
+.aging-decisions{margin:12px 0;color:var(--muted);font-size:.875rem;line-height:1.5;overflow-wrap:anywhere}
+.aging-decisions[hidden]{display:none}

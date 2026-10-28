@@ -104,10 +104,10 @@ test('unresolvable queue entries stay visible as coverage defects', () => {
   assert.match(view.warnings.join(' '), /queue.*missing/i);
 });
 
-test('12-hour work raises a board-wide banner without hiding publisher text', () => {
-  assert.match(prepare([item('stuck', {action_started_at: at(12)})]).banner, /12 hours|12h/);
+test('12-hour overdue Ted work raises a banner from the current item count', () => {
+  assert.match(prepare([item('stuck', {action_started_at: at(12), next_action_due: at(0)})]).banner, /12 hours|12h/);
   assert.equal(prepare([item('new')]).banner, '');
-  assert.equal(prepare([], {reconciliation: {generated_at: at(0), items: [], ted_queue: [], banner: {active: true, message: 'Ted review is overdue.'}}}).banner, 'Ted review is overdue.');
+  assert.equal(prepare([], {reconciliation: {generated_at: at(0), items: [], ted_queue: [], banner: {active: true, message: 'Ted review is overdue.'}}}).banner, '');
 });
 
 test('source data is not mutated, and text remains plain data', () => {
@@ -140,4 +140,35 @@ test('a coverage-only banner does not invent a twelve-hour delay', () => {
   const view = prepare([], {reconciliation: {generated_at: at(0), items: [], ted_queue: [], banner: true, coverage_defects: ['github']}});
   assert.match(view.banner, /follow-up|coverage/i);
   assert.doesNotMatch(view.banner, /12 hours|waited/);
+});
+
+test('banner counts only overdue unattended Ted work and separates Sebastian decisions', () => {
+  const old = {action_started_at: at(13), next_action_due: at(1)};
+  const rows = [item('ted', old), item('busy', old), item('seb', {...old, owner: 'sebastian'}), item('external', {...old, owner: 'external'}), item('worker', {...old, owner: 'worker:one'}), item('not-due', {...old, next_action_due: at(-1)})];
+  const job = {card_id: 'busy', status: 'running', pid: 123, identity: 'identity', heartbeat_at: at(0), worker_live: true, worker_live_observed_at: now / 1000, worker_live_until: now / 1000 + 100};
+  const view = prepare(rows, {jobs: [job]});
+  assert.equal(view.tedUnattendedCount, 1);
+  assert.equal(view.sebastianDecisionCount, 1);
+  assert.match(view.banner, /1 .*Ted|Ted.*1 /);
+  assert.match(view.banner, /no live worker/);
+  assert.match(view.decisions, /Sebastian.*1/);
+  for (const change of [{worker_live: false}, {worker_live: undefined}, {worker_live_until: now / 1000}, {heartbeat_at: at(1)}, {worker_live_observed_at: now / 1000 - 121}]) {
+    assert.equal(prepare(rows, {jobs: [{...job, ...change}]}).tedUnattendedCount, 2);
+  }
+});
+
+test('a repair worker can cover a detached item or its source card', () => {
+  const old = {action_started_at: at(13), next_action_due: at(1)};
+  const rows = [item('detached', {...old, card_id: null}), item('source', old)];
+  const job = {card_id: 'repair', status: 'running', pid: 123, identity: 'identity', heartbeat_at: at(0), worker_live: true, worker_live_observed_at: now / 1000, worker_live_until: now / 1000 + 100, zero_wait_item_ids: ['detached'], zero_wait_source_card_id: 'source'};
+  const view = prepare(rows, {jobs: [job]});
+  assert.equal(view.tedUnattendedCount, 0);
+  assert.equal(view.banner, '');
+});
+
+test('Sebastian-only decisions never use the Ted follow-up banner', () => {
+  const view = prepare([item('decision', {owner: 'sebastian', action_started_at: at(13), next_action_due: at(1)})]);
+  assert.equal(view.banner, '');
+  assert.equal(view.sebastianDecisionCount, 1);
+  assert.match(view.decisions, /Sebastian/);
 });
