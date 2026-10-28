@@ -5,10 +5,10 @@ const {chromium, fixture, clip} = require('./browser.cjs');
 
 const out = process.env.QA_OUT || '../qa-evidence/pr8/theme';
 const cases = [
-  {name: 'system-light', system: 'light', override: null, mode: 'light'},
-  {name: 'system-dark', system: 'dark', override: null, mode: 'dark'},
-  {name: 'override-light', system: 'dark', override: 'light', mode: 'light'},
-  {name: 'override-dark', system: 'light', override: 'dark', mode: 'dark'},
+  {name: 'system-light', system: 'light', override: null, mode: 'day'},
+  {name: 'system-dark', system: 'dark', override: null, mode: 'night'},
+  {name: 'override-light', system: 'dark', override: 'day', mode: 'day'},
+  {name: 'override-dark', system: 'light', override: 'night', mode: 'night'},
 ];
 
 // Catch lost system preferences, ineffective overrides, stale Take B artwork,
@@ -35,9 +35,9 @@ const cases = [
         });
         await fixture(page);
         await page.emulateMedia({colorScheme: test.system});
+        if (test.override) await page.addInitScript(mode => localStorage.setItem('ted-sky', mode), test.override);
         await page.goto('http://127.0.0.1:8763/#k=fixture-only&tab=inbox');
         await page.waitForSelector('.v3-paper');
-        if (test.override) await page.evaluate(mode => { document.documentElement.dataset.theme = mode; }, test.override);
         await page.evaluate(() => document.fonts.ready);
         const appearance = await page.evaluate(() => {
           const style = selector => getComputedStyle(document.querySelector(selector));
@@ -45,6 +45,10 @@ const cases = [
           const headline = style('.v3-headline');
           return {
             background: style('body').backgroundColor,
+            sky: document.documentElement.dataset.sky,
+            layerPosition: style('.sky-layer').position,
+            visibleArt: style('.sky-' + (document.documentElement.dataset.sky === 'day' ? 'day' : 'night')).opacity,
+            glassBlur: style('.masthead').backdropFilter,
             text: style('body').color,
             colorScheme: style('html').colorScheme,
             bodyFont: style('body').fontFamily,
@@ -66,9 +70,13 @@ const cases = [
           };
         });
         const label = test.name + ' at ' + width;
-        assert.equal(appearance.background, test.mode === 'light' ? 'rgb(255, 255, 255)' : 'rgb(17, 17, 17)', label + ' body background');
-        assert.equal(appearance.text, test.mode === 'light' ? 'rgb(17, 17, 17)' : 'rgb(255, 255, 255)', label + ' body text');
-        assert.equal(appearance.colorScheme, test.mode, label + ' native control scheme');
+        assert.equal(appearance.background, 'rgba(0, 0, 0, 0)', label + ' transparent body reveals painted sky');
+        assert.equal(appearance.sky, test.mode, label + ' selected sky');
+        assert.equal(appearance.layerPosition, 'fixed', label + ' sky remains behind scroll');
+        assert.equal(appearance.visibleArt, '1', label + ' chosen art is visible');
+        assert.match(appearance.glassBlur, /blur\(24px\)/, label + ' measured glass blur');
+        assert.equal(appearance.text, test.mode === 'day' ? 'rgb(255, 255, 255)' : 'rgb(243, 245, 250)', label + ' body text');
+        assert.equal(appearance.colorScheme, test.mode === 'day' ? 'light' : 'dark', label + ' native control scheme');
         assert.notEqual(appearance.selectedTabCount, appearance.selectedTabBackground, label + ' selected tab count stays visible');
         assert.match(appearance.bodyFont, /^['"]?Archivo['"]?(?:,|$)/, label + ' body font');
         assert.match(appearance.guideFont, /^['"]?Archivo['"]?(?:,|$)/, label + ' guided instructions font');
@@ -78,15 +86,15 @@ const cases = [
         assert.equal(appearance.displayCase, 'uppercase', label + ' uppercase display');
         assert.match(appearance.stampFont, /^['"]?Archivo['"]?(?:,|$)/, label + ' stamp font');
         assert.match(appearance.metadataFont, /^['"]?Courier Prime['"]?(?:,|$)/, label + ' metadata font');
-        assert.equal(appearance.stampColor, 'rgb(226, 64, 42)', label + ' exact theme red');
-        assert.equal(appearance.stampBorder, 'double', label + ' stamp border');
-        assert.ok(parseFloat(appearance.stampBorderWidth) >= 3, label + ' visible double border');
+        assert.equal(appearance.stampColor, 'rgb(181, 42, 24)', label + ' approved stamp red');
+        assert.equal(appearance.stampBorder, 'solid', label + ' approved outlined stamp');
+        assert.ok(parseFloat(appearance.stampBorderWidth) >= 2, label + ' visible stamp border');
         assert.equal(appearance.stampText, 'TED HANDLED 1', label + ' confirmed decision count');
         assert.ok(appearance.loadedFonts.includes('Archivo'), label + ' loaded Archivo');
         assert.ok(appearance.loadedFonts.includes('Courier Prime'), label + ' loaded Courier Prime');
         assert.deepEqual(appearance.oldBackgrounds, [], label + ' no Take B backgrounds');
         assert.equal(await page.locator('.v3-counter circle').count(), 0, label + ' flat count artwork');
-        assert.ok(await page.locator('.v3-counter rect').evaluateAll(rectangles => rectangles.some(rectangle => getComputedStyle(rectangle).fill === 'rgb(226, 64, 42)')), label + ' red count artwork');
+        assert.ok(await page.locator('.v3-counter rect').evaluateAll((rectangles, mode) => rectangles.some(rectangle => getComputedStyle(rectangle).fill === (mode === 'day' ? 'rgb(181, 42, 24)' : 'rgb(192, 46, 27)')), test.mode), label + ' red count artwork');
         assert.equal(await page.locator('.v3-counter svg text').textContent(), '3', label + ' needs-you count');
         assert.deepEqual(externalRequests, [], label + ' self-hosted theme assets');
         const qa = await clip(page);
@@ -106,7 +114,7 @@ const cases = [
       }
     }
     fs.writeFileSync(path.join(out, 'theme-results.json'), JSON.stringify(report, null, 2));
-    console.log('Poster theme: ' + report.length + ' screenshots, system modes, explicit overrides, local fonts, and live counts pass.');
+    console.log('Glass sky theme: ' + report.length + ' screenshots, system modes, explicit overrides, local fonts, and live counts pass.');
   } finally {
     await browser.close();
   }
