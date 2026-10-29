@@ -158,6 +158,12 @@ class AdapterTests(unittest.TestCase):
         store._flush_publications()
         self.assertEqual(data['publications'],{'sample':item})
 
+    def test_status_change_alone_keeps_unresolved_completion_pending(self):
+        session=dict(card_id='sample',turn='old',lease_token='lease',status='queued',queue=[],pid=None)
+        store,data,item=self.publication_store(session)
+        store._flush_publications()
+        self.assertEqual(data['publications'],{'sample':item})
+
     def test_stale_snapshot_cannot_discard_replacement_publication(self):
         session=dict(card_id='sample',turn='new',lease_token='lease',status='done',queue=[],pid=None)
         replacement=dict(id='new',turn='new',kind='complete')
