@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Exercise current lane and managed adapters without provider or live state access."""
 import ast
+import contextlib
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -65,10 +67,14 @@ MANAGED += """
   with self.locked() as lock:
    for cid,item in pending.items():
     with self.locked() as data:
+     s=data['sessions'][cid]
+     current=data['publications'].get(cid,{})
+     valid=not s.get('stop_requested') and current.get('id')==item['id'] and all(s.get(key)==item.get(key) for key in ('turn','lease_token','status'))
      if valid and item['state']=='running':
       valid=True
      if not valid:
       if current.get('id')==item['id']:data['publications'].pop(cid,None)
+      continue
     try:confirmed=publish_live(cid,item['state'],item['line'],raise_gone=True,**item['kwargs'])
     except RuntimeError:confirmed=False
     if not confirmed:continue
@@ -116,6 +122,70 @@ def main():
 
 
 class AdapterTests(unittest.TestCase):
+    def publication_store(self, session, current=None):
+        """Execute the generated publisher, with only storage and I/O isolated."""
+        item=dict(id='old',card_id='sample',turn='old',lease_token='lease',status='done',
+                  state='blocked',line='ted review',kind='complete',kwargs={'section':'up_next'})
+        data=dict(sessions={'sample':session},publications={'sample':current or dict(item)},approvals={})
+        source=adapter().adapt(MANAGED,managed=True)
+        cls=next(node for node in ast.parse(source).body if isinstance(node,ast.ClassDef))
+        cls.body=[node for node in cls.body if node.name in ('_flush_publications','_completion_eligible')]
+        namespace=dict(json=json,pending={'sample':item},publish_live=lambda *a,**k:self.fail('unexpected provider write'))
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[cls],type_ignores=[])),'generated-publisher','exec'),namespace)
+        store=namespace['Store']()
+        @contextlib.contextmanager
+        def locked():
+            yield data
+        store.locked=locked
+        return store,data,item
+
+    def test_obsolete_completion_is_discarded_before_provider_access(self):
+        for turn,lease in (('new','lease'),('old','new-lease')):
+            with self.subTest(turn=turn,lease=lease):
+                session=dict(card_id='sample',turn=turn,lease_token=lease,status='done',queue=[],pid=None)
+                store,data,_=self.publication_store(session)
+                store._flush_publications()
+                self.assertEqual(data['publications'],{})
+                self.assertEqual(data['sessions']['sample'],session)
+
+    def test_confirmed_current_completion_is_cleared(self):
+        session=dict(card_id='sample',turn='old',lease_token='lease',status='done',queue=[],pid=None)
+        store,data,_=self.publication_store(session)
+        published=[]
+        def confirmed(*args,**kwargs):
+            published.append((args,kwargs))
+            return True
+        store._flush_publications.__func__.__globals__['publish_live']=confirmed
+        store._flush_publications()
+        self.assertEqual(data['publications'],{})
+        self.assertEqual(published,[(('sample','blocked','ted review'),{'raise_gone':True,'section':'up_next'})])
+        self.assertEqual(data['sessions']['sample'],session)
+
+    def test_current_completion_with_unfinished_work_remains_pending(self):
+        session=dict(card_id='sample',turn='old',lease_token='lease',status='done',queue=[{'id':'next'}],pid=None)
+        store,data,item=self.publication_store(session)
+        store._flush_publications()
+        self.assertEqual(data['publications'],{'sample':item})
+
+    def test_stop_hold_with_matching_completion_fence_remains_pending(self):
+        session=dict(card_id='sample',turn='old',lease_token='lease',status='done',queue=[],pid=None,stop_requested=True)
+        store,data,item=self.publication_store(session)
+        store._flush_publications()
+        self.assertEqual(data['publications'],{'sample':item})
+
+    def test_status_change_alone_keeps_unresolved_completion_pending(self):
+        session=dict(card_id='sample',turn='old',lease_token='lease',status='queued',queue=[],pid=None)
+        store,data,item=self.publication_store(session)
+        store._flush_publications()
+        self.assertEqual(data['publications'],{'sample':item})
+
+    def test_stale_snapshot_cannot_discard_replacement_publication(self):
+        session=dict(card_id='sample',turn='new',lease_token='lease',status='done',queue=[],pid=None)
+        replacement=dict(id='new',turn='new',kind='complete')
+        store,data,_=self.publication_store(session,replacement)
+        store._flush_publications()
+        self.assertEqual(data['publications'],{'sample':replacement})
+
     def test_lane_source_preserves_environment_and_routes_spawn(self):
         result = adapter().adapt(LEGACY, managed=False)
         ast.parse(result)
