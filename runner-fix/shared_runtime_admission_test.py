@@ -140,11 +140,26 @@ class AdapterTests(unittest.TestCase):
         return store,data,item
 
     def test_obsolete_completion_is_discarded_before_provider_access(self):
-        session=dict(card_id='sample',turn='new',lease_token='lease',status='done',queue=[],pid=None)
+        for turn,lease in (('new','lease'),('old','new-lease')):
+            with self.subTest(turn=turn,lease=lease):
+                session=dict(card_id='sample',turn=turn,lease_token=lease,status='done',queue=[],pid=None)
+                store,data,_=self.publication_store(session)
+                store._flush_publications()
+                self.assertEqual(data['publications'],{})
+                self.assertEqual(data['sessions']['sample'],session)
+
+    def test_confirmed_current_completion_is_cleared(self):
+        session=dict(card_id='sample',turn='old',lease_token='lease',status='done',queue=[],pid=None)
         store,data,_=self.publication_store(session)
+        published=[]
+        def confirmed(*args,**kwargs):
+            published.append((args,kwargs))
+            return True
+        store._flush_publications.__func__.__globals__['publish_live']=confirmed
         store._flush_publications()
         self.assertEqual(data['publications'],{})
-        self.assertEqual(data['sessions']['sample']['turn'],'new')
+        self.assertEqual(published,[(('sample','blocked','ted review'),{'raise_gone':True,'section':'up_next'})])
+        self.assertEqual(data['sessions']['sample'],session)
 
     def test_current_completion_with_unfinished_work_remains_pending(self):
         session=dict(card_id='sample',turn='old',lease_token='lease',status='done',queue=[{'id':'next'}],pid=None)
