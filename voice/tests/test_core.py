@@ -51,6 +51,22 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(wake_command("Ted, stop. What is open?"), "What is open?")
         self.assertIsNone(wake_command("The answer is Ted, stop."))
 
+    def test_whisper_dialogue_marker_preserves_exact_wake_and_pause_commands(self):
+        for text, expected in [
+            ("- Hey, Ted, stop.", "__interrupt__"),
+            ("- Hey Ted, what is open?", "what is open?"),
+            ("- Ted, stop. What is open?", "What is open?"),
+            ("- Ted, stop listening.", "__pause__"),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(wake_command(text), expected)
+
+    def test_dialogue_marker_does_not_admit_confusables_or_embedded_commands(self):
+        for text in ["- Pay debt, stop.", "- Hey Dad, stop.", "- They said Hey Ted, stop.",
+                     "-- Hey Ted, stop.", "-Hey Ted, stop.", "* Hey Ted, stop."]:
+            with self.subTest(text=text):
+                self.assertIsNone(wake_command(text))
+
     def test_playback_echo_is_rejected_with_punctuation_and_wake_variations(self):
         from core import spoken_echo
 
