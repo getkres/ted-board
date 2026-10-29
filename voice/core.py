@@ -46,7 +46,8 @@ def speech_text(text: str) -> str:
 
 
 def wake_command(text: str):
-    text = text.strip()
+    # Whisper can prepend a dialogue marker to an otherwise exact wake phrase.
+    text = re.sub(r"^-\s+", "", text.strip(), count=1)
     if re.fullmatch(r"(?:hey\s+)?ted[, .!]*\s*stop listening[.! ]*", text, re.I):
         return "__pause__"
     stop = re.match(r"^(?:hey[ ,.!]*)?ted\b[ ,.!:]*stop\b[ ,.!:]*", text, re.I)

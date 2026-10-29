@@ -231,6 +231,42 @@ class LoopTests(unittest.TestCase):
             self.assertEqual(loop.state, "listening")
             audio.resume.assert_not_called()
 
+    def test_dialogue_prefixed_room_stop_arms_followup_without_routing(self):
+        from concurrent.futures import Future
+
+        with tempfile.TemporaryDirectory() as d:
+            loop, audio = self.make(d)
+            loop.state = "speaking"
+            audio.playing = True
+            loop.begin(0.999)
+            loop.verify_future = Future()
+            loop.verify_future.set_result(dict(text="- Hey, Ted, stop.",
+                                              spoken_text="Opening words. Opening words.",
+                                              echo_method="audio_slice"))
+            loop.tick()
+            self.assertEqual(loop.state, "listening")
+            self.assertTrue(loop.awaiting_followup)
+            audio.resume.assert_not_called()
+            loop.bridge.deliver.assert_not_called()
+
+    def test_dialogue_prefixed_playback_echo_still_resumes_without_listening(self):
+        from concurrent.futures import Future
+
+        with tempfile.TemporaryDirectory() as d:
+            loop, audio = self.make(d)
+            loop.state = "speaking"
+            audio.playing = True
+            loop.begin(0.999)
+            loop.verify_future = Future()
+            loop.verify_future.set_result(dict(text="- Hey, Ted, stop.",
+                                              spoken_text="Hey Ted, stop.",
+                                              echo_method="audio_slice"))
+            loop.tick()
+            self.assertEqual(loop.state, "speaking")
+            self.assertFalse(loop.awaiting_followup)
+            audio.resume.assert_called_once()
+            loop.bridge.deliver.assert_not_called()
+
     def test_vocabulary_spelling_change_cannot_erase_an_unprompted_source_echo_match(self):
         from concurrent.futures import Future
 
