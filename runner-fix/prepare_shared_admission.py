@@ -166,12 +166,13 @@ def adapt_completion(source):
     source = replace_once(source, ' def _flush_publications(self):\n', COMPLETION_HELPERS + ' def _flush_publications(self):\n')
     source = replace_once(source,
         "     if valid and item['state']=='running':\n",
+        "     completion_fence_valid=all(s.get(key)==item.get(key) for key in ('turn','lease_token','status'))\n"
         "     if item.get('kind')=='complete':valid=valid and current==item and self._completion_eligible(data,s,item,fallback=False)\n"
         "     completion_snapshot=json.loads(json.dumps(dict(session=s,approvals=data.get('approvals')))) if valid and item.get('kind')=='complete' else None\n"
         "     if valid and item['state']=='running':\n")
     source = replace_once(source,
         "      if current.get('id')==item['id']:data['publications'].pop(cid,None)\n",
-        "      if current.get('id')==item['id'] and item.get('kind')!='complete':data['publications'].pop(cid,None)\n")
+        "      if current.get('id')==item['id'] and (item.get('kind')!='complete' or not completion_fence_valid):data['publications'].pop(cid,None)\n")
     source = replace_once(source,
         "    try:confirmed=publish_live(cid,item['state'],item['line'],raise_gone=True,**item['kwargs'])\n",
         "    kwargs=item['kwargs']\n"
