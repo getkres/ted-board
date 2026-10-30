@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#eef0f5">
+  <title>Taste check</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="taste.css">
+  <script src="taste.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="masthead"><a href="./" aria-label="Taste check home">taste<span class="dot" aria-hidden="true"></span></a><span id="saved-count">A five-minute check</span></header>
+  <section id="compare" aria-labelledby="title" aria-busy="true">
+    <div class="intro"><h1 id="title">Which one lands?</h1><p>Pick the stronger creative for this audience.</p></div>
+    <div class="context" id="context"><div class="tags"><span id="business">Loading</span><span id="format">Your next pair</span></div><p id="audience"></p><p id="brief"></p></div>
+    <div class="pair-meta"><span id="pair-number">Finding a pair</span><span>Tap either to inspect</span></div>
+    <div class="creatives" id="creatives">
+      <figure><figcaption>A</figcaption><button class="creative" id="creative-a" type="button" aria-label="Open creative A full size" disabled></button><p class="source" id="source-a"></p></figure>
+      <figure><figcaption>B</figcaption><button class="creative" id="creative-b" type="button" aria-label="Open creative B full size" disabled></button><p class="source" id="source-b"></p></figure>
+    </div>
+    <form id="choice-form">
+      <div class="reason"><label for="why">Why? <span>Optional</span></label><input id="why" name="why" enterkeyhint="done" maxlength="280" placeholder="What made the difference?" autocomplete="off"></div>
+      <div id="notice" role="status" aria-live="polite"></div>
+      <div class="recovery" id="recovery" hidden><button id="retry" type="button">Retry save</button><button id="refresh" type="button">Load current pair</button></div>
+      <div class="decision-rail"><div class="choices"><button id="pick-a" type="submit" name="choice" value="a" disabled>Pick A</button><button id="pick-b" type="submit" name="choice" value="b" disabled>Pick B</button></div><button id="skip" class="skip" type="submit" name="choice" value="skip" disabled>Skip this pair</button></div>
+    </form>
+  </section>
+  <section id="pause" aria-labelledby="pause-title" hidden><h1 id="pause-title" tabindex="-1">A good place to pause.</h1><p id="pause-copy">Your choices are saved.</p><button id="continue" type="button">Keep going</button><p>You can close this page and come back anytime.</p></section>
+  <footer><p id="agreement">Your choices stay on this Mac.</p><a href="process/">Design process</a></footer>
+  <noscript>This page needs JavaScript to load pairs and save choices.</noscript>
+</main>
+<dialog id="viewer" aria-label="Creative full-size view"><div class="viewer-toolbar"><strong id="viewer-title">Creative A</strong><button id="close-viewer" type="button" aria-label="Close full-size view">Close</button></div><div id="viewer-content"></div><p class="viewer-hint">Pinch to zoom in, or scroll to see the full frame.</p></dialog>
+</body>
+</html>
