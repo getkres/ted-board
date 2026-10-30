@@ -4,8 +4,8 @@
  const compare=$('compare'), notice=$('notice'), viewer=$('viewer');
  let offer=null, busy=false, retryPayload=null, mediaReady=false, generation=0;
  let sessionStart=null;
- try { const raw=sessionStorage.getItem('taste-session-start'); if(raw!==null) sessionStart=Number(raw); } catch {}
- function setStart(value){sessionStart=value;try{sessionStorage.setItem('taste-session-start',String(value));}catch{}}
+ try { const raw=sessionStorage.getItem('taste-session-start'); const value=Number(raw); if(raw!==null&&Number.isSafeInteger(value)&&value>=0) sessionStart=value; } catch {}
+ function setStart(value){sessionStart=value;try{if(value===null)sessionStorage.removeItem('taste-session-start');else sessionStorage.setItem('taste-session-start',String(value));}catch{}}
  function message(text,error=false){notice.textContent=text;notice.classList.toggle('error',error);}
  function controls(){
   $('pick-a').disabled=busy||!offer||!mediaReady;
@@ -41,8 +41,11 @@
   const image=button.querySelector('img');
   if(!image)return Promise.resolve(true);
   return new Promise(resolve=>{
-   if(image.complete)return resolve(image.naturalWidth>0);
-   image.onload=()=>resolve(true);image.onerror=()=>resolve(false);
+   let finished=false;
+   const finish=ok=>{if(finished)return;finished=true;clearTimeout(timer);resolve(ok);};
+   const timer=setTimeout(()=>finish(false),20000);
+   if(image.complete)return finish(image.naturalWidth>0);
+   image.onload=()=>finish(true);image.onerror=()=>finish(false);
   });
  }
  async function load(){
@@ -89,6 +92,9 @@
    busy=false;controls();
   }
  }
+ $('why').addEventListener('keydown',event=>{
+  if(event.key==='Enter'){event.preventDefault();event.currentTarget.blur();}
+ });
  $('choice-form').addEventListener('submit',event=>{
   event.preventDefault();const choice=event.submitter?.value;
   if(!offer||busy||!['a','b','skip'].includes(choice)||(!mediaReady&&choice!=='skip'))return;
