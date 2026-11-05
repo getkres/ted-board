@@ -26,3 +26,9 @@ body.panel-only{width:600px;height:600px;overflow:hidden;background:#162a20}
 body.panel-only{width:100vw;height:100dvh;overflow:hidden;background:#000;color-scheme:dark}
 .panel-only main{width:100vw;max-width:none;margin:0;padding:0}
 .panel-only .lens{width:100vw;height:100dvh;max-width:none;aspect-ratio:auto;border-radius:0;background:#000}
+.lens:not([data-ready])>*{visibility:hidden}
+.lens.hud-hidden{background:#000}
+.lens.hud-hidden>*{display:none!important}
+.lens:focus{outline:none}
+.lens:focus-visible:not(.hud-hidden) .hud{outline:2px solid #fff;outline-offset:5px}
+#yardage-only{width:24px;height:24px;vertical-align:middle;accent-color:var(--forest)}

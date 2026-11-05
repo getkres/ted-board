@@ -1,7 +1,7 @@
 'use strict';
 // Scope both fetches and cleanup to this app, even on a shared Pages origin.
 const PREFIX='dgc-fairway-hud-'+encodeURIComponent(new URL(self.registration.scope).pathname)+'-';
-const CACHE=PREFIX+'2026-11-05-8a6da6c9cfa97a0b';
+const CACHE=PREFIX+'2026-11-05-e067d052037619b1';
 const FILES=['./','index.html','style.css','course-data.js','course.geojson','geometry.js','minimap.js','slope-data.js','minimap-view.js','app.js','icon.svg','terrain-notice.html','.well-known/meta-wearables-manifest.json'];
 const URLS=FILES.map(file=>new URL(file,self.registration.scope).href);
 self.addEventListener('install',event=>{

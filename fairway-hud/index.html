@@ -24,8 +24,8 @@
       <div><h1>Golf Glasses</h1><p>Yardage at a glance. Demo terrain near the green.</p></div>
       <span class="prototype-label">Developer Preview</span>
     </header>
-    <section class="lens" aria-label="Simulated glasses view">
-      <button type="button" class="hud" id="yardage-panel" aria-label="Front, center, and back yardages in yards. Activate to use phone GPS.">
+    <section class="lens" tabindex="0" aria-label="Glasses HUD. Select hides or restores the HUD. Left and Right change holes. Up toggles Yardage Only. Down requests phone GPS.">
+      <button type="button" class="hud" id="yardage-panel" aria-label="Front, center, and back yardages in yards. Activate to hide the HUD.">
         <div class="yardage-row"><span>Front</span> <strong id="front">--</strong> <span class="unit">yd</span></div>
         <div class="yardage-row center-row"><span>Center</span> <strong id="center">--</strong> <span class="unit">yd</span></div>
         <div class="yardage-row"><span>Back</span> <strong id="back">--</strong> <span class="unit">yd</span></div>
@@ -45,6 +45,9 @@
         <input id="bearing" type="range" min="0" max="359" step="1" value="180">
       </div>
       <div class="display-controls">
+        <button id="toggle-hud" type="button" aria-pressed="false">Hide HUD</button>
+        <label><input id="yardage-only" type="checkbox"> Yardage Only</label>
+        <p class="control-note">Yardage Only removes the entire green panel for rules-round use. Check the event's restrictions, which can also prohibit electronic yardage.</p>
         <label for="terrain">Demo Terrain<select id="terrain"><option value="arrows">Slope Arrows</option><option value="heat">Slope Heat</option></select></label>
         <label for="lighting">Surroundings<select id="lighting"><option value="dim">Dim simulation</option><option value="bright">Bright simulation</option></select></label>
       </div>

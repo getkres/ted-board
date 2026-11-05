@@ -4,6 +4,30 @@
   if (!g || !course || !course.features.length) { $('status').textContent = 'Course data could not load. Keep all prototype files together, and reload.'; return; }
   let mode = 'demo', watch = null, fix = null, lastError = '', selected = course.features[0], demoBearing = selected.properties.demoBearing;
   const m=window.GolfMinimap, view=window.GolfMinimapView, params=new URLSearchParams(location.search);
+  const preferenceKey='dgc-fairway-hud-display-v1';
+  let hudHidden=false, yardageOnly=false;
+  try {
+    const saved=JSON.parse(localStorage.getItem(preferenceKey));
+    hudHidden=saved?.hudHidden===true;yardageOnly=saved?.yardageOnly===true;
+  } catch(error) { /* Storage may be unavailable, full, or contain invalid JSON. */ }
+  function saveDisplay() {
+    try { localStorage.setItem(preferenceKey,JSON.stringify({hudHidden,yardageOnly})); }
+    catch(error) { /* Keep the current session usable when storage is blocked. */ }
+  }
+  function syncDisplay() {
+    const lens=document.querySelector('.lens');
+    lens.classList.toggle('hud-hidden',hudHidden);
+    lens.dataset.ready='true';
+    $('yardage-panel').hidden=hudHidden;
+    $('toggle-hud').setAttribute('aria-pressed',String(hudHidden));
+    $('toggle-hud').textContent=hudHidden?'Show HUD':'Hide HUD';
+    $('yardage-only').checked=yardageOnly;
+  }
+  function toggleHUD() {
+    hudHidden=!hudHidden;saveDisplay();render();
+    if(lensOnly)document.querySelector('.lens').focus({preventScroll:true});
+  }
+  function toggleYardage() { yardageOnly=!yardageOnly;saveDisplay();render(); }
   let nearGreen=false, pin=null, pinFrame=null, watchGeneration=0, requestedAt=0;
   const terrainProvider=m.provider(window.GOLF_SLOPE);
   const MAX_AGE = 20000, MAX_ACCURACY = 30, MAX_RANGE = 5000;
@@ -29,6 +53,7 @@
     pin=point;drawPinEditor();render();
   }
   function render() {
+    syncDisplay();
     $('demo').setAttribute('aria-pressed',String(mode === 'demo')); $('gps').setAttribute('aria-pressed',String(mode === 'gps'));
     $('demo-controls').hidden = mode !== 'demo';
     let location, note;
@@ -49,8 +74,9 @@
       ['front','center','back'].forEach(id => $(id).textContent = Math.round(result[id]));
       if (mode === 'gps') $('status').textContent = `${note}. Horizontal yardage to the mapped green. Check the selected hole.`;
       nearGreen=m.greenMode(location,selected.geometry.coordinates[0],nearGreen);
-      $('minimap-panel').toggleAttribute('hidden',!nearGreen);
-      if(nearGreen) view.render($('minimap-panel'),{player:location,pin:pin || result.centerPoint,ring:selected.geometry.coordinates[0],terrain:terrainProvider.getGreen(`way/${selected.properties.osm_id}`,selected.geometry.coordinates[0]),terrainMode:$('terrain').value});
+      const showGreen=nearGreen && !yardageOnly && !hudHidden;
+      $('minimap-panel').toggleAttribute('hidden',!showGreen);
+      if(showGreen) view.render($('minimap-panel'),{player:location,pin:pin || result.centerPoint,ring:selected.geometry.coordinates[0],terrain:terrainProvider.getGreen(`way/${selected.properties.osm_id}`,selected.geometry.coordinates[0]),terrainMode:$('terrain').value});
     } catch (error) { hideNumbers('Location or map error'); $('status').textContent = 'Could not calculate this yardage. Choose another hole, or reload the page.'; }
   }
   $('gps').addEventListener('click', () => {
@@ -82,6 +108,8 @@
   function setLighting() { document.querySelector('.lens').dataset.lighting=$('lighting').value; }
   $('lighting').addEventListener('change',setLighting);
   $('terrain').addEventListener('change',render);
+  $('toggle-hud').addEventListener('click',toggleHUD);
+  $('yardage-only').addEventListener('change',toggleYardage);
   if(params.get('terrain')==='heat')$('terrain').value='heat';
   $('pin-map').addEventListener('click',event=>{
     const matrix=$('pin-map').getScreenCTM();if(!matrix)return;
@@ -102,7 +130,7 @@
   window.addEventListener('pagehide',suspendGPS);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendGPS();});
   const lens=document.querySelector('.lens');
-  $('yardage-panel').addEventListener('click',()=>{if(lensOnly)$('gps').click();});
+  $('yardage-panel').addEventListener('click',()=>{if(lensOnly)toggleHUD();});
   // This custom HUD owns the lens. Consume each handled key so the host cannot
   // also spatially traverse or activate it. The native Back action is untouched.
   lens.addEventListener('keydown',event=>{
@@ -112,11 +140,11 @@
       const index=course.features.indexOf(selected),step=event.key==='ArrowRight'?1:-1;
       $('hole').value=course.features[(index+step+course.features.length)%course.features.length].properties.hole;
       $('hole').dispatchEvent(new Event('change'));
-    } else if(event.key==='ArrowUp' || event.key==='ArrowDown') {
-      $('terrain').value=event.key==='ArrowUp'?'heat':'arrows';render();
-    } else $('yardage-panel').click();
+    } else if(event.key==='ArrowUp') toggleYardage();
+    else if(event.key==='ArrowDown') $('gps').click();
+    else toggleHUD();
   });
-  if(lensOnly)$('yardage-panel').focus({preventScroll:true});
+  if(lensOnly)lens.focus({preventScroll:true});
   if('serviceWorker' in navigator && window.isSecureContext && location.protocol!=='file:') {
     navigator.serviceWorker.register('./sw.js').then(()=>navigator.serviceWorker.ready).then(()=>{
       $('offline-status').textContent='Offline shell and Haggin Oaks course data are ready. Cache may be cleared by the device.';
