@@ -1,0 +1,3 @@
+# Preserve the Meta Web App manifest directory in the existing Pages build.
+include:
+  - fairway-hud/.well-known

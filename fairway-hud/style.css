@@ -1,0 +1,28 @@
+:root{color-scheme:light;--forest:#163e35;--field:#285a49;--light:#f3f7ec;--ink:#142c26;--muted:#53645b;--line:#c4cec4;--blue:#c4e6fa}
+*{box-sizing:border-box}body{margin:0;background:#e4e9df;color:var(--ink);font-family:"Avenir Next",Avenir,"Segoe UI",sans-serif;font-size:16px;line-height:1.5}main{max-width:760px;margin:auto;padding:24px 20px 32px}.page-header{display:flex;align-items:start;justify-content:space-between;gap:14px;margin-bottom:20px}h1{font-size:27px;line-height:1.15;margin:0;letter-spacing:-.6px}header p{font-size:14px;margin:7px 0 0;color:var(--muted)}.prototype-label{font-size:12px;padding:5px 8px;border:1px solid #8b9e90;white-space:nowrap}.lens{width:600px;max-width:100%;aspect-ratio:1;background:#162a20;position:relative;overflow:hidden;border-radius:12px;color:#fff;container-type:inline-size}.lens[data-lighting=bright]{background:#8b9e6b}.hud{position:absolute;right:4%;bottom:4%;width:28%;font-variant-numeric:tabular-nums}.yardage-row{display:grid;grid-template-columns:1fr auto auto;align-items:baseline;column-gap:1cqw;font-size:2.5cqw;line-height:1.3}.yardage-row strong{font-size:5cqw;font-weight:500}.center-row strong{font-weight:650}.unit{font-size:2cqw}#minimap-panel{position:absolute;left:4%;bottom:4%;width:40%;height:auto;aspect-ratio:600/416;background:transparent}.controls{padding:23px 0 10px}.controls>label{display:block;font-size:14px;font-weight:600;margin-bottom:7px}select{font:inherit;width:100%;padding:11px 35px 11px 12px;border:1px solid #819789;background:#f3f7ec;color:var(--ink);border-radius:5px;min-height:48px}.mode-buttons{display:flex;gap:10px;margin-top:13px}button{font:inherit;font-weight:600;min-height:48px;cursor:pointer;border:1px solid #758d7c;border-radius:5px;padding:10px 16px;background:#eff4eb;color:var(--ink);flex:1}button[aria-pressed=true]{background:var(--forest);color:#fff;border-color:var(--forest)}button:disabled{opacity:.6;cursor:wait}button:focus-visible,select:focus-visible,summary:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #226c99;outline-offset:4px}#status{min-height:45px;color:var(--muted);font-size:13px;margin:12px 0 16px}#demo-controls label{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:10px 0 4px}output{font-weight:600;text-align:right}input[type=range]{width:100%;height:44px;accent-color:var(--forest);margin:0;cursor:pointer}details{margin-top:20px;font-size:13px;color:var(--muted);max-width:68ch}summary{cursor:pointer;min-height:44px;padding-top:10px;color:var(--ink)}details p{margin:10px 0}footer{font-size:11px;color:var(--muted);max-width:70ch}a{color:#2a5546}svg[hidden]{display:none}
+@media(min-width:600px){.controls{max-width:480px}}
+@media(max-width:380px){main{padding:18px 12px 28px}.page-header{gap:8px}.prototype-label{font-size:10px}h1{font-size:24px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+[hidden]{display:none!important}
+#green-demo{width:100%;margin-top:10px;background:#d9e8cf}
+.display-controls{display:grid;grid-template-columns:1fr;gap:12px;margin-top:18px}
+.display-controls label{font-size:13px;font-weight:600}
+.display-controls select{font-size:14px;margin-top:6px;padding-left:8px}
+.control-note{font-size:12px;color:var(--muted);margin:10px 0 0}
+#pin-editor{border-top:1px solid var(--line);padding-top:4px}
+#pin-map{width:100%;max-height:300px;background:#eff4eb;border:1px solid #819789;border-radius:5px;cursor:crosshair;touch-action:manipulation;display:block}
+#pin-map:focus-visible{outline:3px solid #226c99;outline-offset:4px}
+#pin-status{min-height:22px}
+#pin-center{width:100%}
+body.panel-only{width:600px;height:600px;overflow:hidden;background:#162a20}
+.panel-only main{width:600px;max-width:none;margin:0;padding:0}
+.panel-only .page-header,.panel-only .controls,.panel-only footer{display:none}
+.panel-only .lens{width:600px;height:600px;aspect-ratio:1;border-radius:0}
+@media(max-width:380px){.display-controls{grid-template-columns:1fr}}
+
+/* The default URL is the wearable surface. Phone controls require ?phone=1. */
+.hud{margin:0;padding:0;border:0;border-radius:0;min-height:0;background:transparent;color:#fff;text-align:left;font-family:inherit;font-weight:400}
+.hud:focus-visible{outline:2px solid #fff;outline-offset:5px}
+body.panel-only{width:100vw;height:100dvh;overflow:hidden;background:#000;color-scheme:dark}
+.panel-only main{width:100vw;max-width:none;margin:0;padding:0}
+.panel-only .lens{width:100vw;height:100dvh;max-width:none;aspect-ratio:auto;border-radius:0;background:#000}

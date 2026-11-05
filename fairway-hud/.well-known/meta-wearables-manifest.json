@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "DGC Fairway HUD",
+  "description": "Haggin Oaks yardages and archived USGS demo terrain. Not putting guidance.",
+  "appearance": {
+    "theme_color": "#72EDFF",
+    "icon": { "src": "../icon.svg", "type": "monochrome" }
+  }
+}

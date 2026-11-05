@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="application-name" content="DGC Fairway HUD">
+  <meta name="description" content="DGC Fairway HUD. Haggin Oaks yardages and archived demo terrain. Not putting guidance.">
+  <meta name="mrbd-web-app-capable" content="yes">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>DGC Fairway HUD</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="course-data.js" defer></script>
+  <script src="geometry.js" defer></script>
+  <script src="minimap.js" defer></script>
+  <script src="slope-data.js" defer></script>
+  <script src="minimap-view.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body class="panel-only">
+  <main>
+    <header class="page-header">
+      <div><h1>Golf Glasses</h1><p>Yardage at a glance. Demo terrain near the green.</p></div>
+      <span class="prototype-label">Developer Preview</span>
+    </header>
+    <section class="lens" aria-label="Simulated glasses view">
+      <button type="button" class="hud" id="yardage-panel" aria-label="Front, center, and back yardages in yards. Activate to use phone GPS.">
+        <div class="yardage-row"><span>Front</span> <strong id="front">--</strong> <span class="unit">yd</span></div>
+        <div class="yardage-row center-row"><span>Center</span> <strong id="center">--</strong> <span class="unit">yd</span></div>
+        <div class="yardage-row"><span>Back</span> <strong id="back">--</strong> <span class="unit">yd</span></div>
+      </button>
+      <svg id="minimap-panel" viewBox="0 64 600 416" role="img" aria-label="Demo terrain downhill arrows, green outline, cyan player dot, and white pin. Pin above player, or north up when coincident." hidden></svg>
+    </section>
+    <section class="controls" aria-label="Prototype controls">
+      <label for="hole">Choose a hole</label>
+      <select id="hole"></select>
+      <div class="mode-buttons"><button id="gps" type="button">Use My GPS</button><button id="demo" type="button" aria-pressed="true">Desk Demo</button></div>
+      <button id="green-demo" type="button">Try Green Demo</button>
+      <p id="status" role="status" aria-live="polite">Demo uses a fake location. Your GPS is off.</p>
+      <div id="demo-controls">
+        <label for="distance">Distance to center <output id="distance-value" for="distance">150 yd</output></label>
+        <input id="distance" type="range" min="0" max="300" step="1" value="150">
+        <label for="bearing">Approach direction <output id="bearing-value" for="bearing">From the fairway</output></label>
+        <input id="bearing" type="range" min="0" max="359" step="1" value="180">
+      </div>
+      <div class="display-controls">
+        <label for="terrain">Demo Terrain<select id="terrain"><option value="arrows">Slope Arrows</option><option value="heat">Slope Heat</option></select></label>
+        <label for="lighting">Surroundings<select id="lighting"><option value="dim">Dim simulation</option><option value="bright">Bright simulation</option></select></label>
+      </div>
+      <p class="control-note" id="offline-status" role="status">Offline shell is preparing.</p>
+      <p class="control-note">600 × 600 display canvas, scaled to your screen. These scenes do not prove full-sun readability.</p>
+      <details id="pin-editor" open><summary>Set the pin on your phone</summary>
+        <p>Tap inside the green. This map stays north up. Use arrow keys to move the pin by 1 m when the map has focus.</p>
+        <svg id="pin-map" viewBox="0 0 600 520" role="group" tabindex="0" aria-label="Pin editor, north up. Tap the green, or use arrow keys to move the pin."></svg>
+        <p id="pin-status" role="status">Green center (default).</p>
+        <button id="pin-center" type="button">Use Green Center</button>
+      </details>
+      <details><summary>What this view can tell you</summary><p>The bottom-left map appears within 30 yd of the nearest green edge and hides beyond 35 yd. Front, center, and back yardages stay in the bottom-right corner. The map turns so the line from you to the pin points up. Pin position defaults to the mapped center. At less than 0.5 m separation, the map stays north up.</p><p>The lens panel shows only yardage and the conditional green map. The map contains the outline, a cyan player dot, and a white pin. Arrows show broad downhill demo terrain by default; heat is selectable. Archived USGS DEM is not putting guidance. Typical 3 to 5 m GPS error on a green can move your dot across a whole putting line. Reported GPS accuracy is an estimate, and tapping a pin does not remove map or GPS error.</p><p>Front and back are the green edges on a line from your location through its mapped center. Center is the polygon's area centroid. Distances are horizontal. The green mini-map fits both you and the full green at a uniform scale.</p><p>Choose the hole yourself. Live values and the map are hidden when a fix is older than 20 seconds, reported GPS error exceeds 30 m, or you are over 5 km from the selected green. On a phone, use HTTPS and allow location. Position stays in this browser. Archived terrain is a demo, not putting guidance. This Web App has no AR tracking.</p></details>
+    </section>
+    <footer><a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>, ODbL 1.0. <span id="data-date"></span> No course affiliation. <a href="terrain-notice.html">Demo Terrain Sources and Limits</a></footer>
+  </main>
+</body>
+</html>
