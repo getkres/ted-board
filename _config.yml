@@ -1,3 +1,4 @@
 # Preserve the Meta Web App manifest directory in the existing Pages build.
 include:
+  - .well-known
   - fairway-hud/.well-known
