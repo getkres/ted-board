@@ -2,3 +2,4 @@
 include:
   - .well-known
   - fairway-hud/.well-known
+  - fairway-hud-b/.well-known
