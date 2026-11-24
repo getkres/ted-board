@@ -1,0 +1,50 @@
+:root{color-scheme:light;--forest:#163e35;--field:#285a49;--light:#f3f7ec;--ink:#142c26;--muted:#53645b;--line:#c4cec4;--blue:#c4e6fa}
+*{box-sizing:border-box}body{margin:0;background:#e4e9df;color:var(--ink);font-family:"Avenir Next",Avenir,"Segoe UI",sans-serif;font-size:16px;line-height:1.5}main{max-width:760px;margin:auto;padding:24px 20px 32px}.page-header{display:flex;align-items:start;justify-content:space-between;gap:14px;margin-bottom:20px}h1{font-size:27px;line-height:1.15;margin:0;letter-spacing:-.6px}header p{font-size:14px;margin:7px 0 0;color:var(--muted)}.prototype-label{font-size:12px;padding:5px 8px;border:1px solid #8b9e90;white-space:nowrap}.controls{padding:23px 0 10px}.controls>label{display:block;font-size:14px;font-weight:600;margin-bottom:7px}select{font:inherit;width:100%;padding:11px 35px 11px 12px;border:1px solid #819789;background:#f3f7ec;color:var(--ink);border-radius:5px;min-height:48px}.mode-buttons{display:flex;gap:10px;margin-top:13px}button{font:inherit;font-weight:600;min-height:48px;cursor:pointer;border:1px solid #758d7c;border-radius:5px;padding:10px 16px;background:#eff4eb;color:var(--ink);flex:1}button[aria-pressed=true]{background:var(--forest);color:#fff;border-color:var(--forest)}button:disabled{opacity:.6;cursor:wait}button:focus-visible,select:focus-visible,summary:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #226c99;outline-offset:4px}#status{min-height:45px;color:var(--muted);font-size:13px;margin:12px 0 16px}#demo-controls label{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:10px 0 4px}output{font-weight:600;text-align:right}input[type=range]{width:100%;height:44px;accent-color:var(--forest);margin:0;cursor:pointer}details{margin-top:20px;font-size:13px;color:var(--muted);max-width:68ch}summary{cursor:pointer;min-height:44px;padding-top:10px;color:var(--ink)}details p{margin:10px 0}footer{font-size:11px;color:var(--muted);max-width:70ch}a{color:#2a5546}svg[hidden]{display:none}
+@media(min-width:600px){.controls{max-width:480px}}
+@media(max-width:380px){main{padding:18px 12px 28px}.page-header{gap:8px}.prototype-label{font-size:10px}h1{font-size:24px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+[hidden]{display:none!important}
+#green-demo{width:100%;margin-top:10px;background:#d9e8cf}
+.display-controls{display:grid;grid-template-columns:1fr;gap:12px;margin-top:18px}
+.display-controls label{font-size:13px;font-weight:600}
+.display-controls select{font-size:14px;margin-top:6px;padding-left:8px}
+.control-note{font-size:12px;color:var(--muted);margin:10px 0 0}
+#pin-editor{border-top:1px solid var(--line);padding-top:4px}
+#pin-map{width:100%;max-height:300px;background:#eff4eb;border:1px solid #819789;border-radius:5px;cursor:crosshair;touch-action:manipulation;display:block}
+#pin-map:focus-visible{outline:3px solid #226c99;outline-offset:4px}
+#pin-status{min-height:22px}
+#pin-center{width:100%}
+/* Archivo is bundled for the wearable's offline first load. */
+@font-face{font-family:Archivo;font-style:italic;font-weight:100 900;font-stretch:62% 125%;font-display:swap;src:url("fonts/archivo-italic-latin.woff2") format("woff2")}
+.lens{width:600px;max-width:100%;aspect-ratio:1;background:#000;position:relative;overflow:hidden;border-radius:0;color:#fff;container-type:inline-size;font-family:Archivo,"Arial",sans-serif;font-style:italic}
+body:not(.panel-only) .lens[data-lighting=bright]:not(.hud-hidden){background:#8b9e6b}
+.hud{position:absolute;right:6.333333cqw;bottom:4cqw;width:48.666667cqw;display:grid;grid-template-columns:29.666667cqw 17.333333cqw;grid-template-rows:auto auto;column-gap:1.666667cqw;row-gap:1.333333cqw;font-variant-numeric:tabular-nums;margin:0;padding:0;border:0;border-radius:0;min-height:0;background:transparent;color:#fff;text-align:left;font-family:inherit;font-style:italic;font-weight:700;line-height:1.25}
+.hud .hole{grid-column:1/3;justify-self:start;font-stretch:120%;font-weight:700;font-size:3cqw;letter-spacing:.08em;color:#FFD400;padding-left:1cqw;white-space:nowrap}
+.hud .box{border:.5cqw solid #FFD400;transform:skewX(-12deg);height:19.666667cqw;display:grid;align-content:center}
+.hud .box>*{transform:skewX(12deg)}
+.hud .big{justify-items:center;position:relative}
+.hud .big strong{font-style:italic;font-stretch:112%;font-weight:800;font-size:13cqw;line-height:1}
+.hud .split{grid-template-rows:1fr 1fr;padding:0}
+.hud .split>span{display:flex;align-items:center;justify-content:center;gap:1cqw;height:100%}
+.hud .split>span+span{border-top:.416667cqw solid #FFD400}
+.hud .split .key{font-stretch:120%;font-weight:800;font-size:3cqw;color:#FFD400}
+.hud .split strong{font-stretch:112%;font-weight:700;font-size:5.333333cqw;line-height:1}
+/* Keep valid long GPS distances inside the same boxes. */
+.hud .big strong.long-yardage{font-size:9.666667cqw}
+.hud .split strong.long-yardage{font-size:4cqw}
+#minimap-panel{position:absolute;left:4cqw;bottom:4cqw;width:36.666667cqw;height:auto;aspect-ratio:220/196;background:transparent;overflow:visible}
+#minimap-panel[data-state=on]{aspect-ratio:220/270}
+/* The default URL is the wearable surface. Phone controls require ?phone=1. */
+body.panel-only{width:100vw;height:100dvh;overflow:hidden;background:#000;color-scheme:dark}
+.panel-only main{width:100vw;max-width:none;margin:0;padding:0}
+.panel-only .page-header,.panel-only .controls,.panel-only footer{display:none}
+.panel-only .lens{width:100vw;height:100dvh;max-width:none;aspect-ratio:auto}
+.lens:not([data-ready])>*{visibility:hidden}
+.lens.hud-hidden{background:#000}
+.lens.hud-hidden>*{display:none!important}
+.lens:focus,.hud:focus-visible{outline:none}
+#yardage-only{width:24px;height:24px;vertical-align:middle;accent-color:var(--forest)}
+
+#field-log{margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
+#field-log h2{font-size:18px;margin:0}
+.field-log-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
