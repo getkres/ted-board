@@ -26,6 +26,13 @@ Snapshot feeds and new mockup writes are optional and capability-gated. Missing 
 
 The public clone omits the private backend and workers. Read [backend integration](backend-integration/README.md) before enabling snapshots, review choices, Good, one fix, round picks, or saved strokes. Proposed SQL is in `migrations/`. The build job contains `apply.sql` with opt-in backup and apply phases, plus manual rollback instructions. SQL was not run by this build.
 
+## Local content review
+
+Local content workers require independent agent review before uploads, Needs
+you transitions, final replies, and approval staging. See [REVIEW-GATE.md](REVIEW-GATE.md)
+for the review record, private worker overlay, pod policies, verification, and
+Ted's separate deployment step.
+
 ## Local verification
 
 Serve the folder, then run the offline fixture tests. They never use live credentials or write to a live backend.
